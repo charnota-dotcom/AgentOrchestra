@@ -21,6 +21,8 @@ import uvicorn
 
 from apps.service.cards.seed import seed_default_cards
 from apps.service.cost.meter import forecast as cost_forecast
+from apps.service.dispatch.bus import EventBus
+from apps.service.dispatch.dispatcher import RunDispatcher
 from apps.service.ingestion.jsonl_watcher import JSONLWatcher
 from apps.service.ipc.server import JsonRpcServer
 from apps.service.linter.preflight import lint
@@ -59,9 +61,11 @@ class Handlers:
         self,
         store: EventStore,
         manager: WorktreeManager,
+        dispatcher: RunDispatcher,
     ) -> None:
         self.store = store
         self.manager = manager
+        self.dispatcher = dispatcher
 
     async def workspaces_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return [w.model_dump(mode="json") for w in await self.store.list_workspaces()]
@@ -123,6 +127,37 @@ class Handlers:
         await self.store.insert_instruction(ins)
         return {"instruction_id": ins.id, "rendered_text": rendered}
 
+    async def runs_dispatch(self, params: dict[str, Any]) -> dict[str, Any]:
+        run = await self.dispatcher.dispatch(
+            workspace_id=params.get("workspace_id"),
+            card_id=params["card_id"],
+            instruction_id=params["instruction_id"],
+            rendered_text=params["rendered_text"],
+        )
+        return {"run_id": run.id, "state": run.state.value}
+
+    async def runs_approve(self, params: dict[str, Any]) -> dict[str, Any]:
+        await self.dispatcher.approve(params["run_id"], note=params.get("note"))
+        return {"ok": True}
+
+    async def runs_reject(self, params: dict[str, Any]) -> dict[str, Any]:
+        await self.dispatcher.reject(params["run_id"], params.get("reason", ""))
+        return {"ok": True}
+
+    async def runs_cancel(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = await self.dispatcher.cancel(
+            params["run_id"], params.get("reason", "user requested"),
+        )
+        return {"ok": ok}
+
+    async def runs_artifacts(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        cur = await self.store.db.execute(
+            "SELECT * FROM artifacts WHERE run_id = ? ORDER BY created_at",
+            (params["run_id"],),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
     async def providers(self, params: dict[str, Any]) -> list[str]:
         return known_providers()
 
@@ -148,6 +183,11 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("workspaces.register", h.workspaces_register)
     server.register("cards.list", h.cards_list)
     server.register("runs.list", h.runs_list)
+    server.register("runs.dispatch", h.runs_dispatch)
+    server.register("runs.approve", h.runs_approve)
+    server.register("runs.reject", h.runs_reject)
+    server.register("runs.cancel", h.runs_cancel)
+    server.register("runs.artifacts", h.runs_artifacts)
     server.register("search", h.search)
     server.register("lint.instruction", h.lint_instruction)
     server.register("cost.forecast", h.cost_forecast)
@@ -174,14 +214,18 @@ async def serve(args: argparse.Namespace) -> int:
     if seeded:
         log.info("seeded %d cards", len(seeded))
 
+    bus = EventBus()
+    store.on_append = bus.publish
+
     manager = WorktreeManager(store)
-    handlers = Handlers(store, manager)
+    dispatcher = RunDispatcher(store, manager, bus)
+    handlers = Handlers(store, manager, dispatcher)
 
     watcher = JSONLWatcher(store)
     await watcher.start()
 
     token = hook_token()
-    rpc = JsonRpcServer(token=token)
+    rpc = JsonRpcServer(token=token, bus=bus)
     _install_handlers(rpc, handlers)
     log.info("rpc token: %s", token[:8] + "…")
 

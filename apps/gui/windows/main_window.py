@@ -17,6 +17,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from apps.gui.windows.composer import ComposerPage
 from apps.gui.windows.history import HistoryPage
 from apps.gui.windows.home import HomePage
+from apps.gui.windows.live import LivePage
+from apps.gui.windows.review import ReviewPage
 from apps.gui.windows.settings import SettingsPage
 
 if TYPE_CHECKING:
@@ -43,18 +45,35 @@ class MainWindow(QtWidgets.QMainWindow):
         # Pages
         self.home = HomePage(self.client)
         self.composer = ComposerPage(self.client)
+        self.live = LivePage(self.client)
+        self.review = ReviewPage(self.client)
         self.history = HistoryPage(self.client)
         self.settings = SettingsPage(self.client)
 
-        self.stack.addWidget(self.home)
-        self.stack.addWidget(self.composer)
-        self.stack.addWidget(self.history)
-        self.stack.addWidget(self.settings)
+        self.stack.addWidget(self.home)        # 0
+        self.stack.addWidget(self.composer)    # 1
+        self.stack.addWidget(self.live)        # 2
+        self.stack.addWidget(self.review)      # 3
+        self.stack.addWidget(self.history)     # 4
+        self.stack.addWidget(self.settings)    # 5
 
         self.setCentralWidget(central)
 
+        # Cross-page navigation.
+        self.composer.dispatched.connect(self._on_dispatched)
+        self.live.review_requested.connect(self._on_review_requested)
+        self.review.closed.connect(lambda: self._switch_to(0))
+
         self._wire_navigation()
         self.stack.setCurrentIndex(0)
+
+    def _on_dispatched(self, run_id: str, card_name: str) -> None:
+        self.live.attach_run(run_id, card_name=card_name)
+        self._switch_to(2)
+
+    def _on_review_requested(self, run_id: str) -> None:
+        self.review.attach_run(run_id)
+        self._switch_to(3)
 
     def _build_rail(self) -> QtWidgets.QWidget:
         rail = QtWidgets.QFrame()
@@ -90,12 +109,21 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(status)
         return rail
 
+    # Map rail button index -> stack widget index.
+    _NAV_TO_STACK = {0: 0, 1: 1, 2: 4, 3: 5}
+
     def _wire_navigation(self) -> None:
         for i, btn in enumerate(self._nav_buttons):
-            btn.clicked.connect(lambda _checked=False, idx=i: self._switch_to(idx))
+            btn.clicked.connect(
+                lambda _checked=False, idx=i: self._switch_to(self._NAV_TO_STACK[idx])
+            )
         self._nav_buttons[0].setChecked(True)
 
-    def _switch_to(self, idx: int) -> None:
+    def _switch_to(self, stack_idx: int) -> None:
+        # Update rail-button checked state to match the new stack page.
+        rail_idx = next(
+            (b for b, s in self._NAV_TO_STACK.items() if s == stack_idx), None
+        )
         for i, btn in enumerate(self._nav_buttons):
-            btn.setChecked(i == idx)
-        self.stack.setCurrentIndex(idx)
+            btn.setChecked(i == rail_idx)
+        self.stack.setCurrentIndex(stack_idx)

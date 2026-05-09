@@ -33,6 +33,7 @@ from apps.service.types import (
     utc_now,
 )
 from apps.service.worktrees import git_cli as g
+from apps.service.worktrees import merger as _merger
 
 log = logging.getLogger(__name__)
 
@@ -351,13 +352,26 @@ class WorktreeManager:
                             f"run: {branch.run_id}"
                         ),
                     )
-                else:
-                    # Assisted / manual fall through to a normal merge for now;
-                    # Mergiraf integration will replace this in week 5.
+                elif mode == "assisted":
+                    # Use Mergiraf-as-merge-driver if available.  We don't
+                    # rewrite the merge: we attempt a regular merge first
+                    # and rely on git's `merge.<driver>` config for tree-
+                    # sitter-aware files.  If Mergiraf isn't installed we
+                    # fall through to the normal merge with a logged note.
+                    if not await _merger.is_available():
+                        log.info("mergiraf not available; falling back to normal merge")
                     sha = await g.merge_into(
                         repo, branch.base_branch_name, branch.agent_branch_name,
                         message=(
-                            f"Merge {branch.agent_branch_name} (mode={mode})\n\n"
+                            f"Merge {branch.agent_branch_name} (assisted)\n\n"
+                            f"run: {branch.run_id}"
+                        ),
+                    )
+                else:  # "manual"
+                    sha = await g.merge_into(
+                        repo, branch.base_branch_name, branch.agent_branch_name,
+                        message=(
+                            f"Merge {branch.agent_branch_name} (manual)\n\n"
                             f"run: {branch.run_id}"
                         ),
                     )

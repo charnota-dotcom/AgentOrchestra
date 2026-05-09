@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Iterable
+import logging
+from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,7 @@ from apps.service.types import (  # noqa: I001
 )
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+log = logging.getLogger(__name__)
 
 
 def _row_to_dict(row: aiosqlite.Row | None) -> dict[str, Any] | None:
@@ -62,6 +64,10 @@ class EventStore:
         self.db_path = db_path
         self._lock = asyncio.Lock()
         self._db: aiosqlite.Connection | None = None
+        # Optional callback fired after each successful append.  The
+        # service entrypoint hooks the EventBus into this so live UIs
+        # see events the moment they land.
+        self.on_append: Callable[[Event], None] | None = None
 
     async def open(self) -> None:
         self._db = await aiosqlite.connect(self.db_path)
@@ -124,7 +130,12 @@ class EventStore:
             if event.text:
                 await self._fts_insert("event", event.id, event.kind.value, event.text)
             await self.db.commit()
-            return event
+        if self.on_append is not None:
+            try:
+                self.on_append(event)
+            except Exception:  # noqa: BLE001
+                log.exception("on_append callback failed")
+        return event
 
     # ------------------------------------------------------------------
     # FTS5

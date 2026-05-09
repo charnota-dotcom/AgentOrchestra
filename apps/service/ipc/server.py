@@ -21,6 +21,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from apps.service.dispatch.bus import EventBus
+from apps.service.ipc.sse import make_run_stream_route
+
 log = logging.getLogger(__name__)
 
 
@@ -28,21 +31,29 @@ Method = Callable[[dict[str, Any]], Awaitable[Any]]
 
 
 class JsonRpcServer:
-    def __init__(self, *, token: str) -> None:
+    def __init__(self, *, token: str, bus: EventBus | None = None) -> None:
         self.token = token
+        self.bus = bus
         self._methods: dict[str, Method] = {}
 
     def register(self, name: str, fn: Method) -> None:
         self._methods[name] = fn
 
     def app(self) -> Starlette:
-        return Starlette(
-            routes=[
-                Route("/rpc", self._rpc, methods=["POST"]),
-                Route("/healthz", self._healthz, methods=["GET"]),
-                Route("/ingest/hook", self._hook, methods=["POST"]),
-            ]
-        )
+        routes = [
+            Route("/rpc", self._rpc, methods=["POST"]),
+            Route("/healthz", self._healthz, methods=["GET"]),
+            Route("/ingest/hook", self._hook, methods=["POST"]),
+        ]
+        if self.bus is not None:
+            routes.append(
+                Route(
+                    "/stream/runs/{run_id}",
+                    make_run_stream_route(self.bus, token=self.token),
+                    methods=["GET"],
+                )
+            )
+        return Starlette(routes=routes)
 
     async def _healthz(self, _request: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "methods": sorted(self._methods.keys())})

@@ -25,12 +25,16 @@ if TYPE_CHECKING:
 
 
 class ComposerPage(QtWidgets.QWidget):
+    dispatched = QtCore.Signal(str, str)  # (run_id, card_name)
+
     def __init__(self, client: "RpcClient") -> None:
         super().__init__()
         self.client = client
         self._cards: list[dict[str, Any]] = []
         self._current_card: dict[str, Any] | None = None
         self._template: dict[str, Any] | None = None
+        self._last_instruction_id: str | None = None
+        self._last_rendered: str | None = None
 
         self.setStyleSheet("background:#fafbfc;")
         layout = QtWidgets.QHBoxLayout(self)
@@ -95,6 +99,7 @@ class ComposerPage(QtWidgets.QWidget):
             "QPushButton{background:#1f6feb;color:#fff;padding:8px 14px;border-radius:4px;}"
             "QPushButton:disabled{background:#aab1bb;color:#fff;}"
         )
+        self.dispatch_btn.clicked.connect(self._dispatch)  # type: ignore[arg-type]
         bar.addWidget(self.dispatch_btn)
         rl.addLayout(bar)
 
@@ -180,6 +185,8 @@ class ComposerPage(QtWidgets.QWidget):
             self.preview.setPlainText(f"Render failed: {exc}")
             return
         self.preview.setPlainText(res["rendered_text"])
+        self._last_instruction_id = res["instruction_id"]
+        self._last_rendered = res["rendered_text"]
 
         try:
             issues = await self.client.call("lint.instruction", {
@@ -208,6 +215,28 @@ class ComposerPage(QtWidgets.QWidget):
 
         blocking = any(i["severity"] == "error" for i in issues)
         self.dispatch_btn.setEnabled(not blocking and bool(res["rendered_text"].strip()))
+
+    def _dispatch(self) -> None:
+        if not self._current_card or not self._last_instruction_id or not self._last_rendered:
+            return
+        asyncio.ensure_future(self._dispatch_async())
+
+    async def _dispatch_async(self) -> None:
+        if not self._current_card or not self._last_instruction_id or not self._last_rendered:
+            return
+        try:
+            res = await self.client.call("runs.dispatch", {
+                "card_id": self._current_card["id"],
+                "instruction_id": self._last_instruction_id,
+                "rendered_text": self._last_rendered,
+                "workspace_id": None,
+            })
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(self, "Dispatch failed", str(exc))
+            return
+        # Hand over to the Live pane.
+        self.dispatched.emit(res["run_id"], self._current_card["name"])
+        self.dispatch_btn.setEnabled(False)
 
     def _render_lints(self, issues: list[dict[str, Any]]) -> None:
         if not issues:
