@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS cards (
     sandbox_tier             TEXT NOT NULL,
     tool_allowlist           TEXT NOT NULL,        -- JSON array
     fallbacks                TEXT NOT NULL DEFAULT '[]',  -- JSON array of {provider, model}
+    auto_qa                  INTEGER NOT NULL DEFAULT 0,
     stale_minutes            INTEGER NOT NULL,
     max_commits_per_run      INTEGER NOT NULL,
     max_turns                INTEGER NOT NULL DEFAULT 12,

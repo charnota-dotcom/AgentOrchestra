@@ -23,6 +23,15 @@ from apps.service.cards.seed import seed_default_cards
 from apps.service.cost.meter import forecast as cost_forecast
 from apps.service.dispatch.bus import EventBus
 from apps.service.dispatch.dispatcher import RunDispatcher
+from apps.service.ingestion.hook_installer import (
+    install as install_hook,
+)
+from apps.service.ingestion.hook_installer import (
+    status as hook_status,
+)
+from apps.service.ingestion.hook_installer import (
+    uninstall as uninstall_hook,
+)
 from apps.service.ingestion.jsonl_watcher import JSONLWatcher
 from apps.service.ipc.server import JsonRpcServer
 from apps.service.linter.preflight import lint
@@ -160,6 +169,15 @@ class Handlers:
         )
         return {"ok": ok}
 
+    async def runs_replay(self, params: dict[str, Any]) -> dict[str, Any]:
+        run = await self.dispatcher.replay(
+            params["run_id"],
+            provider_override=params.get("provider"),
+            model_override=params.get("model"),
+            instruction_override=params.get("instruction"),
+        )
+        return {"run_id": run.id, "state": run.state.value}
+
     async def runs_artifacts(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         cur = await self.store.db.execute(
             "SELECT * FROM artifacts WHERE run_id = ? ORDER BY created_at",
@@ -170,6 +188,20 @@ class Handlers:
 
     async def providers(self, params: dict[str, Any]) -> list[str]:
         return known_providers()
+
+    async def hooks_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        return hook_status()
+
+    async def hooks_install(self, params: dict[str, Any]) -> dict[str, Any]:
+        plan = install_hook(service_url=params["service_url"])
+        return {
+            "settings_path": str(plan.settings_path),
+            "script_path": str(plan.script_path),
+        }
+
+    async def hooks_uninstall(self, params: dict[str, Any]) -> dict[str, Any]:
+        removed = uninstall_hook()
+        return {"removed": removed}
 
     async def hook_received(self, params: dict[str, Any]) -> dict[str, Any]:
         await self.store.append_event(
@@ -197,6 +229,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("runs.approve", h.runs_approve)
     server.register("runs.reject", h.runs_reject)
     server.register("runs.cancel", h.runs_cancel)
+    server.register("runs.replay", h.runs_replay)
     server.register("runs.artifacts", h.runs_artifacts)
     server.register("search", h.search)
     server.register("lint.instruction", h.lint_instruction)
@@ -204,6 +237,9 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("templates.render", h.render_template)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
+    server.register("hooks.status", h.hooks_status)
+    server.register("hooks.install", h.hooks_install)
+    server.register("hooks.uninstall", h.hooks_uninstall)
 
 
 async def serve(args: argparse.Namespace) -> int:

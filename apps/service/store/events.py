@@ -224,10 +224,10 @@ class EventStore:
             """
             INSERT INTO cards (id, name, archetype, description, template_id,
                 provider, model, mode, cost, blast_radius, sandbox_tier,
-                tool_allowlist, fallbacks, stale_minutes, max_commits_per_run,
-                max_turns, skip_pre_commit_hooks, version,
-                created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tool_allowlist, fallbacks, auto_qa, stale_minutes,
+                max_commits_per_run, max_turns, skip_pre_commit_hooks,
+                version, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 c.id,
@@ -243,6 +243,7 @@ class EventStore:
                 c.sandbox_tier.value,
                 json.dumps(c.tool_allowlist),
                 json.dumps(c.fallbacks),
+                int(c.auto_qa),
                 c.stale_minutes,
                 c.max_commits_per_run,
                 c.max_turns,
@@ -269,6 +270,7 @@ class EventStore:
             d["fallbacks"] = json.loads(d["fallbacks"])
         else:
             d["fallbacks"] = []
+        d["auto_qa"] = bool(d.get("auto_qa", 0))
         return PersonalityCard.model_validate(d)
 
     async def list_cards(self) -> list[PersonalityCard]:

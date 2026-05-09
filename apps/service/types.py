@@ -110,6 +110,9 @@ class PersonalityCard(BaseModel):
     # Ordered fallback list of {"provider": ..., "model": ...} used on
     # rate-limit / 5xx errors before declaring the run failed.
     fallbacks: list[dict[str, str]] = Field(default_factory=list)
+    # When true and this card runs to REVIEWING, automatically dispatch
+    # a QA-on-fix run targeting this run's diff.
+    auto_qa: bool = False
     stale_minutes: int = 60
     max_commits_per_run: int = 50
     max_turns: int = 12

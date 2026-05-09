@@ -39,6 +39,7 @@ from apps.service.types import (
     Event,
     EventKind,
     EventSource,
+    Instruction,
     PersonalityCard,
     Run,
     RunState,
@@ -136,6 +137,83 @@ class RunDispatcher:
 
         task.add_done_callback(_cleanup)
         return run
+
+    async def replay(
+        self,
+        original_run_id: str,
+        *,
+        provider_override: str | None = None,
+        model_override: str | None = None,
+        instruction_override: str | None = None,
+    ) -> Run:
+        """Re-execute a past run.  Reuses the original instruction and
+        card unless overrides are supplied; provider/model overrides
+        clone the card so the original's accounting stays intact.
+        """
+        original = await self.store.get_run(original_run_id)
+        if not original:
+            raise DispatchError(f"unknown run: {original_run_id}")
+        card = await self.store.get_card(original.card_id)
+        if not card:
+            raise DispatchError(f"original card missing: {original.card_id}")
+
+        cur = await self.store.db.execute(
+            "SELECT rendered_text, template_id, template_version FROM instructions WHERE id = ?",
+            (original.instruction_id,),
+        )
+        row = await cur.fetchone()
+        if not row:
+            raise DispatchError("original instruction missing")
+        rendered = instruction_override or row["rendered_text"]
+
+        effective_card = card
+        if provider_override or model_override:
+            effective_card = card.model_copy(
+                update={
+                    "id": long_id(),
+                    "provider": provider_override or card.provider,
+                    "model": model_override or card.model,
+                }
+            )
+            await self.store.insert_card(effective_card)
+
+        if instruction_override:
+            new_ins = Instruction(
+                id=long_id(),
+                template_id=row["template_id"],
+                template_version=row["template_version"],
+                card_id=effective_card.id,
+                rendered_text=instruction_override,
+                variables={},
+            )
+            await self.store.insert_instruction(new_ins)
+            instruction_id = new_ins.id
+        else:
+            instruction_id = original.instruction_id
+
+        await self.store.append_event(
+            Event(
+                source=EventSource.SYSTEM,
+                kind=EventKind.RUN_STARTED,
+                run_id=original_run_id,
+                payload={
+                    "replay_of": original_run_id,
+                    "provider": effective_card.provider,
+                    "model": effective_card.model,
+                },
+                text=(
+                    f"replay of {original_run_id} on "
+                    f"{effective_card.provider}/{effective_card.model}"
+                ),
+            )
+        )
+
+        return await self.dispatch(
+            workspace_id=original.workspace_id or None,
+            card_id=effective_card.id,
+            instruction_id=instruction_id,
+            rendered_text=rendered,
+        )
 
     async def cancel(self, run_id: str, reason: str = "user requested") -> bool:
         task = self._tasks.get(run_id)
@@ -401,6 +479,41 @@ class RunDispatcher:
                     if ev.kind == "usage":
                         tokens_in = int(ev.payload.get("input_tokens") or 0)
                         tokens_out = int(ev.payload.get("output_tokens") or 0)
+                        # Hard cost cap mid-run.  Soft cap emits a warning
+                        # event; hard cap aborts the run.
+                        running = cost_for_call(
+                            card.provider,
+                            card.model,
+                            tokens_in,
+                            tokens_out,
+                        )
+                        if running > card.cost.hard_cap_usd:
+                            raise DispatchError(
+                                f"hard cost cap exceeded: "
+                                f"${running:.4f} > ${card.cost.hard_cap_usd:.2f}"
+                            )
+                        if running > card.cost.soft_cap_usd and not getattr(
+                            self,
+                            "_warned_" + run.id,
+                            False,
+                        ):
+                            setattr(self, "_warned_" + run.id, True)
+                            await self.store.append_event(
+                                Event(
+                                    source=EventSource.SYSTEM,
+                                    kind=EventKind.RUN_STATE_CHANGED,
+                                    run_id=run.id,
+                                    payload={
+                                        "warning": "soft_cost_cap",
+                                        "running_cost_usd": running,
+                                        "soft_cap_usd": card.cost.soft_cap_usd,
+                                    },
+                                    text=(
+                                        f"soft cost cap reached: ${running:.4f} > "
+                                        f"${card.cost.soft_cap_usd:.2f}"
+                                    ),
+                                )
+                            )
                     elif ev.kind == "tool_call":
                         await self.store.append_event(
                             Event(
@@ -537,6 +650,15 @@ class RunDispatcher:
             await self.manager.request_review(branch.id)
             await self._transition_run(run, RunState.REVIEWING)
 
+            # 6. Auto-QA: if the card requested it, dispatch a chat-style
+            #    QA-on-fix run targeting this run's diff.  Failures here
+            #    don't fail the parent run.
+            if card.auto_qa:
+                try:
+                    await self._dispatch_auto_qa(run, card, diff_text)
+                except Exception as exc:
+                    log.warning("auto-QA dispatch failed: %s", exc)
+
         except asyncio.CancelledError:
             await self._fail(run, "cancelled")
             if branch is not None:
@@ -553,6 +675,59 @@ class RunDispatcher:
                     await self.manager.abandon(branch.id, f"failed: {exc}")
                 except Exception:
                     pass
+
+    async def _dispatch_auto_qa(
+        self,
+        parent: Run,
+        parent_card: PersonalityCard,
+        diff_text: str,
+    ) -> None:
+        """Find the QA-on-fix card and dispatch a chat-style run pointing at
+        the parent's diff.  Best-effort: silently no-ops if there's no
+        QA card seeded.
+        """
+        cur = await self.store.db.execute(
+            "SELECT id FROM cards WHERE archetype = 'qa-on-fix' LIMIT 1",
+        )
+        row = await cur.fetchone()
+        if not row:
+            return
+        qa_card_id = row["id"]
+
+        # Construct a minimal rendered prompt from the parent's diff.
+        diff_excerpt = diff_text[:6000] if diff_text else "(no changes)"
+        rendered = (
+            f"You are a QA agent reviewing run {parent.id} produced by "
+            f"the {parent_card.name} card.\n\n"
+            f"Verify the diff below for: regressions, missing edge cases,"
+            f" secret leaks, broken error handling, public-API breakage.\n\n"
+            f"Diff:\n```\n{diff_excerpt}\n```\n\n"
+            f"End with an explicit verdict: APPROVE, REQUEST CHANGES, or BLOCK."
+        )
+        # Persist a stub instruction so the FK lights up.
+        cur = await self.store.db.execute(
+            "SELECT template_id FROM cards WHERE id = ?",
+            (qa_card_id,),
+        )
+        r = await cur.fetchone()
+        if not r:
+            return
+        ins = Instruction(
+            id=long_id(),
+            template_id=r["template_id"],
+            template_version=1,
+            card_id=qa_card_id,
+            rendered_text=rendered,
+            variables={"target_run_id": parent.id, "focus": "auto-QA"},
+        )
+        await self.store.insert_instruction(ins)
+
+        await self.dispatch(
+            workspace_id=parent.workspace_id or None,
+            card_id=qa_card_id,
+            instruction_id=ins.id,
+            rendered_text=rendered,
+        )
 
     async def _fail(self, run: Run, error: str) -> None:
         try:
