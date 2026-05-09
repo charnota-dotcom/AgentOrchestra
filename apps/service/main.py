@@ -147,6 +147,29 @@ class Handlers:
         await self.store.insert_instruction(ins)
         return {"instruction_id": ins.id, "rendered_text": rendered}
 
+    async def templates_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        template = await self.store.get_template(params["template_id"])
+        if not template:
+            raise ValueError(f"unknown template: {params['template_id']}")
+        return {
+            "id": template.id,
+            "name": template.name,
+            "archetype": template.archetype,
+            "version": template.version,
+            "variables": [
+                {
+                    "name": v.name,
+                    "label": v.label,
+                    "kind": v.kind,
+                    "required": v.required,
+                    "default": v.default,
+                    "help": v.help,
+                    "options": v.options,
+                }
+                for v in template.variables
+            ],
+        }
+
     async def runs_dispatch(self, params: dict[str, Any]) -> dict[str, Any]:
         run = await self.dispatcher.dispatch(
             workspace_id=params.get("workspace_id"),
@@ -335,6 +358,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("lint.instruction", h.lint_instruction)
     server.register("cost.forecast", h.cost_forecast)
     server.register("templates.render", h.render_template)
+    server.register("templates.get", h.templates_get)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
     server.register("hooks.status", h.hooks_status)
