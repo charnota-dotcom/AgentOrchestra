@@ -63,13 +63,23 @@ jobs:
       - name: Pytest collect
         id: pytest_collect
         run: |
-          set -o pipefail
-          pytest tests/unit --collect-only -q 2>&1 | tee /tmp/collect.log
+          set +e
+          pytest tests/unit --collect-only -q > /tmp/collect.log 2>&1
+          EC=$?
+          echo "==== /tmp/collect.log (pytest --collect-only) ===="
+          cat /tmp/collect.log
+          echo "==== exit $EC ===="
+          exit $EC
       - name: Pytest (unit)
         id: pytest_unit
         run: |
-          set -o pipefail
-          pytest tests/unit -v --tb=long --no-header 2>&1 | tee /tmp/pytest.log
+          set +e
+          pytest tests/unit -v --tb=long --no-header > /tmp/pytest.log 2>&1
+          EC=$?
+          echo "==== /tmp/pytest.log (pytest unit) ===="
+          cat /tmp/pytest.log
+          echo "==== exit $EC ===="
+          exit $EC
       - name: Show pytest tail on failure
         if: failure()
         run: |
