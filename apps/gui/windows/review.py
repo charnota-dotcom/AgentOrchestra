@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtWidgets
 
+from apps.gui.widgets.diff_view import DiffView
+
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
@@ -41,13 +43,20 @@ class ReviewPage(QtWidgets.QWidget):
         self.meta.setStyleSheet("color:#5b6068;")
         layout.addWidget(self.meta)
 
+        # Stack: a syntax-highlighted DiffView for runs with a DIFF
+        # artifact, and a plain-text body for chat-only runs.  We pick
+        # the right one in _load() once the artifacts come in.
+        self._stack = QtWidgets.QStackedWidget()
+        self.diff_view = DiffView()
         self.body = QtWidgets.QPlainTextEdit()
         self.body.setReadOnly(True)
         self.body.setStyleSheet(
             "background:#fff;border:1px solid #e6e7eb;border-radius:6px;"
             "padding:10px;font-family:ui-sans-serif,Inter,system-ui;font-size:13px;"
         )
-        layout.addWidget(self.body, stretch=1)
+        self._stack.addWidget(self.body)  # 0: plain
+        self._stack.addWidget(self.diff_view)  # 1: diff
+        layout.addWidget(self._stack, stretch=1)
 
         self.note = QtWidgets.QLineEdit()
         self.note.setPlaceholderText("Optional note (rationale, follow-ups, …)")
@@ -82,30 +91,28 @@ class ReviewPage(QtWidgets.QWidget):
             self.body.setPlainText(f"Failed to load: {exc}")
             return
         if not artifacts:
+            self._stack.setCurrentIndex(0)
             self.body.setPlainText("(no artifacts produced)")
             return
-        # If any artifact is a diff, switch to monospace and show that
-        # one prominently; concatenate other artifacts beneath.
-        has_diff = any(a.get("kind") == "diff" for a in artifacts)
-        if has_diff:
-            self.body.setStyleSheet(
-                "background:#0f1115;color:#dee0e3;border:1px solid #e6e7eb;"
-                "border-radius:6px;padding:10px;"
-                "font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;"
-            )
-        else:
-            self.body.setStyleSheet(
-                "background:#fff;border:1px solid #e6e7eb;border-radius:6px;"
-                "padding:10px;font-family:ui-sans-serif,Inter,system-ui;font-size:13px;"
-            )
-        # Sort: diffs first, then summaries / transcripts.
-        order = {"diff": 0, "summary": 1, "transcript": 2}
-        artifacts_sorted = sorted(
-            artifacts,
-            key=lambda a: order.get(a.get("kind", ""), 99),
+        # Find the first DIFF artifact (if any) and route to the
+        # syntax-highlighted DiffView; everything else goes to the
+        # plain-text body.
+        diff_artifact = next(
+            (a for a in artifacts if a.get("kind") == "diff"),
+            None,
         )
-        text = "\n\n".join(f"# {a['title']}\n\n{a['body']}" for a in artifacts_sorted)
-        self.body.setPlainText(text)
+        if diff_artifact is not None:
+            self.diff_view.set_diff(diff_artifact["body"] or "(no changes)")
+            self._stack.setCurrentIndex(1)
+        else:
+            order = {"summary": 0, "transcript": 1, "plan": 2}
+            sorted_a = sorted(
+                artifacts,
+                key=lambda a: order.get(a.get("kind", ""), 99),
+            )
+            text = "\n\n".join(f"# {a['title']}\n\n{a['body']}" for a in sorted_a)
+            self.body.setPlainText(text)
+            self._stack.setCurrentIndex(0)
         self.meta.setText(f"run {self._run_id} · {len(artifacts)} artifact(s)")
 
     def _approve(self) -> None:

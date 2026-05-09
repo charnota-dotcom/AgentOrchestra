@@ -1,5 +1,75 @@
 # Changelog
 
+## Unreleased — Phase 4
+
+Sprint 1 — multi-vendor agentic parity + sandbox tier.
+- Gemini ``run_with_tools`` via google-genai's function-calling
+  (generate_content + Tool[function_declarations]); per-turn
+  function_call execution + function_response feed-back.  JSON-Schema
+  fields Gemini can't accept (default, additionalProperties) are
+  recursively stripped from the input schema.
+- Ollama ``run_with_tools`` via the OpenAI-compatible
+  /v1/chat/completions tool path.  Tolerant of malformed args (local
+  models often produce noisy JSON) — coerces to {} rather than
+  aborting.
+- Minimal MCP stdio client (``apps/service/mcp/client.py``):
+  initialize handshake, tools/list, tools/call.  Tolerant of
+  malformed lines so a misbehaving server doesn't kill an agent run.
+- ``WorktreeToolset`` gains ``mcp_tools`` + ``MCPRunTimeTool``
+  adapter.  Built-ins take priority; MCP tools land with public name
+  ``mcp:<server>:<tool>`` so they cannot shadow built-ins.
+- RunDispatcher.``_open_mcp_tools`` resolves card.tool_allowlist
+  against the registry; only TRUSTED stdio servers are opened, the
+  rest are skipped with a logged warning.  Clients are torn down in
+  the same finally block as the sandbox.
+- ``apps/service/sandbox/e2b.py``: E2B Firecracker microVM tier with
+  read/write/list parity to LocalSandbox.  Lazy SDK import; raises
+  SandboxError when the package or E2B_API_KEY is missing so the
+  dispatcher falls back to LocalSandbox with a warning event.
+
+Sprint 2 — speculative parallelism + hot model swap.
+- ``apps/service/dispatch/speculative.py``: ``race(user_message,
+  candidates)`` runs N (provider, model) chats in parallel; first
+  acceptable response cancels the others.  Cancelled tasks still
+  record duration + cost.  Building block for a runs.speculative
+  RPC + a Speculative card archetype.
+- ``apps/service/dispatch/hot_swap.py``: pure decision module that
+  decides when to swap to a larger-context fallback model mid-run.
+  ``plan_swap(card, tokens_used)`` returns a HotSwapPlan with the
+  routing change and a human-readable reason.  Pinned context caps
+  per (provider, model) tunable in one place.
+
+Sprint 3 — backup/restore + distributed bus + A2A schema + update client.
+- ``apps/service/store/backup.py``: ``.aobackup`` tar.gz format with
+  JSON manifest + sqlite3 online backup API; refuses to restore
+  forward-incompatible schemas; pre-restore copy of the current DB
+  lands at ``target.sqlite.pre-restore`` so a botched restore is
+  recoverable.
+- ``apps/service/dispatch/a2a.py``: Pydantic models for the A2A
+  protocol — PeerCapabilities, RunDelegation + Ack,
+  HandoffCardEnvelope, A2AEvent.  Wire format only; runtime path is
+  V5.
+- ``apps/service/dispatch/nats_bridge.py``: optional bridge that
+  republishes EventBus events on a NATS subject namespace
+  (``agentorchestra.<workspace>.<run>.<kind>``) and relays peer
+  events back tagged with ``peer_origin``.  Lazy nats-py; no-op when
+  the package isn't installed.
+- ``apps/service/updates/client.py``: signed-manifest discovery +
+  download.  Verifies the signature, picks the platform-appropriate
+  asset, hashes the download, raises if the sha256 doesn't match.
+  Install is always user-initiated.
+
+Sprint 4 — UI polish.
+- ``apps/gui/widgets/diff_view.py``: QSyntaxHighlighter-based diff
+  viewer paints + green, - red, hunk headers purple, file headers
+  muted gray.  Review page uses a QStackedWidget to show DiffView
+  for runs with a DIFF artifact and the plain-text body for
+  chat-only runs.
+
+CI: provider field on PersonalityCard relaxed from
+Literal[\"anthropic\",...] to plain str so test fakes (failing,
+secondary, echo, vendorA, ...) no longer fail Pydantic validation.
+
 ## Unreleased — Phase 3
 
 Sprint 1 — multi-vendor parity + sandbox + Mergiraf wire-up.
