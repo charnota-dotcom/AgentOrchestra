@@ -35,6 +35,10 @@ dependencies = [
 gui = [
     "PySide6>=6.7",
     "qasync>=0.27",
+    # Optional in-app annotation overlay (floating bar + Review dialog).
+    # Pinned per the integration requirements doc — bump deliberately
+    # and re-run the integration compatibility test on each upgrade.
+    "pyside6_annotator>=1.4.23",
 ]
 google = [
     "google-genai>=0.3",
