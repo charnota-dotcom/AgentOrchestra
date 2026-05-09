@@ -35,6 +35,10 @@ dependencies = [
 gui = [
     "PySide6>=6.7",
     "qasync>=0.27",
+    # Optional in-app annotation overlay (floating bar + Review dialog).
+    # Pinned per the integration requirements doc — bump deliberately
+    # and re-run the integration compatibility test on each upgrade.
+    "pyside6_annotator>=1.4.23",
 ]
 google = [
     "google-genai>=0.3",
@@ -64,6 +68,13 @@ force-include = { "packs" = "packs" }
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = [
+    # Verbatim contract test from the pyside6_annotator project — kept
+    # at the repo root for manual `pytest test_integration_compatibility.py`
+    # runs after bumping the annotator pin (per its docs).  Not on the
+    # CI critical path; we don't reformat upstream files.
+    "test_integration_compatibility.py",
+]
 
 [tool.ruff.lint]
 select = [

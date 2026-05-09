@@ -156,26 +156,48 @@ class ComposerPage(QtWidgets.QWidget):
         asyncio.ensure_future(self._load_template_async())
 
     async def _load_template_async(self) -> None:
-        # Templates are fetched indirectly; for V1 we just use the variables
-        # already on the card list response.  Wire a templates.get RPC if
-        # richer metadata is needed.
-        # Clear and rebuild the form.
         while self.form_host.rowCount():
             self.form_host.removeRow(0)
-        # We don't have a templates.get RPC yet; simple V1 approach is to
-        # introspect via the card archetype.  Show a minimal goal text input.
         self._inputs: dict[str, QtWidgets.QWidget] = {}
-        self._add_input("goal", "Goal", multiline=True, required=True)
-        if self._current_card and self._current_card.get("archetype") == "qa-on-fix":
-            self._add_input("target_run_id", "Run to QA", multiline=False, required=True)
-            self._add_input("focus", "Focus", multiline=True, required=True)
+        if not self._current_card:
+            return
+        try:
+            tmpl = await self.client.call(
+                "templates.get",
+                {"template_id": self._current_card["template_id"]},
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Template error", str(exc))
+            return
+        for v in tmpl.get("variables", []):
+            kind = v.get("kind", "text")
+            multiline = kind == "text"
+            self._add_input(
+                v["name"],
+                v.get("label") or v["name"],
+                multiline=multiline,
+                required=bool(v.get("required", False)),
+                default=v.get("default"),
+            )
 
-    def _add_input(self, name: str, label: str, *, multiline: bool, required: bool) -> None:
+    def _add_input(
+        self,
+        name: str,
+        label: str,
+        *,
+        multiline: bool,
+        required: bool,
+        default: Any = None,
+    ) -> None:
         if multiline:
             w: QtWidgets.QWidget = QtWidgets.QPlainTextEdit()
             w.setMinimumHeight(80)
+            if default:
+                w.setPlainText(str(default))
         else:
             w = QtWidgets.QLineEdit()
+            if default is not None:
+                w.setText(str(default))
         self._inputs[name] = w
         self.form_host.addRow(QtWidgets.QLabel(label + (" *" if required else "")), w)
 

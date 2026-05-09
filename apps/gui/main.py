@@ -50,6 +50,11 @@ def main() -> int:
 
     token = args.token or hook_token()
     app = qt_widgets.QApplication(sys.argv)
+    # QSettings keys derive from these.  The pyside6_annotator library
+    # uses ("pyside6_annotator", "annotator") internally; we pick a
+    # different pair so its keys never collide with ours and stale
+    # values from a previous host app aren't read back into ours.
+    app.setOrganizationName("AgentOrchestra")
     app.setApplicationName("AgentOrchestra")
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)

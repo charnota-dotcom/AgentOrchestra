@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtWidgets
 
+from apps.gui.annotator import setup_annotator
 from apps.gui.windows.composer import ComposerPage
 from apps.gui.windows.first_run import FirstRunWizard, first_run_pending
 from apps.gui.windows.history import HistoryPage
@@ -67,6 +68,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._wire_navigation()
         self.stack.setCurrentIndex(0)
+
+        # Optional annotation overlay (pyside6_annotator).  No-ops if
+        # the package isn't installed; never raises.
+        self._annotator = setup_annotator(self)
 
         if first_run_pending():
             QtCore.QTimer.singleShot(0, self._show_first_run_wizard)
