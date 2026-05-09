@@ -80,6 +80,13 @@ class CostPolicy(BaseModel):
     hard_cap_tokens: int = 1_000_000
 
 
+class CardMode(StrEnum):
+    """How the dispatcher should run cards of this type."""
+
+    CHAT = "chat"        # text-only, no worktree (research, QA)
+    AGENTIC = "agentic"  # tool-using, worktree-bound (code editing)
+
+
 class PersonalityCard(BaseModel):
     """A reusable agent role.
 
@@ -95,12 +102,14 @@ class PersonalityCard(BaseModel):
     template_id: str  # FK to InstructionTemplate
     provider: Literal["anthropic", "google", "openai", "ollama"] = "anthropic"
     model: str = "claude-sonnet-4-5"
+    mode: CardMode = CardMode.CHAT
     cost: CostPolicy = Field(default_factory=CostPolicy)
     blast_radius: BlastRadiusPolicy = Field(default_factory=BlastRadiusPolicy)
     sandbox_tier: SandboxTier = SandboxTier.DEVCONTAINER
     tool_allowlist: list[str] = Field(default_factory=list)  # empty = all bundled tools
     stale_minutes: int = 60
     max_commits_per_run: int = 50
+    max_turns: int = 12
     skip_pre_commit_hooks: bool = False
     version: int = 1
     created_at: datetime = Field(default_factory=utc_now)

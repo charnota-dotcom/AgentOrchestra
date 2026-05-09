@@ -6,20 +6,23 @@ quirks are confined to the adapter.
 
 Two execution modes:
 
-- ChatSession: lightweight, in-process, no worktree.  Backs the chat panes.
-- Run dispatch (open_run): worktree-bound; adapter-specific.
-
-For V1 only ChatSession is fully implemented.  Run dispatch is a stub
-ready to be filled in week 4 of Phase 1.
+- ChatSession: lightweight, in-process, no worktree.  Backs the chat
+  panes and the V1 research/QA archetypes.
+- Agent loop (run_with_tools): worktree-bound; the adapter executes a
+  tool-using loop, calling back into ToolExecutor for each tool_use,
+  yielding normalized events to the dispatcher.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from apps.service.types import PersonalityCard
+
+if TYPE_CHECKING:
+    from apps.service.dispatch.tools import ToolExecutor
 
 
 @dataclass
@@ -30,7 +33,7 @@ class ChatMessage:
 
 @dataclass
 class StreamEvent:
-    """Normalized event yielded by ChatSession.send().
+    """Normalized event yielded by ChatSession.send() and run_with_tools().
 
     Adapter-agnostic so the GUI binds to one shape regardless of vendor.
     """
@@ -40,6 +43,7 @@ class StreamEvent:
         "assistant_message",
         "tool_call",
         "tool_result",
+        "turn_end",
         "usage",
         "finish",
         "error",
@@ -63,6 +67,28 @@ class LLMProvider(Protocol):
     name: Literal["anthropic", "google", "openai", "ollama"]
 
     async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+        ...
+
+    async def run_with_tools(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None,
+        user_message: str,
+        executor: "ToolExecutor",
+        max_turns: int = 16,
+    ) -> AsyncIterator[StreamEvent]:
+        """Run an agent loop that may call tools.
+
+        Implementations:
+        1. Send the user message with the executor's tool definitions.
+        2. On each assistant turn:
+           a. Yield ``text_delta`` / ``assistant_message`` for any text.
+           b. For each ``tool_use`` block, yield ``tool_call``, invoke
+              ``executor.execute(...)``, then yield ``tool_result`` and
+              feed the result back to the model.
+        3. End when stop_reason is end_turn or max_turns is exhausted.
+        """
         ...
 
     async def healthcheck(self) -> bool:

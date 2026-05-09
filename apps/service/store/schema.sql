@@ -39,12 +39,14 @@ CREATE TABLE IF NOT EXISTS cards (
     template_id              TEXT NOT NULL REFERENCES templates(id),
     provider                 TEXT NOT NULL,
     model                    TEXT NOT NULL,
+    mode                     TEXT NOT NULL DEFAULT 'chat',
     cost                     TEXT NOT NULL,        -- JSON
     blast_radius             TEXT NOT NULL,        -- JSON
     sandbox_tier             TEXT NOT NULL,
     tool_allowlist           TEXT NOT NULL,        -- JSON array
     stale_minutes            INTEGER NOT NULL,
     max_commits_per_run      INTEGER NOT NULL,
+    max_turns                INTEGER NOT NULL DEFAULT 12,
     skip_pre_commit_hooks    INTEGER NOT NULL,
     version                  INTEGER NOT NULL,
     created_at               TEXT NOT NULL,

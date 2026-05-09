@@ -226,20 +226,22 @@ class EventStore:
         await self.db.execute(
             """
             INSERT INTO cards (id, name, archetype, description, template_id,
-                provider, model, cost, blast_radius, sandbox_tier,
+                provider, model, mode, cost, blast_radius, sandbox_tier,
                 tool_allowlist, stale_minutes, max_commits_per_run,
-                skip_pre_commit_hooks, version, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                max_turns, skip_pre_commit_hooks, version,
+                created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 c.id, c.name, c.archetype, c.description, c.template_id,
-                c.provider, c.model,
+                c.provider, c.model, c.mode.value,
                 c.cost.model_dump_json(),
                 c.blast_radius.model_dump_json(),
                 c.sandbox_tier.value,
                 json.dumps(c.tool_allowlist),
                 c.stale_minutes,
                 c.max_commits_per_run,
+                c.max_turns,
                 int(c.skip_pre_commit_hooks),
                 c.version,
                 c.created_at.isoformat(),
@@ -249,30 +251,28 @@ class EventStore:
         await self.db.commit()
         return c
 
-    async def list_cards(self) -> list[PersonalityCard]:
-        cur = await self.db.execute("SELECT * FROM cards ORDER BY archetype, name")
-        rows = await cur.fetchall()
-        result = []
-        for r in rows:
-            d = dict(r)
-            d["cost"] = json.loads(d["cost"])
-            d["blast_radius"] = json.loads(d["blast_radius"])
-            d["tool_allowlist"] = json.loads(d["tool_allowlist"])
-            d["skip_pre_commit_hooks"] = bool(d["skip_pre_commit_hooks"])
-            result.append(PersonalityCard.model_validate(d))
-        return result
-
-    async def get_card(self, card_id: str) -> PersonalityCard | None:
-        cur = await self.db.execute("SELECT * FROM cards WHERE id = ?", (card_id,))
-        row = await cur.fetchone()
-        if not row:
-            return None
+    @staticmethod
+    def _hydrate_card(row: aiosqlite.Row) -> PersonalityCard:
         d = dict(row)
         d["cost"] = json.loads(d["cost"])
         d["blast_radius"] = json.loads(d["blast_radius"])
         d["tool_allowlist"] = json.loads(d["tool_allowlist"])
         d["skip_pre_commit_hooks"] = bool(d["skip_pre_commit_hooks"])
+        # Backwards-compat for DBs that predate the `mode` and
+        # `max_turns` columns.
+        d.setdefault("mode", "chat")
+        d.setdefault("max_turns", 12)
         return PersonalityCard.model_validate(d)
+
+    async def list_cards(self) -> list[PersonalityCard]:
+        cur = await self.db.execute("SELECT * FROM cards ORDER BY archetype, name")
+        rows = await cur.fetchall()
+        return [self._hydrate_card(r) for r in rows]
+
+    async def get_card(self, card_id: str) -> PersonalityCard | None:
+        cur = await self.db.execute("SELECT * FROM cards WHERE id = ?", (card_id,))
+        row = await cur.fetchone()
+        return self._hydrate_card(row) if row else None
 
     # ------------------------------------------------------------------
     # Instructions
