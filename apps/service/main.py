@@ -169,6 +169,46 @@ class Handlers:
         )
         return {"ok": ok}
 
+    async def runs_consensus(self, params: dict[str, Any]) -> dict[str, Any]:
+        from apps.service.dispatch.consensus import run_consensus
+
+        # Locate the bundled consensus card+template so we have valid FKs.
+        cur = await self.store.db.execute(
+            "SELECT id, template_id FROM cards WHERE archetype = 'consensus' LIMIT 1",
+        )
+        row = await cur.fetchone()
+        if not row:
+            raise ValueError("consensus card not seeded; restart the service to seed it")
+        candidates = [(c["provider"], c["model"]) for c in (params.get("candidates") or [])]
+        if len(candidates) < 2:
+            raise ValueError("need at least two candidates")
+        result = await run_consensus(
+            self.store,
+            self.dispatcher.bus,
+            question=params["question"],
+            judge_provider=params.get("judge_provider", "anthropic"),
+            judge_model=params.get("judge_model", "claude-sonnet-4-5"),
+            candidates=candidates,
+            judge_instructions=params.get("judge_instructions"),
+            consensus_card_id=row["id"],
+            consensus_template_id=row["template_id"],
+        )
+        return {
+            "run_id": result.run_id,
+            "candidates": [
+                {
+                    "provider": c.provider,
+                    "model": c.model,
+                    "tokens_in": c.tokens_in,
+                    "tokens_out": c.tokens_out,
+                    "error": c.error,
+                    "duration_s": c.duration_s,
+                }
+                for c in result.candidates
+            ],
+            "cost_usd": result.cost_usd,
+        }
+
     async def runs_replay(self, params: dict[str, Any]) -> dict[str, Any]:
         run = await self.dispatcher.replay(
             params["run_id"],
@@ -230,6 +270,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("runs.reject", h.runs_reject)
     server.register("runs.cancel", h.runs_cancel)
     server.register("runs.replay", h.runs_replay)
+    server.register("runs.consensus", h.runs_consensus)
     server.register("runs.artifacts", h.runs_artifacts)
     server.register("search", h.search)
     server.register("lint.instruction", h.lint_instruction)

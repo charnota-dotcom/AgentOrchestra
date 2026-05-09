@@ -103,6 +103,66 @@ _CARD_DEFAULTS: dict[str, dict] = {
         stale_minutes=90,
         max_turns=12,
     ),
+    "red-team": dict(
+        name="Red Team",
+        description="Adversarial reviewer that tries to break a target run's diff.",
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        cost=CostPolicy(
+            soft_cap_usd=0.40, hard_cap_usd=1.50, soft_cap_tokens=150_000, hard_cap_tokens=400_000
+        ),
+        sandbox_tier=SandboxTier.DEVCONTAINER,
+        blast_radius=BlastRadiusPolicy(
+            file_count_threshold=999,
+            network_egress_requires_approval=False,
+            deletion_requires_approval=True,
+            push_requires_approval=True,
+        ),
+        stale_minutes=45,
+    ),
+    "tracker": dict(
+        name="Tracker",
+        description=(
+            "Watcher agent that observes other runs and emits HandoffCards"
+            " so the next agent (or human) can pick up the work cleanly."
+        ),
+        provider="anthropic",
+        model="claude-haiku-4-5",
+        cost=CostPolicy(
+            soft_cap_usd=0.10, hard_cap_usd=0.50, soft_cap_tokens=50_000, hard_cap_tokens=200_000
+        ),
+        sandbox_tier=SandboxTier.DEVCONTAINER,
+        blast_radius=BlastRadiusPolicy(
+            file_count_threshold=999,
+            network_egress_requires_approval=False,
+            deletion_requires_approval=True,
+            push_requires_approval=True,
+        ),
+        stale_minutes=20,
+    ),
+    "consensus": dict(
+        name="Cross-vendor Consensus",
+        description=(
+            "Asks several vendors the same question in parallel and uses a "
+            "judge model to synthesise a single answer."
+        ),
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        cost=CostPolicy(
+            soft_cap_usd=1.50,
+            hard_cap_usd=5.00,
+            soft_cap_tokens=400_000,
+            hard_cap_tokens=1_200_000,
+        ),
+        sandbox_tier=SandboxTier.DEVCONTAINER,
+        blast_radius=BlastRadiusPolicy(
+            file_count_threshold=999,
+            network_egress_requires_approval=False,
+            deletion_requires_approval=True,
+            push_requires_approval=True,
+        ),
+        stale_minutes=60,
+    ),
 }
 
 
