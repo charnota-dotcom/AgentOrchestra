@@ -23,6 +23,7 @@ from apps.service.cards.seed import seed_default_cards
 from apps.service.cost.meter import forecast as cost_forecast
 from apps.service.dispatch.bus import EventBus
 from apps.service.dispatch.dispatcher import RunDispatcher
+from apps.service.dispatch.drift_sentinel import DriftSentinel
 from apps.service.ingestion.hook_installer import (
     install as install_hook,
 )
@@ -35,6 +36,7 @@ from apps.service.ingestion.hook_installer import (
 from apps.service.ingestion.jsonl_watcher import JSONLWatcher
 from apps.service.ipc.server import JsonRpcServer
 from apps.service.linter.preflight import lint
+from apps.service.mcp import registry as mcp_registry
 from apps.service.providers.registry import known_providers
 from apps.service.secrets.keyring_store import hook_token
 from apps.service.store.events import EventStore
@@ -233,6 +235,58 @@ class Handlers:
     async def providers(self, params: dict[str, Any]) -> list[str]:
         return known_providers()
 
+    async def mcp_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return [mcp_registry.to_dict(s) for s in mcp_registry.list_servers()]
+
+    async def mcp_add(self, params: dict[str, Any]) -> dict[str, Any]:
+        s = mcp_registry.add_server(
+            name=params["name"],
+            transport=params["transport"],
+            command=params.get("command", ""),
+            args=params.get("args") or [],
+            url=params.get("url", ""),
+            env=params.get("env") or {},
+        )
+        return mcp_registry.to_dict(s)
+
+    async def mcp_trust(self, params: dict[str, Any]) -> dict[str, Any]:
+        s = mcp_registry.trust_server(params["id"])
+        if not s:
+            raise ValueError(f"unknown mcp server: {params['id']}")
+        return mcp_registry.to_dict(s)
+
+    async def mcp_block(self, params: dict[str, Any]) -> dict[str, Any]:
+        s = mcp_registry.block_server(params["id"])
+        if not s:
+            raise ValueError(f"unknown mcp server: {params['id']}")
+        return mcp_registry.to_dict(s)
+
+    async def mcp_remove(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = mcp_registry.remove_server(params["id"])
+        return {"ok": ok}
+
+    async def dictation_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        from apps.service.dictation.whisper import is_available
+
+        return {"available": is_available()}
+
+    async def dictation_transcribe(self, params: dict[str, Any]) -> dict[str, Any]:
+        from apps.service.dictation.whisper import (
+            TranscriptionOptions,
+            transcribe_file,
+        )
+
+        path = Path(params["audio_path"])
+        text = await asyncio.to_thread(
+            transcribe_file,
+            path,
+            TranscriptionOptions(
+                model_size=params.get("model_size", "base"),
+                language=params.get("language"),
+            ),
+        )
+        return {"text": text}
+
     async def hooks_status(self, params: dict[str, Any]) -> dict[str, Any]:
         return hook_status()
 
@@ -286,6 +340,13 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("hooks.status", h.hooks_status)
     server.register("hooks.install", h.hooks_install)
     server.register("hooks.uninstall", h.hooks_uninstall)
+    server.register("mcp.list", h.mcp_list)
+    server.register("mcp.add", h.mcp_add)
+    server.register("mcp.trust", h.mcp_trust)
+    server.register("mcp.block", h.mcp_block)
+    server.register("mcp.remove", h.mcp_remove)
+    server.register("dictation.status", h.dictation_status)
+    server.register("dictation.transcribe", h.dictation_transcribe)
 
 
 async def serve(args: argparse.Namespace) -> int:
@@ -315,6 +376,9 @@ async def serve(args: argparse.Namespace) -> int:
 
     watcher = JSONLWatcher(store)
     await watcher.start()
+
+    sentinel = DriftSentinel(store=store, bus=bus)
+    await sentinel.start()
 
     token = hook_token()
     rpc = JsonRpcServer(token=token, bus=bus)
@@ -353,6 +417,7 @@ async def serve(args: argparse.Namespace) -> int:
     server.should_exit = True
     with contextlib.suppress(asyncio.CancelledError):
         await server_task
+    await sentinel.stop()
     await watcher.stop()
     await store.append_event(
         Event(source=EventSource.SYSTEM, kind=EventKind.SERVICE_STOPPED, text="service stopped")

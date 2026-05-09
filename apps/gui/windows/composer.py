@@ -98,6 +98,12 @@ class ComposerPage(QtWidgets.QWidget):
 
         bar = QtWidgets.QHBoxLayout()
         bar.addStretch(1)
+        self.dictate_btn = QtWidgets.QPushButton("🎙 Dictate")
+        self.dictate_btn.setToolTip(
+            "Record a short voice memo and transcribe locally.  Requires faster-whisper installed."
+        )
+        self.dictate_btn.clicked.connect(self._dictate)  # type: ignore[arg-type]
+        bar.addWidget(self.dictate_btn)
         self.preview_btn = QtWidgets.QPushButton("Preview")
         self.preview_btn.clicked.connect(self._preview)  # type: ignore[arg-type]
         bar.addWidget(self.preview_btn)
@@ -181,6 +187,41 @@ class ComposerPage(QtWidgets.QWidget):
             elif isinstance(w, QtWidgets.QLineEdit):
                 out[k] = w.text().strip()
         return out
+
+    def _dictate(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Pick an audio recording (wav / mp3 / m4a)",
+            filter="Audio (*.wav *.mp3 *.m4a *.ogg *.flac);;All files (*)",
+        )
+        if not path:
+            return
+        asyncio.ensure_future(self._dictate_async(path))
+
+    async def _dictate_async(self, audio_path: str) -> None:
+        try:
+            res = await self.client.call(
+                "dictation.transcribe",
+                {"audio_path": audio_path},
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Dictation failed",
+                f"{exc}\n\nIs faster-whisper installed?",
+            )
+            return
+        text = res.get("text", "").strip()
+        if not text:
+            return
+        # Drop the transcript into the first text input we have.
+        for widget in self._inputs.values():
+            if isinstance(widget, QtWidgets.QPlainTextEdit):
+                widget.setPlainText((widget.toPlainText() + "\n" + text).strip())
+                return
+            if isinstance(widget, QtWidgets.QLineEdit):
+                widget.setText(text)
+                return
 
     def _preview(self) -> None:
         asyncio.ensure_future(self._preview_async())

@@ -12,9 +12,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from apps.gui.windows.composer import ComposerPage
+from apps.gui.windows.first_run import FirstRunWizard, first_run_pending
 from apps.gui.windows.history import HistoryPage
 from apps.gui.windows.home import HomePage
 from apps.gui.windows.live import LivePage
@@ -66,6 +67,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._wire_navigation()
         self.stack.setCurrentIndex(0)
+
+        if first_run_pending():
+            QtCore.QTimer.singleShot(0, self._show_first_run_wizard)
+
+    def _show_first_run_wizard(self) -> None:
+        wizard = FirstRunWizard(self.client, parent=self)
+        wizard.exec()
 
     def _on_dispatched(self, run_id: str, card_name: str) -> None:
         self.live.attach_run(run_id, card_name=card_name)
