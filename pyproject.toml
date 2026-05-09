@@ -54,7 +54,12 @@ agentorchestra-service = "apps.service.main:main"
 agentorchestra-gui = "apps.gui.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["apps", "packs"]
+# `packs/` is data, not Python — its subdirs (hooks/, archetypes/) hold
+# .sh and .md files that the service reads via Path(__file__) at
+# runtime.  We force-include them in the wheel but don't list them as
+# Python packages.
+packages = ["apps"]
+force-include = { "packs" = "packs" }
 
 [tool.ruff]
 line-length = 100
