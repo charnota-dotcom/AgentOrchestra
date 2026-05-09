@@ -38,11 +38,22 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Show env
         run: |
+          set -x
           python --version
           python -m pip list
-          python -c "import apps.service.types; print('imports ok')"
+      - name: Smoke imports
+        run: |
+          set -x
+          python -c "import apps.service.types"
+          python -c "import apps.service.store.events"
+          python -c "import apps.service.dispatch.dispatcher"
+          python -c "import apps.service.providers.registry"
+          python -c "import apps.service.dispatch.tools"
+          python -c "import apps.service.dispatch.speculative"
+      - name: Pytest collect
+        run: pytest tests/unit --collect-only -q
       - name: Pytest (unit)
-        run: pytest tests/unit -v --tb=short
+        run: pytest tests/unit -v --tb=long
       - name: Pytest (integration)
         # Integration tests touch the filesystem and spawn git; allowed
         # to fail while we stabilise the suite (re-enabled hard gating
