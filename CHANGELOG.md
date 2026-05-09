@@ -1,6 +1,55 @@
 # Changelog
 
-## Unreleased — Phase 2
+## Unreleased — Phase 3
+
+Sprint 1 — multi-vendor parity + sandbox + Mergiraf wire-up.
+- Gemini agentic via google-genai function-calling; per-turn function
+  call execution + function_response feed-back; JSON-schema field
+  stripping for Gemini-incompatible keys.
+- Ollama agentic via OpenAI-compatible function-calling; defensive
+  arg-coercion for noisy local models.
+- New apps/service/sandbox/ package: Sandbox protocol, LocalSandbox,
+  DockerSandbox (cap-drop ALL, no-network, --read-only, worktree
+  bind-mount).  WorktreeToolset routes I/O through the sandbox when
+  set; falls back to direct FS otherwise.  RunDispatcher honors
+  card.sandbox_tier and emits a fallback event when Docker isn't
+  available.
+- merger.install_as_merge_driver registers Mergiraf via per-repo
+  `git config merge.mergiraf.driver` + a tagged .gitattributes block
+  (~20 tree-sitter-supported globs).  Idempotent.  Wired into
+  WorktreeManager assisted-merge mode.
+
+Sprint 2 — innovation + onboarding.
+- MCP server registry with trust-on-first-use, SHA-256 fingerprint of
+  command + args + url, and trust transitions UNTRUSTED -> TRUSTED ->
+  BLOCKED.  RPCs: mcp.list / add / trust / block / remove.
+- First-run wizard (4 pages): welcome, provider keys, default
+  workspace, defaults (sandbox tier + daily budget + Claude hook
+  install).  Sentinel file at ~/.local/share/agentorchestra/
+  first_run.done so it shows once.
+- Local-only voice dictation via lazy faster-whisper wrapper.
+  Composer's "🎙 Dictate" button picks an audio file, the service
+  transcribes via dictation.transcribe, the result lands in the first
+  text input.
+- Drift Sentinel: a single asyncio task subscribed to the EventBus
+  flagging runs with N tool calls and zero commits, or N consecutive
+  tool errors.  Started with the service.
+
+Sprint 3 — distribution.
+- Briefcase config (briefcase.toml) for macOS / Windows / Linux
+  installers; mac entitlements for Hardened Runtime; stub for
+  signing (the certs aren't shipped in this branch).
+- Signed update manifest format + verifier
+  (apps/service/updates/manifest.py): ed25519 over canonical JSON
+  via the `cryptography` package.  Manifests without signatures are
+  rejected; tampered payloads fail verification.
+
+Tests: test_sandbox, test_merger_install, test_mcp_registry,
+test_drift_sentinel, test_update_manifest.
+
+CI: ruff check + ruff format --check green tree-wide.
+
+## Phase 2
 
 Sprint 1 — multi-vendor.
 - Gemini chat adapter via the official google-genai SDK.

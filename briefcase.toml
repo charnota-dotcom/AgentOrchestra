@@ -1,0 +1,84 @@
+# Briefcase configuration for AgentOrchestra desktop installers.
+#
+# Build per platform:
+#
+#   briefcase create <macOS | windows | linux>
+#   briefcase build <macOS | windows | linux>
+#   briefcase package <macOS | windows | linux>  --identity <Developer ID>
+#
+# Code signing:
+#   - macOS: Developer ID Application; notarisation runs as part of
+#     `briefcase package` when --identity is supplied.
+#   - Windows: an Authenticode (preferably EV) cert; pass via the
+#     SIGNTOOL_CERT_FILE / SIGNTOOL_CERT_PASSWORD env vars.
+#   - Linux: AppImage + .deb + .rpm.  Optional GPG sign via the
+#     LINUX_SIGNING_KEY env var.
+#
+# Dev signing certs aren't shipped in this branch — the config below
+# is what production builds reference.
+
+[tool.briefcase]
+project_name = "AgentOrchestra"
+bundle = "com.agentorchestra"
+version = "0.1.0"
+url = "https://github.com/charnota-dotcom/AgentOrchestra"
+author = "AgentOrchestra Contributors"
+author_email = "noreply@agentorchestra.local"
+license = "Proprietary"
+
+[tool.briefcase.app.agentorchestra]
+formal_name = "AgentOrchestra"
+description = "Multi-vendor desktop AI sub-agent orchestrator."
+long_description = """
+AgentOrchestra runs AI agents from Anthropic, Google, OpenAI, and
+local models in branch-per-agent isolation.  Every instruction is
+tracked, every diff is reviewable, and every Claude Code session on
+this machine appears in History.
+"""
+icon = "installers/icons/agentorchestra"
+sources = ["apps", "packs"]
+test_sources = ["tests"]
+
+requires = [
+    "PySide6>=6.7",
+    "qasync>=0.27",
+    "pydantic>=2.7",
+    "anyio>=4.4",
+    "ulid-py>=1.1",
+    "jinja2>=3.1",
+    "aiosqlite>=0.20",
+    "watchdog>=4.0",
+    "httpx>=0.27",
+    "starlette>=0.37",
+    "uvicorn>=0.30",
+    "keyring>=25.0",
+    "anthropic>=0.30",
+]
+
+# ---- macOS ----
+[tool.briefcase.app.agentorchestra.macOS]
+universal_build = true
+requires = ["std-nslog>=1.0"]
+
+# Hardened Runtime entitlements.  We keep this minimal: no network
+# extensions, no audio input until the user opts into voice dictation
+# (which is then granted via the system permission prompt).
+entitlements = { "com.apple.security.cs.allow-unsigned-executable-memory" = true,
+                  "com.apple.security.cs.disable-library-validation" = true }
+
+# ---- Linux ----
+[tool.briefcase.app.agentorchestra.linux]
+requires = []
+
+[tool.briefcase.app.agentorchestra.linux.system.debian]
+system_requires = [
+    "git",
+    "libxcb-cursor0",
+]
+
+[tool.briefcase.app.agentorchestra.linux.appimage]
+manylinux = "manylinux_2_28"
+
+# ---- Windows ----
+[tool.briefcase.app.agentorchestra.windows]
+requires = []

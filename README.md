@@ -4,7 +4,7 @@ Desktop orchestrator for multi-vendor AI sub-agents — Claude, Gemini, OpenAI, 
 
 ## Status
 
-**Phase 1 (MVP) — in progress.** This branch (`claude/ai-agent-orchestration-research-BmALo`) is the working scaffold.
+**Phase 3 — in progress.** This branch (`claude/ai-agent-orchestration-research-BmALo`) is the working scaffold.  Phase 1 (MVP), Phase 2 (innovations + multi-vendor + specialised archetypes) and Phase 3 (multi-vendor agentic parity + Docker sandbox + MCP registry + first-run wizard + voice dictation + drift sentinel + signed updates) are all in.
 
 What is implemented in this commit:
 
