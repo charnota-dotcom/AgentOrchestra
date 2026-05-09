@@ -1,6 +1,54 @@
 # Changelog
 
-## Unreleased — Phase 1 MVP scaffold
+## Unreleased — Phase 2
+
+Sprint 1 — multi-vendor.
+- Gemini chat adapter via the official google-genai SDK.
+- Ollama chat adapter via the OpenAI-compatible /v1/chat/completions
+  endpoint at http://localhost:11434.
+- Provider registry now wires anthropic + google + ollama by default;
+  agentic Gemini / Ollama runs surface a clear deferred-feature error.
+- PersonalityCard gains `fallbacks`, an ordered list of {provider,
+  model} dicts.  RunDispatcher tries the primary on open; on failure
+  it walks the fallbacks before declaring the run aborted.
+
+Sprint 2 — innovations.
+- runs.replay re-runs a past Run with optional provider / model /
+  instruction overrides.  Overrides clone the card so the original's
+  accounting stays intact.  History page in the GUI grew a Recent
+  runs tab with a Replay… dialog.
+- Claude hook bridge: bundled `packs/hooks/agentorchestra-hook.sh`
+  and an idempotent installer that edits `~/.claude/settings.json`
+  to attach our entry to SessionStart / PreToolUse / PostToolUse /
+  Stop / SubagentStop with env vars carrying the URL + token.
+  Settings page exposes Install / Remove buttons.
+- Auto-QA on diff: PersonalityCard.auto_qa triggers a chat-style
+  qa-on-fix run targeting the parent's diff once the parent reaches
+  REVIEWING.
+- Cost caps enforced mid-run: every usage event recomputes cumulative
+  cost; soft cap emits a warning event once; hard cap aborts the run
+  cleanly.
+
+Sprint 3 — specialised archetypes.
+- Red Team adversarial reviewer card targeting another run's diff.
+- Tracker watcher card emitting structured HandoffCards.
+- Cross-vendor Consensus card + a fan-out + judge orchestrator
+  (`apps/service/dispatch/consensus.py`).  RPC: runs.consensus.
+
+Sprint 4 — UI polish + safety.
+- Workspace map widget: per-workspace lanes with run state pips +
+  costs, refresh button, Home page now splits into Active table +
+  workspace map.
+- Plan-act split with HITL gate: PersonalityCard.requires_plan makes
+  the dispatcher generate a written plan first, persist it as a PLAN
+  artifact, transition the Run to AWAITING_APPROVAL, and wait on an
+  asyncio.Event until runs.approve_plan releases it.
+
+Tests: test_providers, test_replay, test_hook_installer,
+test_consensus, test_plan_act (integration).
+CI: ruff check + ruff format --check green tree-wide.
+
+## Phase 1 — MVP scaffold
 
 This commit lays down the working scaffold for the multi-vendor desktop
 agent orchestrator.  Execution-ready end-to-end run dispatch is the
