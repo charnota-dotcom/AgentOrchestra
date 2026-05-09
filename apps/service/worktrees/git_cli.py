@@ -63,7 +63,7 @@ async def git(
     )
     try:
         stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         raise GitCLIError(list(args), -1, "timeout") from None
@@ -118,8 +118,14 @@ async def add_worktree(repo: Path, target: Path, branch: str, base_ref: str) -> 
     validate_branch_name(branch)
     target.parent.mkdir(parents=True, exist_ok=True)
     await git(
-        "worktree", "add", "-b", branch, str(target), base_ref,
-        cwd=repo, timeout=120.0,
+        "worktree",
+        "add",
+        "-b",
+        branch,
+        str(target),
+        base_ref,
+        cwd=repo,
+        timeout=120.0,
     )
 
 
@@ -146,7 +152,7 @@ async def update_ref(repo: Path, ref: str, sha: str) -> None:
 
 async def delete_ref_namespace(repo: Path, prefix: str) -> int:
     """Delete every ref whose name starts with `prefix`.  Returns count."""
-    r = await git("for-each-ref", f"--format=%(refname)", prefix, cwd=repo)
+    r = await git("for-each-ref", "--format=%(refname)", prefix, cwd=repo)
     refs = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
     for ref in refs:
         await git("update-ref", "-d", ref, cwd=repo, check=False)

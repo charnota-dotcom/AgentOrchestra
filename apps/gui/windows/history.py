@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtWidgets
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
 
 class HistoryPage(QtWidgets.QWidget):
-    def __init__(self, client: "RpcClient") -> None:
+    def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
         self.setStyleSheet("background:#fafbfc;")
@@ -50,12 +50,10 @@ class HistoryPage(QtWidgets.QWidget):
             return
         try:
             rows = await self.client.call("search", {"query": q})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "RPC error", str(exc))
             return
         self.results.clear()
         for r in rows:
-            item = QtWidgets.QListWidgetItem(
-                f"[{r['doc_kind']}] {r['title']}  —  {r['snippet']}"
-            )
+            item = QtWidgets.QListWidgetItem(f"[{r['doc_kind']}] {r['title']}  —  {r['snippet']}")
             self.results.addItem(item)

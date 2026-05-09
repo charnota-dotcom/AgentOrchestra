@@ -14,7 +14,7 @@ from apps.service.dispatch.bus import EventBus, by_run
 log = logging.getLogger(__name__)
 
 
-def make_run_stream_route(bus: EventBus, *, token: str):  # noqa: ANN201
+def make_run_stream_route(bus: EventBus, *, token: str):
     """Returns an async function suitable as a Starlette endpoint."""
 
     async def endpoint(request: Request) -> Response:
@@ -22,7 +22,7 @@ def make_run_stream_route(bus: EventBus, *, token: str):  # noqa: ANN201
             return Response("unauthorized", status_code=401)
         run_id = request.path_params["run_id"]
 
-        async def gen():  # noqa: ANN202
+        async def gen():
             heartbeat = 15.0
             try:
                 async for ev in bus.stream(by_run(run_id), timeout=heartbeat):
@@ -48,9 +48,13 @@ def make_run_stream_route(bus: EventBus, *, token: str):  # noqa: ANN201
                 return
             yield "event: end\ndata: {}\n\n"
 
-        return StreamingResponse(gen(), media_type="text/event-stream", headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        })
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     return endpoint

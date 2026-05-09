@@ -49,6 +49,7 @@ class _MissingDependency:
 def _import_sdk() -> Any:
     try:
         import anthropic  # type: ignore[import-not-found]
+
         return anthropic
     except ImportError:
         return _MissingDependency("anthropic")
@@ -64,9 +65,7 @@ class AnthropicChatSession(ChatSession):
         self._history: list[dict[str, Any]] = []
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key and not isinstance(self._sdk, _MissingDependency):
-            raise ProviderError(
-                "ANTHROPIC_API_KEY not set; load from keyring before opening chat"
-            )
+            raise ProviderError("ANTHROPIC_API_KEY not set; load from keyring before opening chat")
         self._client = (
             self._sdk.AsyncAnthropic(api_key=api_key)
             if not isinstance(self._sdk, _MissingDependency)
@@ -132,9 +131,7 @@ class AnthropicProvider:
     def __init__(self) -> None:
         self._sdk = _import_sdk()
 
-    async def open_chat(
-        self, card: PersonalityCard, *, system: str | None = None
-    ) -> ChatSession:
+    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
         if card.provider != "anthropic":
             raise ProviderError(f"card.provider={card.provider!r} is not anthropic")
         return AnthropicChatSession(card, system=system)
@@ -145,7 +142,7 @@ class AnthropicProvider:
         *,
         system: str | None,
         user_message: str,
-        executor: "ToolExecutor",
+        executor: ToolExecutor,
         max_turns: int = 16,
     ) -> AsyncIterator[StreamEvent]:
         if card.provider != "anthropic":
@@ -211,25 +208,24 @@ class AnthropicProvider:
                         block_id = getattr(block, "id", "")
                         name = getattr(block, "name", "")
                         params = getattr(block, "input", {}) or {}
-                        assistant_blocks.append({
-                            "type": "tool_use",
-                            "id": block_id,
-                            "name": name,
-                            "input": params,
-                        })
+                        assistant_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": block_id,
+                                "name": name,
+                                "input": params,
+                            }
+                        )
                         yield StreamEvent(
                             kind="tool_call",
                             text=name,
-                            payload={"tool_use_id": block_id, "name": name,
-                                     "params": params},
+                            payload={"tool_use_id": block_id, "name": name, "params": params},
                         )
 
                 messages.append({"role": "assistant", "content": assistant_blocks})
 
                 # Find tool_use blocks; if there are none, the loop is done.
-                tool_uses = [
-                    b for b in assistant_blocks if b.get("type") == "tool_use"
-                ]
+                tool_uses = [b for b in assistant_blocks if b.get("type") == "tool_use"]
                 if not tool_uses:
                     yield StreamEvent(
                         kind="turn_end",
@@ -244,7 +240,9 @@ class AnthropicProvider:
                 tool_results: list[dict[str, Any]] = []
                 for tu in tool_uses:
                     result = await executor.execute(
-                        tu["id"], tu["name"], tu["input"],
+                        tu["id"],
+                        tu["name"],
+                        tu["input"],
                     )
                     yield StreamEvent(
                         kind="tool_result",
@@ -255,12 +253,14 @@ class AnthropicProvider:
                             "content": result.content,
                         },
                     )
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": result.tool_use_id,
-                        "content": _coerce_tool_content(result.content),
-                        "is_error": result.is_error,
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": result.tool_use_id,
+                            "content": _coerce_tool_content(result.content),
+                            "is_error": result.is_error,
+                        }
+                    )
 
                 messages.append({"role": "user", "content": tool_results})
                 yield StreamEvent(
@@ -285,7 +285,7 @@ class AnthropicProvider:
                 kind="finish",
                 payload={"input_tokens": tokens_in, "output_tokens": tokens_out},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.exception("Anthropic run_with_tools failed")
             yield StreamEvent(kind="error", text=str(exc))
         finally:
@@ -302,4 +302,5 @@ def _coerce_tool_content(content: dict[str, Any]) -> Any:
     of content blocks.  We emit a JSON-encoded string for compactness.
     """
     import json
+
     return json.dumps(content, default=str)

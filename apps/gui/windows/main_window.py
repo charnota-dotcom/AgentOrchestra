@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtWidgets
 
 from apps.gui.windows.composer import ComposerPage
 from apps.gui.windows.history import HistoryPage
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, client: "RpcClient") -> None:
+    def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
         self.setWindowTitle("AgentOrchestra")
@@ -50,12 +50,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.history = HistoryPage(self.client)
         self.settings = SettingsPage(self.client)
 
-        self.stack.addWidget(self.home)        # 0
-        self.stack.addWidget(self.composer)    # 1
-        self.stack.addWidget(self.live)        # 2
-        self.stack.addWidget(self.review)      # 3
-        self.stack.addWidget(self.history)     # 4
-        self.stack.addWidget(self.settings)    # 5
+        self.stack.addWidget(self.home)  # 0
+        self.stack.addWidget(self.composer)  # 1
+        self.stack.addWidget(self.live)  # 2
+        self.stack.addWidget(self.review)  # 3
+        self.stack.addWidget(self.history)  # 4
+        self.stack.addWidget(self.settings)  # 5
 
         self.setCentralWidget(central)
 
@@ -121,9 +121,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _switch_to(self, stack_idx: int) -> None:
         # Update rail-button checked state to match the new stack page.
-        rail_idx = next(
-            (b for b, s in self._NAV_TO_STACK.items() if s == stack_idx), None
-        )
+        rail_idx = next((b for b, s in self._NAV_TO_STACK.items() if s == stack_idx), None)
         for i, btn in enumerate(self._nav_buttons):
             btn.setChecked(i == rail_idx)
         self.stack.setCurrentIndex(stack_idx)

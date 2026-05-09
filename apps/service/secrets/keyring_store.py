@@ -42,18 +42,19 @@ class _KeyringBackend:
     def delete(self, key: str) -> None:
         try:
             self._kr.delete_password(SERVICE_NAME, key)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
 
 def _make_backend() -> _MemoryBackend | _KeyringBackend:
     try:
         import keyring  # type: ignore[import-not-found]
+
         # Probe the backend; some CI envs have keyring installed but no daemon.
         try:
             keyring.get_password(SERVICE_NAME, "__probe__")
             return _KeyringBackend(keyring)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.warning("keyring backend unavailable; falling back to in-memory store")
             return _MemoryBackend()
     except ImportError:
@@ -78,6 +79,7 @@ def delete_secret(key: str) -> None:
 
 # Convenience names for the common keys.
 
+
 def anthropic_key() -> str | None:
     return get_secret("anthropic_api_key")
 
@@ -93,6 +95,7 @@ def openai_key() -> str | None:
 def hook_token() -> str:
     """Per-launch token for the hook receiver.  Lazily generated."""
     import secrets as _secrets
+
     token = get_secret("hook_token")
     if not token:
         token = _secrets.token_urlsafe(24)

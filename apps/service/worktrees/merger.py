@@ -38,12 +38,13 @@ async def is_available() -> bool:
         return False
     try:
         proc = await asyncio.create_subprocess_exec(
-            bin_path, "--version",
+            bin_path,
+            "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-    except (asyncio.TimeoutError, OSError):
+    except (TimeoutError, OSError):
         _cached_available = False
         return False
     text = out.decode("utf-8", errors="replace").strip()
@@ -75,16 +76,17 @@ def _parse_version(text: str) -> tuple[int, int, int] | None:
         if all(c.isdigit() or c == "." for c in tok):
             bits = tok.split(".")
             try:
-                return (int(bits[0]), int(bits[1]) if len(bits) > 1 else 0,
-                        int(bits[2]) if len(bits) > 2 else 0)
+                return (
+                    int(bits[0]),
+                    int(bits[1]) if len(bits) > 1 else 0,
+                    int(bits[2]) if len(bits) > 2 else 0,
+                )
             except ValueError:
                 continue
     return None
 
 
-async def merge_files(
-    base: Path, left: Path, right: Path, *, output: Path
-) -> bool:
+async def merge_files(base: Path, left: Path, right: Path, *, output: Path) -> bool:
     """Run Mergiraf on a single file.  Returns True on clean merge.
 
     Caller must ensure ``base``, ``left``, ``right`` are paths to files
@@ -94,17 +96,22 @@ async def merge_files(
     if not await is_available():
         raise RuntimeError("mergiraf not available")
     proc = await asyncio.create_subprocess_exec(
-        MERGIRAF_BINARY, "merge",
-        "--base", str(base),
-        "--left", str(left),
-        "--right", str(right),
-        "--output", str(output),
+        MERGIRAF_BINARY,
+        "merge",
+        "--base",
+        str(base),
+        "--left",
+        str(left),
+        "--right",
+        str(right),
+        "--output",
+        str(output),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
         await asyncio.wait_for(proc.communicate(), timeout=30.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return False

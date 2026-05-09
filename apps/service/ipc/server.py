@@ -78,16 +78,12 @@ class JsonRpcServer:
             )
         fn = self._methods.get(method)
         if not fn:
-            return JSONResponse(
-                {"error": f"unknown method: {method}"}, status_code=404
-            )
+            return JSONResponse({"error": f"unknown method: {method}"}, status_code=404)
         try:
             result = await fn(params)
         except Exception as exc:  # surfaced to caller
             log.exception("rpc method %s failed", method)
-            return JSONResponse(
-                {"error": str(exc), "type": type(exc).__name__}, status_code=500
-            )
+            return JSONResponse({"error": str(exc), "type": type(exc).__name__}, status_code=500)
         return JSONResponse({"result": result})
 
     async def _hook(self, request: Request) -> Response:

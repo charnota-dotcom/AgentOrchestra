@@ -75,12 +75,14 @@ class _WorkspaceLock:
 def _platform_lock(fh: int) -> None:
     try:
         import fcntl
+
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return
     except ImportError:
         pass
     try:
         import msvcrt
+
         msvcrt.locking(fh, msvcrt.LK_NBLCK, 1)
     except ImportError:
         # Last resort: no locking.  Tests still pass; production
@@ -91,12 +93,14 @@ def _platform_lock(fh: int) -> None:
 def _platform_unlock(fh: int) -> None:
     try:
         import fcntl
+
         fcntl.flock(fh, fcntl.LOCK_UN)
         return
     except ImportError:
         pass
     try:
         import msvcrt
+
         msvcrt.locking(fh, msvcrt.LK_UNLCK, 1)
     except ImportError:
         pass
@@ -127,7 +131,7 @@ class WorktreeManager:
         existing = [b for b in await g.list_branches(repo, prefix="agent/")]
         if existing:
             raise WorktreeError(
-                f"workspace already has branches under 'agent/' "
+                "workspace already has branches under 'agent/' "
                 f"namespace ({len(existing)}); please rename or remove them"
             )
 
@@ -246,8 +250,12 @@ class WorktreeManager:
         if not st.stdout.strip():
             return None
         await g.git(
-            "stash", "push", "--include-untracked", "--keep-index",
-            "-m", "agentorchestra:import-uncommitted",
+            "stash",
+            "push",
+            "--include-untracked",
+            "--keep-index",
+            "-m",
+            "agentorchestra:import-uncommitted",
             cwd=repo,
         )
         # The most-recent stash is stash@{0}; capture the SHA so we
@@ -261,8 +269,11 @@ class WorktreeManager:
         await g.git("stash", "apply", stash_ref, cwd=wt, check=False)
         await g.git("add", "-A", cwd=wt)
         await g.git(
-            "commit", "-m", "Imported uncommitted state from your workspace",
-            cwd=wt, check=False,
+            "commit",
+            "-m",
+            "Imported uncommitted state from your workspace",
+            cwd=wt,
+            check=False,
         )
         await g.git("stash", "drop", stash_ref, cwd=repo, check=False)
 
@@ -328,13 +339,9 @@ class WorktreeManager:
 
     MergeMode = Literal["clean", "assisted", "manual"]
 
-    async def approve_and_merge(
-        self, branch_id: str, mode: MergeMode = "clean"
-    ) -> dict:
+    async def approve_and_merge(self, branch_id: str, mode: MergeMode = "clean") -> dict:
         branch = await self._must_get_branch(branch_id)
-        ws_lock = self._get_workspace_lock(
-            await self._must_get_workspace(branch.workspace_id)
-        )
+        ws_lock = self._get_workspace_lock(await self._must_get_workspace(branch.workspace_id))
         await ws_lock.acquire()
         try:
             await self._transition(branch, BranchState.MERGING)
@@ -346,11 +353,10 @@ class WorktreeManager:
             try:
                 if mode == "clean":
                     sha = await g.merge_into(
-                        repo, branch.base_branch_name, branch.agent_branch_name,
-                        message=(
-                            f"Merge {branch.agent_branch_name}\n\n"
-                            f"run: {branch.run_id}"
-                        ),
+                        repo,
+                        branch.base_branch_name,
+                        branch.agent_branch_name,
+                        message=(f"Merge {branch.agent_branch_name}\n\nrun: {branch.run_id}"),
                     )
                 elif mode == "assisted":
                     # Use Mergiraf-as-merge-driver if available.  We don't
@@ -361,18 +367,20 @@ class WorktreeManager:
                     if not await _merger.is_available():
                         log.info("mergiraf not available; falling back to normal merge")
                     sha = await g.merge_into(
-                        repo, branch.base_branch_name, branch.agent_branch_name,
+                        repo,
+                        branch.base_branch_name,
+                        branch.agent_branch_name,
                         message=(
-                            f"Merge {branch.agent_branch_name} (assisted)\n\n"
-                            f"run: {branch.run_id}"
+                            f"Merge {branch.agent_branch_name} (assisted)\n\nrun: {branch.run_id}"
                         ),
                     )
                 else:  # "manual"
                     sha = await g.merge_into(
-                        repo, branch.base_branch_name, branch.agent_branch_name,
+                        repo,
+                        branch.base_branch_name,
+                        branch.agent_branch_name,
                         message=(
-                            f"Merge {branch.agent_branch_name} (manual)\n\n"
-                            f"run: {branch.run_id}"
+                            f"Merge {branch.agent_branch_name} (manual)\n\nrun: {branch.run_id}"
                         ),
                     )
             except g.GitCLIError as exc:
@@ -456,9 +464,13 @@ class WorktreeManager:
             non_terminal = await self.store.list_branches_by_state(
                 workspace_id=workspace_id,
                 states=[
-                    BranchState.CREATED, BranchState.ACTIVE, BranchState.PAUSED,
-                    BranchState.AWAITING_REVIEW, BranchState.MERGING,
-                    BranchState.CONFLICTED, BranchState.STALE,
+                    BranchState.CREATED,
+                    BranchState.ACTIVE,
+                    BranchState.PAUSED,
+                    BranchState.AWAITING_REVIEW,
+                    BranchState.MERGING,
+                    BranchState.CONFLICTED,
+                    BranchState.STALE,
                 ],
             )
             cleaned: list[str] = []

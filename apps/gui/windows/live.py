@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 class LivePage(QtWidgets.QWidget):
     review_requested = QtCore.Signal(str)
 
-    def __init__(self, client: "RpcClient") -> None:
+    def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
         self._sse = SseClient(base_url=client.base_url, token=client.token)
@@ -69,9 +69,7 @@ class LivePage(QtWidgets.QWidget):
 
         # Right: event log
         self.event_log = QtWidgets.QListWidget()
-        self.event_log.setStyleSheet(
-            "background:#fff;border:1px solid #e6e7eb;border-radius:6px;"
-        )
+        self.event_log.setStyleSheet("background:#fff;border:1px solid #e6e7eb;border-radius:6px;")
         splitter.addWidget(self._wrap("Events", self.event_log))
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
@@ -114,9 +112,7 @@ class LivePage(QtWidgets.QWidget):
             text = ev.get("text", "") or ""
             payload = ev.get("payload") or {}
 
-            self.event_log.insertItem(
-                0, f"[{kind}] {text[:120] if text else payload}"
-            )
+            self.event_log.insertItem(0, f"[{kind}] {text[:120] if text else payload}")
             if self.event_log.count() > 200:
                 self.event_log.takeItem(self.event_log.count() - 1)
 
@@ -143,9 +139,7 @@ class LivePage(QtWidgets.QWidget):
     def _cancel(self) -> None:
         if not self._run_id:
             return
-        asyncio.ensure_future(
-            self.client.call("runs.cancel", {"run_id": self._run_id})
-        )
+        asyncio.ensure_future(self.client.call("runs.cancel", {"run_id": self._run_id}))
         self.cancel_btn.setEnabled(False)
 
     def _open_review(self) -> None:

@@ -15,10 +15,12 @@ def test_anthropic_sonnet_priced() -> None:
 
 
 def test_forecast_increases_with_prompt_size() -> None:
-    f1 = forecast("anthropic", "claude-sonnet-4-5",
-                  rendered_prompt_tokens=1000, archetype="broad-research")
-    f2 = forecast("anthropic", "claude-sonnet-4-5",
-                  rendered_prompt_tokens=10_000, archetype="broad-research")
+    f1 = forecast(
+        "anthropic", "claude-sonnet-4-5", rendered_prompt_tokens=1000, archetype="broad-research"
+    )
+    f2 = forecast(
+        "anthropic", "claude-sonnet-4-5", rendered_prompt_tokens=10_000, archetype="broad-research"
+    )
     assert f2.expected_usd > f1.expected_usd
     assert f2.high_usd >= f2.expected_usd >= f2.low_usd
 

@@ -83,7 +83,7 @@ class CostPolicy(BaseModel):
 class CardMode(StrEnum):
     """How the dispatcher should run cards of this type."""
 
-    CHAT = "chat"        # text-only, no worktree (research, QA)
+    CHAT = "chat"  # text-only, no worktree (research, QA)
     AGENTIC = "agentic"  # tool-using, worktree-bound (code editing)
 
 

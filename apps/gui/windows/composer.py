@@ -27,10 +27,11 @@ if TYPE_CHECKING:
 class ComposerPage(QtWidgets.QWidget):
     dispatched = QtCore.Signal(str, str)  # (run_id, card_name)
 
-    def __init__(self, client: "RpcClient") -> None:
+    def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
         self._cards: list[dict[str, Any]] = []
+        self._workspaces: list[dict[str, Any]] = []
         self._current_card: dict[str, Any] | None = None
         self._template: dict[str, Any] | None = None
         self._last_instruction_id: str | None = None
@@ -53,6 +54,13 @@ class ComposerPage(QtWidgets.QWidget):
         self.cards_list.setMaximumHeight(140)
         self.cards_list.currentRowChanged.connect(self._on_card_selected)
         ll.addWidget(self.cards_list)
+
+        # Workspace picker (only meaningful for agentic cards).
+        ws_row = QtWidgets.QHBoxLayout()
+        ws_row.addWidget(QtWidgets.QLabel("Workspace:"))
+        self.workspace_combo = QtWidgets.QComboBox()
+        ws_row.addWidget(self.workspace_combo, stretch=1)
+        ll.addLayout(ws_row)
 
         ll.addWidget(self._h2("Tell it what to do"))
         self.form_host = QtWidgets.QFormLayout()
@@ -119,13 +127,19 @@ class ComposerPage(QtWidgets.QWidget):
     async def _reload_cards_async(self) -> None:
         try:
             self._cards = await self.client.call("cards.list", {})
-        except Exception as exc:  # noqa: BLE001
+            self._workspaces = await self.client.call("workspaces.list", {})
+        except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "RPC error", str(exc))
             return
         self.cards_list.clear()
         for c in self._cards:
-            item = QtWidgets.QListWidgetItem(f"{c['name']}  —  {c['description']}")
+            badge = " · agentic" if c.get("mode") == "agentic" else ""
+            item = QtWidgets.QListWidgetItem(f"{c['name']}{badge}  —  {c['description']}")
             self.cards_list.addItem(item)
+        self.workspace_combo.clear()
+        self.workspace_combo.addItem("(no workspace)", None)
+        for w in self._workspaces:
+            self.workspace_combo.addItem(f"{w['name']} — {w['repo_path']}", w["id"])
         if self._cards:
             self.cards_list.setCurrentRow(0)
 
@@ -176,12 +190,15 @@ class ComposerPage(QtWidgets.QWidget):
             return
         vars_ = self._collect_variables()
         try:
-            res = await self.client.call("templates.render", {
-                "template_id": self._current_card["template_id"],
-                "card_id": self._current_card["id"],
-                "variables": vars_,
-            })
-        except Exception as exc:  # noqa: BLE001
+            res = await self.client.call(
+                "templates.render",
+                {
+                    "template_id": self._current_card["template_id"],
+                    "card_id": self._current_card["id"],
+                    "variables": vars_,
+                },
+            )
+        except Exception as exc:
             self.preview.setPlainText(f"Render failed: {exc}")
             return
         self.preview.setPlainText(res["rendered_text"])
@@ -189,28 +206,34 @@ class ComposerPage(QtWidgets.QWidget):
         self._last_rendered = res["rendered_text"]
 
         try:
-            issues = await self.client.call("lint.instruction", {
-                "text": res["rendered_text"],
-                "archetype": self._current_card["archetype"],
-                "variables": vars_,
-            })
-        except Exception:  # noqa: BLE001
+            issues = await self.client.call(
+                "lint.instruction",
+                {
+                    "text": res["rendered_text"],
+                    "archetype": self._current_card["archetype"],
+                    "variables": vars_,
+                },
+            )
+        except Exception:
             issues = []
 
         self._render_lints(issues)
 
         try:
-            f = await self.client.call("cost.forecast", {
-                "provider": self._current_card["provider"],
-                "model": self._current_card["model"],
-                "rendered_prompt_tokens": max(1, len(res["rendered_text"]) // 4),
-                "archetype": self._current_card["archetype"],
-            })
+            f = await self.client.call(
+                "cost.forecast",
+                {
+                    "provider": self._current_card["provider"],
+                    "model": self._current_card["model"],
+                    "rendered_prompt_tokens": max(1, len(res["rendered_text"]) // 4),
+                    "archetype": self._current_card["archetype"],
+                },
+            )
             self.cost_box.setText(
                 f"Cost forecast: ${f['low_usd']:.2f} – ${f['high_usd']:.2f} "
                 f"(expected ${f['expected_usd']:.2f})"
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             self.cost_box.setText("Cost forecast unavailable")
 
         blocking = any(i["severity"] == "error" for i in issues)
@@ -224,14 +247,26 @@ class ComposerPage(QtWidgets.QWidget):
     async def _dispatch_async(self) -> None:
         if not self._current_card or not self._last_instruction_id or not self._last_rendered:
             return
+        ws_id = self.workspace_combo.currentData()
+        is_agentic = self._current_card.get("mode") == "agentic"
+        if is_agentic and not ws_id:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Workspace required",
+                "This agent edits files; pick a workspace before dispatching.",
+            )
+            return
         try:
-            res = await self.client.call("runs.dispatch", {
-                "card_id": self._current_card["id"],
-                "instruction_id": self._last_instruction_id,
-                "rendered_text": self._last_rendered,
-                "workspace_id": None,
-            })
-        except Exception as exc:  # noqa: BLE001
+            res = await self.client.call(
+                "runs.dispatch",
+                {
+                    "card_id": self._current_card["id"],
+                    "instruction_id": self._last_instruction_id,
+                    "rendered_text": self._last_rendered,
+                    "workspace_id": ws_id,
+                },
+            )
+        except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Dispatch failed", str(exc))
             return
         # Hand over to the Live pane.
@@ -246,7 +281,9 @@ class ComposerPage(QtWidgets.QWidget):
         parts = []
         for i in issues:
             sev = i["severity"]
-            color = {"error": "#b3261e", "warning": "#a96b00", "info": "#5b6068"}.get(sev, "#0f1115")
+            color = {"error": "#b3261e", "warning": "#a96b00", "info": "#5b6068"}.get(
+                sev, "#0f1115"
+            )
             parts.append(
                 f"<div style='color:{color}'><b>{sev.upper()}</b> "
                 f"{i['message']}{' — ' + i['suggestion'] if i.get('suggestion') else ''}</div>"

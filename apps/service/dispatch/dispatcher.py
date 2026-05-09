@@ -23,15 +23,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from apps.service.cost.meter import cost_for_call
 from apps.service.dispatch.bus import EventBus
+from apps.service.dispatch.tools import WorktreeToolset, serialize_invocations
 from apps.service.providers.registry import get_provider
 from apps.service.store.events import EventStore
 from apps.service.types import (
     Artifact,
     ArtifactKind,
+    Branch,
+    CardMode,
     Event,
     EventKind,
     EventSource,
@@ -40,11 +44,13 @@ from apps.service.types import (
     RunState,
     Step,
     StepKind,
+    Workspace,
     assert_run_transition,
     long_id,
     short_id,
     utc_now,
 )
+from apps.service.worktrees import git_cli as g
 from apps.service.worktrees.manager import WorktreeManager
 
 log = logging.getLogger(__name__)
@@ -80,12 +86,19 @@ class RunDispatcher:
         card_id: str,
         instruction_id: str,
         rendered_text: str,
+        base_branch: str | None = None,
     ) -> Run:
         """Create a Run row and start executing it in the background."""
 
         card = await self.store.get_card(card_id)
         if not card:
             raise DispatchError(f"unknown card: {card_id}")
+
+        # Agentic cards require a workspace; chat cards don't.
+        if card.mode is CardMode.AGENTIC and not workspace_id:
+            raise DispatchError(
+                "agentic cards require a workspace; pick one in Settings first",
+            )
 
         run = Run(
             workspace_id=workspace_id or "",
@@ -94,18 +107,28 @@ class RunDispatcher:
             state=RunState.QUEUED,
         )
         await self.store.insert_run(run)
-        await self.store.append_event(Event(
-            source=EventSource.DISPATCH_RUN,
-            kind=EventKind.RUN_STARTED,
-            run_id=run.id,
-            workspace_id=run.workspace_id or None,
-            payload={"card": card.name, "model": card.model},
-            text=f"Run started: {card.name}",
-        ))
-
-        task = asyncio.create_task(
-            self._execute(run, card, rendered_text), name=f"run-{run.id}",
+        await self.store.append_event(
+            Event(
+                source=EventSource.DISPATCH_RUN,
+                kind=EventKind.RUN_STARTED,
+                run_id=run.id,
+                workspace_id=run.workspace_id or None,
+                payload={"card": card.name, "model": card.model, "mode": card.mode.value},
+                text=f"Run started: {card.name}",
+            )
         )
+
+        if card.mode is CardMode.AGENTIC:
+            workspace = await self.store.get_workspace(workspace_id or "")
+            if not workspace:
+                raise DispatchError(f"unknown workspace: {workspace_id}")
+            coro = self._execute_agentic(
+                run, card, workspace, rendered_text, base_branch=base_branch
+            )
+        else:
+            coro = self._execute(run, card, rendered_text)
+
+        task = asyncio.create_task(coro, name=f"run-{run.id}")
         self._tasks[run.id] = task
 
         def _cleanup(_t: asyncio.Task) -> None:
@@ -119,16 +142,24 @@ class RunDispatcher:
         if not task:
             return False
         task.cancel()
-        await self.store.append_event(Event(
-            source=EventSource.SYSTEM,
-            kind=EventKind.RUN_COMPLETED,
-            run_id=run_id,
-            payload={"state": "aborted", "reason": reason},
-            text=f"aborted: {reason}",
-        ))
+        await self.store.append_event(
+            Event(
+                source=EventSource.SYSTEM,
+                kind=EventKind.RUN_COMPLETED,
+                run_id=run_id,
+                payload={"state": "aborted", "reason": reason},
+                text=f"aborted: {reason}",
+            )
+        )
         return True
 
-    async def approve(self, run_id: str, *, note: str | None = None) -> None:
+    async def approve(
+        self,
+        run_id: str,
+        *,
+        note: str | None = None,
+        merge_mode: str = "clean",
+    ) -> None:
         run = await self.store.get_run(run_id)
         if not run:
             raise DispatchError(f"unknown run: {run_id}")
@@ -136,14 +167,25 @@ class RunDispatcher:
             raise DispatchError(
                 f"approve requires REVIEWING; run is {run.state.value}",
             )
+        # If this run is worktree-bound, merge into the base branch first.
+        if run.branch_id:
+            try:
+                await self.manager.approve_and_merge(
+                    run.branch_id,
+                    mode=merge_mode,  # type: ignore[arg-type]
+                )
+            except Exception as exc:
+                raise DispatchError(f"merge failed: {exc}") from exc
         await self._transition_run(run, RunState.MERGED)
-        await self.store.append_event(Event(
-            source=EventSource.SYSTEM,
-            kind=EventKind.RUN_COMPLETED,
-            run_id=run.id,
-            payload={"state": "merged", "note": note},
-            text=note or "approved",
-        ))
+        await self.store.append_event(
+            Event(
+                source=EventSource.SYSTEM,
+                kind=EventKind.RUN_COMPLETED,
+                run_id=run.id,
+                payload={"state": "merged", "note": note},
+                text=note or "approved",
+            )
+        )
 
     async def reject(self, run_id: str, reason: str) -> None:
         run = await self.store.get_run(run_id)
@@ -153,22 +195,27 @@ class RunDispatcher:
             raise DispatchError(
                 f"reject requires REVIEWING; run is {run.state.value}",
             )
+        if run.branch_id:
+            try:
+                await self.manager.reject(run.branch_id, reason)
+            except Exception:
+                log.exception("worktree reject failed")
         await self._transition_run(run, RunState.REJECTED)
-        await self.store.append_event(Event(
-            source=EventSource.SYSTEM,
-            kind=EventKind.RUN_COMPLETED,
-            run_id=run.id,
-            payload={"state": "rejected", "reason": reason},
-            text=f"rejected: {reason}",
-        ))
+        await self.store.append_event(
+            Event(
+                source=EventSource.SYSTEM,
+                kind=EventKind.RUN_COMPLETED,
+                run_id=run.id,
+                payload={"state": "rejected", "reason": reason},
+                text=f"rejected: {reason}",
+            )
+        )
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
 
-    async def _execute(
-        self, run: Run, card: PersonalityCard, rendered_text: str
-    ) -> None:
+    async def _execute(self, run: Run, card: PersonalityCard, rendered_text: str) -> None:
         try:
             await self._transition_run(run, RunState.PLANNING)
             await self._transition_run(run, RunState.EXECUTING)
@@ -185,13 +232,15 @@ class RunDispatcher:
                 async for ev in session.send(rendered_text):
                     if ev.kind == "text_delta":
                         full_text_parts.append(ev.text)
-                        await self.store.append_event(Event(
-                            source=EventSource.DISPATCH_RUN,
-                            kind=EventKind.LLM_CALL_COMPLETED,
-                            run_id=run.id,
-                            payload={"delta": ev.text[:200]},
-                            text="",  # deltas don't go to FTS
-                        ))
+                        await self.store.append_event(
+                            Event(
+                                source=EventSource.DISPATCH_RUN,
+                                kind=EventKind.LLM_CALL_COMPLETED,
+                                run_id=run.id,
+                                payload={"delta": ev.text[:200]},
+                                text="",  # deltas don't go to FTS
+                            )
+                        )
                     elif ev.kind == "assistant_message":
                         # Accumulated text — record as a Step.
                         seq += 1
@@ -203,7 +252,10 @@ class RunDispatcher:
                             tokens_in=tokens_in,
                             tokens_out=tokens_out,
                             cost_usd=cost_for_call(
-                                card.provider, card.model, tokens_in, tokens_out,
+                                card.provider,
+                                card.model,
+                                tokens_in,
+                                tokens_out,
                             ),
                             payload={"finished_at": ev.payload.get("finished_at")},
                         )
@@ -239,54 +291,267 @@ class RunDispatcher:
             await self.store.insert_artifact(artifact)
 
             duration_s = int(time.monotonic() - t0)
-            await self.store.append_event(Event(
-                source=EventSource.DISPATCH_RUN,
-                kind=EventKind.RUN_STATE_CHANGED,
-                run_id=run.id,
-                payload={
-                    "state": "reviewing",
-                    "cost_usd": cost,
-                    "tokens": tokens_in + tokens_out,
-                    "duration_s": duration_s,
-                    "artifact_id": artifact.id,
-                },
-                text=f"ready for review: ${cost:.4f}, {duration_s}s",
-            ))
+            await self.store.append_event(
+                Event(
+                    source=EventSource.DISPATCH_RUN,
+                    kind=EventKind.RUN_STATE_CHANGED,
+                    run_id=run.id,
+                    payload={
+                        "state": "reviewing",
+                        "cost_usd": cost,
+                        "tokens": tokens_in + tokens_out,
+                        "duration_s": duration_s,
+                        "artifact_id": artifact.id,
+                    },
+                    text=f"ready for review: ${cost:.4f}, {duration_s}s",
+                )
+            )
             # EXECUTING -> REVIEWING is a legal transition.
             await self._transition_run(run, RunState.REVIEWING)
 
         except asyncio.CancelledError:
             await self._fail(run, "cancelled")
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.exception("run %s failed", run.id)
             await self._fail(run, str(exc))
+
+    async def _execute_agentic(
+        self,
+        run: Run,
+        card: PersonalityCard,
+        workspace: Workspace,
+        rendered_text: str,
+        *,
+        base_branch: str | None,
+    ) -> None:
+        """Worktree-bound dispatch path: create a branch, run the agent
+        loop with the file-touching tools, commit per turn, capture the
+        final diff as an artifact.
+        """
+        branch: Branch | None = None
+        try:
+            await self._transition_run(run, RunState.PLANNING)
+
+            # 1. Create the worktree.
+            branch = await self.manager.create(
+                run.id,
+                workspace,
+                card,
+                base_branch=base_branch,
+                include_uncommitted=False,
+            )
+            # Persist the branch_id back onto the Run.
+            await self.store.db.execute(
+                "UPDATE runs SET branch_id = ? WHERE id = ?",
+                (branch.id, run.id),
+            )
+            await self.store.db.commit()
+
+            await self._transition_run(run, RunState.EXECUTING)
+
+            # 2. Open the agent loop with the worktree toolset.
+            toolset = WorktreeToolset(worktree=Path(branch.worktree_path))
+            provider = get_provider(card.provider)
+
+            tokens_in = tokens_out = 0
+            seq = 0
+            t0 = time.monotonic()
+            commit_count = 0
+
+            try:
+                async for ev in provider.run_with_tools(
+                    card,
+                    system=card.description,
+                    user_message=rendered_text,
+                    executor=toolset,
+                    max_turns=card.max_turns,
+                ):
+                    if ev.kind == "usage":
+                        tokens_in = int(ev.payload.get("input_tokens") or 0)
+                        tokens_out = int(ev.payload.get("output_tokens") or 0)
+                    elif ev.kind == "tool_call":
+                        await self.store.append_event(
+                            Event(
+                                source=EventSource.DISPATCH_RUN,
+                                kind=EventKind.TOOL_CALLED,
+                                run_id=run.id,
+                                branch_id=branch.id,
+                                workspace_id=workspace.id,
+                                payload=ev.payload,
+                                text=f"tool: {ev.payload.get('name')}",
+                            )
+                        )
+                    elif ev.kind == "tool_result":
+                        seq += 1
+                        step = Step(
+                            id=short_id(10),
+                            run_id=run.id,
+                            seq=seq,
+                            kind=StepKind.TOOL_CALL,
+                            payload=ev.payload,
+                        )
+                        await self.store.insert_step(step)
+                    elif ev.kind == "assistant_message":
+                        # A textual narration block from the agent.
+                        if ev.text:
+                            await self.store.append_event(
+                                Event(
+                                    source=EventSource.DISPATCH_RUN,
+                                    kind=EventKind.LLM_CALL_COMPLETED,
+                                    run_id=run.id,
+                                    branch_id=branch.id,
+                                    workspace_id=workspace.id,
+                                    payload={},
+                                    text=ev.text[:8000],
+                                )
+                            )
+                    elif ev.kind == "turn_end":
+                        # If anything was written this turn, commit it.
+                        written = toolset.reset_written()
+                        if written and commit_count < card.max_commits_per_run:
+                            try:
+                                turn = ev.payload.get("turn", commit_count + 1)
+                                msg = (
+                                    f"[{card.archetype}] Turn {turn} "
+                                    f"({len(written)} files)\n\n"
+                                    f"run: {run.id}\n"
+                                    f"card: {card.name}@{card.version}\n"
+                                    f"model: {card.provider}/{card.model}\n"
+                                    f"prompt-hash: {long_id(8)}"
+                                )
+                                await self.manager.commit(
+                                    branch.id,
+                                    list(written),
+                                    msg,
+                                    no_verify=card.skip_pre_commit_hooks,
+                                )
+                                commit_count += 1
+                            except Exception as exc:
+                                log.warning("commit failed: %s", exc)
+                    elif ev.kind == "error":
+                        raise DispatchError(ev.text or "agent error")
+                    elif ev.kind == "finish":
+                        break
+            finally:
+                pass
+
+            # 3. Cost accounting.
+            cost = cost_for_call(card.provider, card.model, tokens_in, tokens_out)
+            run.cost_usd = cost
+            run.cost_tokens = tokens_in + tokens_out
+            await self.store.db.execute(
+                "UPDATE runs SET cost_usd = ?, cost_tokens = ? WHERE id = ?",
+                (cost, run.cost_tokens, run.id),
+            )
+            await self.store.db.commit()
+
+            # 4. Capture the final diff as a DIFF artifact.
+            diff_text = ""
+            try:
+                diff_text = await g.diff(
+                    Path(workspace.repo_path),
+                    branch.base_ref,
+                    branch.agent_branch_name,
+                )
+            except Exception as exc:
+                log.warning("diff capture failed: %s", exc)
+
+            await self.store.insert_artifact(
+                Artifact(
+                    id=long_id(),
+                    run_id=run.id,
+                    kind=ArtifactKind.DIFF,
+                    title=f"{card.name} — diff vs {branch.base_branch_name}",
+                    body=diff_text or "(no changes)",
+                )
+            )
+
+            # Tool-call audit artifact.
+            await self.store.insert_artifact(
+                Artifact(
+                    id=long_id(),
+                    run_id=run.id,
+                    kind=ArtifactKind.TRANSCRIPT,
+                    title=f"{card.name} — tool timeline",
+                    body=serialize_invocations(toolset.invocations) or "(no tool calls)",
+                )
+            )
+
+            duration_s = int(time.monotonic() - t0)
+            await self.store.append_event(
+                Event(
+                    source=EventSource.DISPATCH_RUN,
+                    kind=EventKind.RUN_STATE_CHANGED,
+                    run_id=run.id,
+                    branch_id=branch.id,
+                    workspace_id=workspace.id,
+                    payload={
+                        "state": "reviewing",
+                        "cost_usd": cost,
+                        "tokens": tokens_in + tokens_out,
+                        "duration_s": duration_s,
+                        "commits": commit_count,
+                        "files_changed": len(toolset.invocations),
+                    },
+                    text=(
+                        f"ready for review · ${cost:.4f} · {duration_s}s · "
+                        f"{commit_count} save points"
+                    ),
+                )
+            )
+
+            # 5. Hand off to the WorktreeManager review state and the Run
+            #    REVIEWING state.  Approval/rejection is the user's call.
+            await self.manager.request_review(branch.id)
+            await self._transition_run(run, RunState.REVIEWING)
+
+        except asyncio.CancelledError:
+            await self._fail(run, "cancelled")
+            if branch is not None:
+                try:
+                    await self.manager.abandon(branch.id, "cancelled")
+                except Exception:
+                    pass
+            raise
+        except Exception as exc:
+            log.exception("agentic run %s failed", run.id)
+            await self._fail(run, str(exc))
+            if branch is not None:
+                try:
+                    await self.manager.abandon(branch.id, f"failed: {exc}")
+                except Exception:
+                    pass
 
     async def _fail(self, run: Run, error: str) -> None:
         try:
             await self._transition_run(run, RunState.ABORTED)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
-        await self.store.append_event(Event(
-            source=EventSource.DISPATCH_RUN,
-            kind=EventKind.RUN_COMPLETED,
-            run_id=run.id,
-            payload={"state": "aborted", "error": error},
-            text=f"aborted: {error}",
-        ))
+        await self.store.append_event(
+            Event(
+                source=EventSource.DISPATCH_RUN,
+                kind=EventKind.RUN_COMPLETED,
+                run_id=run.id,
+                payload={"state": "aborted", "error": error},
+                text=f"aborted: {error}",
+            )
+        )
 
     async def _transition_run(self, run: Run, to: RunState) -> None:
         assert_run_transition(run.state, to)
         run.state = to
         run.state_changed_at = utc_now()
         await self.store.update_run_state(run.id, to)
-        await self.store.append_event(Event(
-            source=EventSource.SYSTEM,
-            kind=EventKind.RUN_STATE_CHANGED,
-            run_id=run.id,
-            payload={"to": to.value},
-            text=to.value,
-        ))
+        await self.store.append_event(
+            Event(
+                source=EventSource.SYSTEM,
+                kind=EventKind.RUN_STATE_CHANGED,
+                run_id=run.id,
+                payload={"to": to.value},
+                text=to.value,
+            )
+        )
 
 
 def _serialize_event_for_payload(ev: Event) -> dict[str, Any]:

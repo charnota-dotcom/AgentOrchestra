@@ -16,13 +16,10 @@ def test_short_text_is_blocked() -> None:
 
 
 def test_vague_terms_warn() -> None:
-    issues = lint(
-        "Please clean up the code and make it better.  We want various improvements."
-    )
+    issues = lint("Please clean up the code and make it better.  We want various improvements.")
     rules = {i.rule for i in issues}
     assert "vague-language" in rules
-    assert all(i.severity is not Severity.ERROR for i in issues
-               if i.rule == "vague-language")
+    assert all(i.severity is not Severity.ERROR for i in issues if i.rule == "vague-language")
 
 
 def test_secret_pattern_blocks() -> None:

@@ -55,11 +55,11 @@ class EventBus:
                         except asyncio.QueueEmpty:
                             pass
                     sub.queue.put_nowait(event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("subscriber filter raised")
 
     @asynccontextmanager
-    async def subscribe(self, filter_fn: EventFilter):  # noqa: ANN201
+    async def subscribe(self, filter_fn: EventFilter):
         sub = _Subscriber(filter=filter_fn)
         async with self._lock:
             self._subs.append(sub)
@@ -71,7 +71,7 @@ class EventBus:
                 if sub in self._subs:
                     self._subs.remove(sub)
 
-    async def stream(self, filter_fn: EventFilter, *, timeout: float | None = None):  # noqa: ANN201
+    async def stream(self, filter_fn: EventFilter, *, timeout: float | None = None):
         """Yield events forever (or until cancelled).
 
         Use as: ``async for event in bus.stream(...)``.
@@ -84,7 +84,7 @@ class EventBus:
                     else:
                         ev = await asyncio.wait_for(sub.queue.get(), timeout=timeout)
                     yield ev
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
                 except asyncio.CancelledError:
                     break

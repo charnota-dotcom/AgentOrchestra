@@ -59,6 +59,7 @@ def test_render_uses_default() -> None:
 
 def test_load_seed_templates(tmp_path) -> None:
     from pathlib import Path
+
     pack = Path("packs/archetypes")
     if not pack.exists():
         pytest.skip("packs not present in this checkout")

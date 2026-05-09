@@ -39,10 +39,13 @@ async def test_event_seq_assigns_monotonically(store) -> None:
 
 @pytest.mark.asyncio
 async def test_fts_search(store) -> None:
-    ws = await store.insert_workspace(Workspace(name="w", repo_path="/tmp/never-used"))
+    await store.insert_workspace(Workspace(name="w", repo_path="/tmp/never-used"))
     art = Artifact(
-        id=long_id(), run_id="r1", kind=ArtifactKind.SUMMARY,
-        title="Anthropic SDK overview", body="Python client for Claude.",
+        id=long_id(),
+        run_id="r1",
+        kind=ArtifactKind.SUMMARY,
+        title="Anthropic SDK overview",
+        body="Python client for Claude.",
     )
     await store.insert_artifact(art)
     hits = await store.search("anthropic")
@@ -51,23 +54,48 @@ async def test_fts_search(store) -> None:
 
 @pytest.mark.asyncio
 async def test_run_round_trip(store) -> None:
+    from apps.service.types import (
+        BlastRadiusPolicy,
+        CostPolicy,
+        Instruction,
+        InstructionTemplate,
+        PersonalityCard,
+        SandboxTier,
+    )
+
     ws = await store.insert_workspace(Workspace(name="w", repo_path="/tmp/never-used"))
-    # We need a card and instruction — use minimal stubs by inserting raw rows.
-    await store.db.execute(
-        "INSERT INTO templates VALUES (?,?,?,?,?,?,?,?)",
-        ("t", "T", "demo", "body", "[]", 1, "h", "2026-01-01T00:00:00+00:00"),
+    template = InstructionTemplate(
+        id="t",
+        name="T",
+        archetype="demo",
+        body="body",
+        variables=[],
+        version=1,
+        content_hash="h",
     )
-    await store.db.execute(
-        """INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        ("c", "C", "demo", "d", "t", "anthropic", "claude-sonnet-4-5",
-         "{}", "{}", "devcontainer", "[]", 60, 50, 0, 1,
-         "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+    await store.insert_template(template)
+    card = PersonalityCard(
+        id="c",
+        name="C",
+        archetype="demo",
+        description="d",
+        template_id="t",
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        cost=CostPolicy(),
+        blast_radius=BlastRadiusPolicy(),
+        sandbox_tier=SandboxTier.DEVCONTAINER,
     )
-    await store.db.execute(
-        "INSERT INTO instructions VALUES (?,?,?,?,?,?,?)",
-        ("i", "t", 1, "c", "rendered", "{}", "2026-01-01T00:00:00+00:00"),
+    await store.insert_card(card)
+    instruction = Instruction(
+        id="i",
+        template_id="t",
+        template_version=1,
+        card_id="c",
+        rendered_text="rendered",
+        variables={},
     )
-    await store.db.commit()
+    await store.insert_instruction(instruction)
 
     run = Run(workspace_id=ws.id, card_id="c", instruction_id="i")
     await store.insert_run(run)

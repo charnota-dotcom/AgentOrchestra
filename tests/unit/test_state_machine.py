@@ -6,9 +6,9 @@ import pytest
 
 from apps.service.types import (
     BRANCH_TRANSITIONS,
+    RUN_TRANSITIONS,
     BranchState,
     IllegalTransitionError,
-    RUN_TRANSITIONS,
     RunState,
     assert_branch_transition,
     assert_run_transition,

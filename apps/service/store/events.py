@@ -23,15 +23,12 @@ from typing import Any
 
 import aiosqlite
 
-from apps.service.types import (  # noqa: I001
-
+from apps.service.types import (
     Approval,
     Artifact,
     Branch,
     BranchState,
     Event,
-    EventKind,
-    EventSource,
     Instruction,
     InstructionTemplate,
     Outcome,
@@ -133,7 +130,7 @@ class EventStore:
         if self.on_append is not None:
             try:
                 self.on_append(event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("on_append callback failed")
         return event
 
@@ -233,8 +230,14 @@ class EventStore:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                c.id, c.name, c.archetype, c.description, c.template_id,
-                c.provider, c.model, c.mode.value,
+                c.id,
+                c.name,
+                c.archetype,
+                c.description,
+                c.template_id,
+                c.provider,
+                c.model,
+                c.mode.value,
                 c.cost.model_dump_json(),
                 c.blast_radius.model_dump_json(),
                 c.sandbox_tier.value,
@@ -282,8 +285,12 @@ class EventStore:
         await self.db.execute(
             "INSERT INTO instructions VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
-                ins.id, ins.template_id, ins.template_version, ins.card_id,
-                ins.rendered_text, json.dumps(ins.variables),
+                ins.id,
+                ins.template_id,
+                ins.template_version,
+                ins.card_id,
+                ins.rendered_text,
+                json.dumps(ins.variables),
                 ins.created_at.isoformat(),
             ),
         )
@@ -304,11 +311,18 @@ class EventStore:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                run.id, run.workspace_id, run.card_id, run.instruction_id,
-                run.branch_id, run.state.value, run.state_changed_at.isoformat(),
+                run.id,
+                run.workspace_id,
+                run.card_id,
+                run.instruction_id,
+                run.branch_id,
+                run.state.value,
+                run.state_changed_at.isoformat(),
                 run.created_at.isoformat(),
                 run.completed_at.isoformat() if run.completed_at else None,
-                run.cost_usd, run.cost_tokens, run.error,
+                run.cost_usd,
+                run.cost_tokens,
+                run.error,
             ),
         )
         await self.db.commit()
@@ -326,9 +340,7 @@ class EventStore:
         row = await cur.fetchone()
         return Run.model_validate(_row_to_dict(row)) if row else None
 
-    async def list_runs(
-        self, *, workspace_id: str | None = None, limit: int = 100
-    ) -> list[Run]:
+    async def list_runs(self, *, workspace_id: str | None = None, limit: int = 100) -> list[Run]:
         if workspace_id:
             cur = await self.db.execute(
                 "SELECT * FROM runs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
@@ -336,7 +348,8 @@ class EventStore:
             )
         else:
             cur = await self.db.execute(
-                "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,),
+                "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?",
+                (limit,),
             )
         rows = await cur.fetchall()
         return [Run.model_validate(dict(r)) for r in rows]
@@ -356,9 +369,15 @@ class EventStore:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                b.id, b.run_id, b.workspace_id, b.base_ref,
-                b.base_branch_name, b.agent_branch_name, b.worktree_path,
-                b.state.value, b.state_changed_at.isoformat(),
+                b.id,
+                b.run_id,
+                b.workspace_id,
+                b.base_ref,
+                b.base_branch_name,
+                b.agent_branch_name,
+                b.worktree_path,
+                b.state.value,
+                b.state_changed_at.isoformat(),
                 b.created_at.isoformat(),
                 b.last_commit_sha,
                 b.last_commit_at.isoformat() if b.last_commit_at else None,
@@ -377,8 +396,13 @@ class EventStore:
             await self.db.execute(
                 """UPDATE branches SET state = ?, state_changed_at = ?,
                    last_commit_sha = ?, last_commit_at = ? WHERE id = ?""",
-                (state.value, utc_now().isoformat(), last_commit_sha,
-                 utc_now().isoformat(), branch_id),
+                (
+                    state.value,
+                    utc_now().isoformat(),
+                    last_commit_sha,
+                    utc_now().isoformat(),
+                    branch_id,
+                ),
             )
         else:
             await self.db.execute(
@@ -410,7 +434,7 @@ class EventStore:
             params.extend(s.value for s in states)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         cur = await self.db.execute(
-            f"SELECT * FROM branches {where} ORDER BY created_at",  # noqa: S608
+            f"SELECT * FROM branches {where} ORDER BY created_at",
             params,
         )
         rows = await cur.fetchall()
@@ -433,9 +457,16 @@ class EventStore:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                s.id, s.run_id, s.seq, s.kind.value, s.started_at.isoformat(),
+                s.id,
+                s.run_id,
+                s.seq,
+                s.kind.value,
+                s.started_at.isoformat(),
                 s.completed_at.isoformat() if s.completed_at else None,
-                s.tokens_in, s.tokens_out, s.cost_usd, s.latency_ms,
+                s.tokens_in,
+                s.tokens_out,
+                s.cost_usd,
+                s.latency_ms,
                 json.dumps(s.payload),
             ),
         )
@@ -446,7 +477,12 @@ class EventStore:
         await self.db.execute(
             "INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
-                a.id, a.run_id, a.step_id, a.kind.value, a.title, a.body,
+                a.id,
+                a.run_id,
+                a.step_id,
+                a.kind.value,
+                a.title,
+                a.body,
                 a.created_at.isoformat(),
             ),
         )
@@ -462,12 +498,15 @@ class EventStore:
         await self.db.execute(
             "INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                ap.id, ap.run_id, ap.reason,
+                ap.id,
+                ap.run_id,
+                ap.reason,
                 json.dumps(ap.risk_signals),
                 ap.decision.value,
                 ap.requested_at.isoformat(),
                 ap.decided_at.isoformat() if ap.decided_at else None,
-                ap.decided_by, ap.note,
+                ap.decided_by,
+                ap.note,
             ),
         )
         await self.db.commit()
@@ -477,8 +516,13 @@ class EventStore:
         await self.db.execute(
             "INSERT INTO outcomes VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                o.id, o.run_id, o.kind.value, o.rationale,
-                o.final_cost_usd, o.final_cost_tokens, o.duration_seconds,
+                o.id,
+                o.run_id,
+                o.kind.value,
+                o.rationale,
+                o.final_cost_usd,
+                o.final_cost_tokens,
+                o.duration_seconds,
                 o.created_at.isoformat(),
             ),
         )

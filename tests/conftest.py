@@ -36,12 +36,15 @@ def isolated_repo(tmp_path: Path) -> Iterator[Path]:
 
     repo = tmp_path / "repo"
     repo.mkdir()
-    env = {**os.environ,
-           "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "t@e.com",
-           "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "t@e.com"}
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "test",
+        "GIT_AUTHOR_EMAIL": "t@e.com",
+        "GIT_COMMITTER_NAME": "test",
+        "GIT_COMMITTER_EMAIL": "t@e.com",
+    }
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
     (repo / "README.md").write_text("# test repo\n")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"],
-                   check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True, env=env)
     yield repo

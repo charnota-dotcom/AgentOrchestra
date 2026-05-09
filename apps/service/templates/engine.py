@@ -47,7 +47,7 @@ def _parse_frontmatter(text: str) -> _ParsedTemplate:
     if not m:
         return _ParsedTemplate(metadata={}, body=text)
     raw = m.group(1)
-    body = text[m.end():]
+    body = text[m.end() :]
     return _ParsedTemplate(metadata=_parse_yaml_subset(raw), body=body)
 
 
@@ -117,7 +117,7 @@ def _scalar(s: str) -> Any:
         return float(s)
     except ValueError:
         pass
-    if (s.startswith("\"") and s.endswith("\"")) or (s.startswith("'") and s.endswith("'")):
+    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
         return s[1:-1]
     return s
 

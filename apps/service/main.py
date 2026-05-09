@@ -96,8 +96,13 @@ class Handlers:
             variables=params.get("variables"),
         )
         return [
-            {"rule": i.rule, "severity": i.severity.value, "message": i.message,
-             "field": i.field, "suggestion": i.suggestion}
+            {
+                "rule": i.rule,
+                "severity": i.severity.value,
+                "message": i.message,
+                "field": i.field,
+                "suggestion": i.suggestion,
+            }
             for i in issues
         ]
 
@@ -108,8 +113,12 @@ class Handlers:
             rendered_prompt_tokens=params["rendered_prompt_tokens"],
             archetype=params.get("archetype"),
         )
-        return {"low_usd": f.low_usd, "high_usd": f.high_usd,
-                "expected_usd": f.expected_usd, "rationale": f.rationale}
+        return {
+            "low_usd": f.low_usd,
+            "high_usd": f.high_usd,
+            "expected_usd": f.expected_usd,
+            "rationale": f.rationale,
+        }
 
     async def render_template(self, params: dict[str, Any]) -> dict[str, Any]:
         template = await self.store.get_template(params["template_id"])
@@ -146,7 +155,8 @@ class Handlers:
 
     async def runs_cancel(self, params: dict[str, Any]) -> dict[str, Any]:
         ok = await self.dispatcher.cancel(
-            params["run_id"], params.get("reason", "user requested"),
+            params["run_id"],
+            params.get("reason", "user requested"),
         )
         return {"ok": ok}
 
@@ -239,8 +249,11 @@ async def serve(args: argparse.Namespace) -> int:
     server = uvicorn.Server(config)
 
     await store.append_event(
-        Event(source=EventSource.SYSTEM, kind=EventKind.SERVICE_STARTED,
-              text=f"service started on 127.0.0.1:{args.port}")
+        Event(
+            source=EventSource.SYSTEM,
+            kind=EventKind.SERVICE_STARTED,
+            text=f"service started on 127.0.0.1:{args.port}",
+        )
     )
 
     stop = asyncio.Event()
@@ -254,16 +267,13 @@ async def serve(args: argparse.Namespace) -> int:
     server_task = asyncio.create_task(server.serve(), name="uvicorn")
     stop_task = asyncio.create_task(stop.wait(), name="stop-signal")
 
-    done, _ = await asyncio.wait(
-        {server_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
-    )
+    await asyncio.wait({server_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
     server.should_exit = True
     with contextlib.suppress(asyncio.CancelledError):
         await server_task
     await watcher.stop()
     await store.append_event(
-        Event(source=EventSource.SYSTEM, kind=EventKind.SERVICE_STOPPED,
-              text="service stopped")
+        Event(source=EventSource.SYSTEM, kind=EventKind.SERVICE_STOPPED, text="service stopped")
     )
     await store.close()
     return 0

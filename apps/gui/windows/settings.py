@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 class SettingsPage(QtWidgets.QWidget):
-    def __init__(self, client: "RpcClient") -> None:
+    def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
         self.setStyleSheet("background:#fafbfc;")
@@ -37,9 +37,7 @@ class SettingsPage(QtWidgets.QWidget):
 
     def _provider_keys(self) -> QtWidgets.QWidget:
         wrap = QtWidgets.QFrame()
-        wrap.setStyleSheet(
-            "QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;}"
-        )
+        wrap.setStyleSheet("QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;}")
         v = QtWidgets.QVBoxLayout(wrap)
         v.setContentsMargins(16, 12, 16, 16)
         v.setSpacing(10)
@@ -88,9 +86,7 @@ class SettingsPage(QtWidgets.QWidget):
 
     def _workspaces_box(self) -> QtWidgets.QWidget:
         wrap = QtWidgets.QFrame()
-        wrap.setStyleSheet(
-            "QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;}"
-        )
+        wrap.setStyleSheet("QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;}")
         v = QtWidgets.QVBoxLayout(wrap)
         v.setContentsMargins(16, 12, 16, 16)
         v.setSpacing(10)
@@ -121,7 +117,7 @@ class SettingsPage(QtWidgets.QWidget):
     async def _register(self, path: str) -> None:
         try:
             await self.client.call("workspaces.register", {"path": path})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Couldn't add workspace", str(exc))
             return
         await self._reload()
@@ -129,7 +125,7 @@ class SettingsPage(QtWidgets.QWidget):
     async def _reload(self) -> None:
         try:
             ws = await self.client.call("workspaces.list", {})
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         self.workspaces.clear()
         for w in ws:

@@ -14,6 +14,7 @@ from apps.service.store.events import EventStore
 from apps.service.templates.engine import load_template
 from apps.service.types import (
     BlastRadiusPolicy,
+    CardMode,
     CostPolicy,
     PersonalityCard,
     SandboxTier,
@@ -33,11 +34,12 @@ _CARD_DEFAULTS: dict[str, dict] = {
         description="Wide-net research with indexed findings.",
         provider="anthropic",
         model="claude-sonnet-4-5",
-        cost=CostPolicy(soft_cap_usd=0.50, hard_cap_usd=2.00,
-                        soft_cap_tokens=200_000, hard_cap_tokens=600_000),
+        cost=CostPolicy(
+            soft_cap_usd=0.50, hard_cap_usd=2.00, soft_cap_tokens=200_000, hard_cap_tokens=600_000
+        ),
         sandbox_tier=SandboxTier.DEVCONTAINER,
         blast_radius=BlastRadiusPolicy(
-            file_count_threshold=999,            # research can read freely
+            file_count_threshold=999,  # research can read freely
             network_egress_requires_approval=False,
             deletion_requires_approval=True,
             push_requires_approval=True,
@@ -49,8 +51,9 @@ _CARD_DEFAULTS: dict[str, dict] = {
         description="Deep dive on one topic with citations.",
         provider="anthropic",
         model="claude-sonnet-4-5",
-        cost=CostPolicy(soft_cap_usd=0.40, hard_cap_usd=1.50,
-                        soft_cap_tokens=150_000, hard_cap_tokens=500_000),
+        cost=CostPolicy(
+            soft_cap_usd=0.40, hard_cap_usd=1.50, soft_cap_tokens=150_000, hard_cap_tokens=500_000
+        ),
         sandbox_tier=SandboxTier.DEVCONTAINER,
         blast_radius=BlastRadiusPolicy(
             file_count_threshold=999,
@@ -65,8 +68,9 @@ _CARD_DEFAULTS: dict[str, dict] = {
         description="Adversarial review of another agent's diff.",
         provider="anthropic",
         model="claude-sonnet-4-5",
-        cost=CostPolicy(soft_cap_usd=0.30, hard_cap_usd=1.00,
-                        soft_cap_tokens=100_000, hard_cap_tokens=300_000),
+        cost=CostPolicy(
+            soft_cap_usd=0.30, hard_cap_usd=1.00, soft_cap_tokens=100_000, hard_cap_tokens=300_000
+        ),
         sandbox_tier=SandboxTier.DEVCONTAINER,
         blast_radius=BlastRadiusPolicy(
             file_count_threshold=10,
@@ -75,6 +79,29 @@ _CARD_DEFAULTS: dict[str, dict] = {
             push_requires_approval=True,
         ),
         stale_minutes=60,
+    ),
+    "code-edit": dict(
+        name="Code Edit",
+        description=(
+            "Tool-using agent that edits files in an isolated worktree "
+            "branch.  Changes are committed per turn and merged into "
+            "the base branch only when you approve."
+        ),
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        mode=CardMode.AGENTIC,
+        cost=CostPolicy(
+            soft_cap_usd=0.75, hard_cap_usd=3.00, soft_cap_tokens=300_000, hard_cap_tokens=900_000
+        ),
+        sandbox_tier=SandboxTier.DEVCONTAINER,
+        blast_radius=BlastRadiusPolicy(
+            file_count_threshold=15,
+            network_egress_requires_approval=True,
+            deletion_requires_approval=True,
+            push_requires_approval=True,
+        ),
+        stale_minutes=90,
+        max_turns=12,
     ),
 }
 

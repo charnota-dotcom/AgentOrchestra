@@ -70,7 +70,17 @@ select = [
     "SIM",           # simplify
     "RUF",           # ruff-specific
 ]
-ignore = ["E501"]  # line length is enforced by formatter
+ignore = [
+    "E501",   # line length enforced by formatter
+    "RUF006", # asyncio.ensure_future fire-and-forget is intentional in GUI signal handlers
+    "RUF012", # mutable default in BaseModel/dataclass — pydantic + dataclasses handle this
+    "RUF001", # ambiguous unicode (em/en dashes) — used in user-facing copy intentionally
+    "SIM105", # contextlib.suppress is verbose for one-line try/except in hot paths
+    "SIM117", # nested with statements — readability is fine
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B017"]  # blind pytest.raises(Exception) is fine in tests
 
 [tool.ruff.format]
 quote-style = "double"

@@ -17,29 +17,35 @@ from apps.service.types import (
 )
 from apps.service.worktrees.manager import WorktreeManager
 
-
 pytestmark = pytest.mark.integration
 
 
 def _commit(repo: Path, files: dict[str, str], msg: str) -> None:
     import subprocess
-    env = {**os.environ,
-           "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "t@e.com",
-           "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "t@e.com"}
+
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "test",
+        "GIT_AUTHOR_EMAIL": "t@e.com",
+        "GIT_COMMITTER_NAME": "test",
+        "GIT_COMMITTER_EMAIL": "t@e.com",
+    }
     for path, body in files.items():
         full = repo / path
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(body)
         subprocess.run(["git", "-C", str(repo), "add", path], check=True, env=env)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", msg],
-                   check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", msg], check=True, env=env)
 
 
 def _make_card() -> PersonalityCard:
     return PersonalityCard(
-        name="Demo", archetype="demo", description="d",
+        name="Demo",
+        archetype="demo",
+        description="d",
         template_id="t-demo",
-        provider="anthropic", model="claude-sonnet-4-5",
+        provider="anthropic",
+        model="claude-sonnet-4-5",
         cost=CostPolicy(),
         blast_radius=BlastRadiusPolicy(),
         sandbox_tier=SandboxTier.DEVCONTAINER,
@@ -62,8 +68,7 @@ async def test_create_and_commit_and_cleanup(store, isolated_repo) -> None:
     # the schema are happy.
     await store.db.execute(
         "INSERT INTO templates VALUES (?,?,?,?,?,?,?,?)",
-        ("t-demo", "Demo", "demo", "body", "[]", 1, "h",
-         "2026-01-01T00:00:00+00:00"),
+        ("t-demo", "Demo", "demo", "body", "[]", 1, "h", "2026-01-01T00:00:00+00:00"),
     )
     await store.db.commit()
 
@@ -74,18 +79,27 @@ async def test_create_and_commit_and_cleanup(store, isolated_repo) -> None:
     # Insert a stub instruction + run for FK.
     await store.db.execute(
         "INSERT INTO instructions VALUES (?,?,?,?,?,?,?)",
-        ("i", "t-demo", 1, card.id, "rendered", "{}",
-         "2026-01-01T00:00:00+00:00"),
+        ("i", "t-demo", 1, card.id, "rendered", "{}", "2026-01-01T00:00:00+00:00"),
     )
     await store.db.execute(
         """INSERT INTO runs (id, workspace_id, card_id, instruction_id,
             branch_id, state, state_changed_at, created_at,
             completed_at, cost_usd, cost_tokens, error)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-        ("r1", ws.id, card.id, "i", None, "queued",
-         "2026-01-01T00:00:00+00:00",
-         "2026-01-01T00:00:00+00:00",
-         None, 0.0, 0, None),
+        (
+            "r1",
+            ws.id,
+            card.id,
+            "i",
+            None,
+            "queued",
+            "2026-01-01T00:00:00+00:00",
+            "2026-01-01T00:00:00+00:00",
+            None,
+            0.0,
+            0,
+            None,
+        ),
     )
     await store.db.commit()
 
@@ -117,8 +131,7 @@ async def test_panic_reset_clears_worktrees(store, isolated_repo) -> None:
     mgr = WorktreeManager(store)
     await store.db.execute(
         "INSERT INTO templates VALUES (?,?,?,?,?,?,?,?)",
-        ("t-demo", "Demo", "demo", "body", "[]", 1, "h",
-         "2026-01-01T00:00:00+00:00"),
+        ("t-demo", "Demo", "demo", "body", "[]", 1, "h", "2026-01-01T00:00:00+00:00"),
     )
     await store.db.commit()
     ws = await mgr.register_workspace(isolated_repo)
@@ -129,18 +142,27 @@ async def test_panic_reset_clears_worktrees(store, isolated_repo) -> None:
         run_id = short_id(8)
         await store.db.execute(
             "INSERT INTO instructions VALUES (?,?,?,?,?,?,?)",
-            (f"i{n}", "t-demo", 1, card.id, "r", "{}",
-             "2026-01-01T00:00:00+00:00"),
+            (f"i{n}", "t-demo", 1, card.id, "r", "{}", "2026-01-01T00:00:00+00:00"),
         )
         await store.db.execute(
             """INSERT INTO runs (id, workspace_id, card_id, instruction_id,
                 branch_id, state, state_changed_at, created_at,
                 completed_at, cost_usd, cost_tokens, error)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (run_id, ws.id, card.id, f"i{n}", None, "queued",
-             "2026-01-01T00:00:00+00:00",
-             "2026-01-01T00:00:00+00:00",
-             None, 0.0, 0, None),
+            (
+                run_id,
+                ws.id,
+                card.id,
+                f"i{n}",
+                None,
+                "queued",
+                "2026-01-01T00:00:00+00:00",
+                "2026-01-01T00:00:00+00:00",
+                None,
+                0.0,
+                0,
+                None,
+            ),
         )
         await store.db.commit()
         await mgr.create(run_id, ws, card)

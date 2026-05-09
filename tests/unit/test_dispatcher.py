@@ -29,7 +29,8 @@ class _FakeChat:
         yield StreamEvent(kind="text_delta", text="Hello, ")
         yield StreamEvent(kind="text_delta", text="world.")
         yield StreamEvent(
-            kind="assistant_message", text="Hello, world.",
+            kind="assistant_message",
+            text="Hello, world.",
             payload={"finished_at": "2026-01-01T00:00:00+00:00"},
         )
         yield StreamEvent(
@@ -56,14 +57,22 @@ def _register_fake_provider() -> None:
 
 async def _seed_card(store) -> PersonalityCard:  # type: ignore[no-untyped-def]
     template = InstructionTemplate(
-        id=long_id(), name="t", archetype="demo",
-        body="hi", variables=[], version=1, content_hash="h",
+        id=long_id(),
+        name="t",
+        archetype="demo",
+        body="hi",
+        variables=[],
+        version=1,
+        content_hash="h",
     )
     await store.insert_template(template)
     card = PersonalityCard(
-        name="Demo", archetype="demo", description="d",
+        name="Demo",
+        archetype="demo",
+        description="d",
         template_id=template.id,
-        provider="fake", model="claude-sonnet-4-5",
+        provider="fake",
+        model="claude-sonnet-4-5",
         cost=CostPolicy(),
         blast_radius=BlastRadiusPolicy(),
         sandbox_tier=SandboxTier.DEVCONTAINER,
@@ -75,13 +84,17 @@ async def _seed_card(store) -> PersonalityCard:  # type: ignore[no-untyped-def]
 @pytest.mark.asyncio
 async def test_dispatch_completes_into_reviewing_state(store, tmp_path) -> None:
     from apps.service.worktrees.manager import WorktreeManager
+
     bus = EventBus()
     store.on_append = bus.publish
 
     card = await _seed_card(store)
     ins = Instruction(
-        id=long_id(), template_id=card.template_id, template_version=1,
-        card_id=card.id, rendered_text="please respond",
+        id=long_id(),
+        template_id=card.template_id,
+        template_version=1,
+        card_id=card.id,
+        rendered_text="please respond",
         variables={},
     )
     await store.insert_instruction(ins)
@@ -103,9 +116,7 @@ async def test_dispatch_completes_into_reviewing_state(store, tmp_path) -> None:
     assert fetched.state is RunState.REVIEWING
 
     # An artifact should exist with the assistant text.
-    cur = await store.db.execute(
-        "SELECT title, body FROM artifacts WHERE run_id = ?", (run.id,)
-    )
+    cur = await store.db.execute("SELECT title, body FROM artifacts WHERE run_id = ?", (run.id,))
     rows = await cur.fetchall()
     assert len(rows) == 1
     assert "Hello, world." in rows[0]["body"]
@@ -114,11 +125,16 @@ async def test_dispatch_completes_into_reviewing_state(store, tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_approve_only_from_reviewing(store) -> None:
     from apps.service.worktrees.manager import WorktreeManager
+
     bus = EventBus()
     card = await _seed_card(store)
     ins = Instruction(
-        id=long_id(), template_id=card.template_id, template_version=1,
-        card_id=card.id, rendered_text="x", variables={},
+        id=long_id(),
+        template_id=card.template_id,
+        template_version=1,
+        card_id=card.id,
+        rendered_text="x",
+        variables={},
     )
     await store.insert_instruction(ins)
     dispatcher = RunDispatcher(store, WorktreeManager(store), bus)

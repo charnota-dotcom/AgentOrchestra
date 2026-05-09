@@ -59,15 +59,15 @@ class ChatSession(Protocol):
         """Send a user message and stream back events."""
         ...
 
-    async def close(self) -> None:
-        ...
+    async def close(self) -> None: ...
 
 
 class LLMProvider(Protocol):
     name: Literal["anthropic", "google", "openai", "ollama"]
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
-        ...
+    async def open_chat(
+        self, card: PersonalityCard, *, system: str | None = None
+    ) -> ChatSession: ...
 
     async def run_with_tools(
         self,
@@ -75,7 +75,7 @@ class LLMProvider(Protocol):
         *,
         system: str | None,
         user_message: str,
-        executor: "ToolExecutor",
+        executor: ToolExecutor,
         max_turns: int = 16,
     ) -> AsyncIterator[StreamEvent]:
         """Run an agent loop that may call tools.
@@ -91,5 +91,4 @@ class LLMProvider(Protocol):
         """
         ...
 
-    async def healthcheck(self) -> bool:
-        ...
+    async def healthcheck(self) -> bool: ...

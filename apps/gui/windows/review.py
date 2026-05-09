@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 class ReviewPage(QtWidgets.QWidget):
     closed = QtCore.Signal()
 
-    def __init__(self, client: "RpcClient") -> None:
+    def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
         self._run_id: str | None = None
@@ -77,16 +77,34 @@ class ReviewPage(QtWidgets.QWidget):
         if not self._run_id:
             return
         try:
-            artifacts = await self.client.call(
-                "runs.artifacts", {"run_id": self._run_id}
-            )
-        except Exception as exc:  # noqa: BLE001
+            artifacts = await self.client.call("runs.artifacts", {"run_id": self._run_id})
+        except Exception as exc:
             self.body.setPlainText(f"Failed to load: {exc}")
             return
         if not artifacts:
             self.body.setPlainText("(no artifacts produced)")
             return
-        text = "\n\n".join(f"# {a['title']}\n\n{a['body']}" for a in artifacts)
+        # If any artifact is a diff, switch to monospace and show that
+        # one prominently; concatenate other artifacts beneath.
+        has_diff = any(a.get("kind") == "diff" for a in artifacts)
+        if has_diff:
+            self.body.setStyleSheet(
+                "background:#0f1115;color:#dee0e3;border:1px solid #e6e7eb;"
+                "border-radius:6px;padding:10px;"
+                "font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;"
+            )
+        else:
+            self.body.setStyleSheet(
+                "background:#fff;border:1px solid #e6e7eb;border-radius:6px;"
+                "padding:10px;font-family:ui-sans-serif,Inter,system-ui;font-size:13px;"
+            )
+        # Sort: diffs first, then summaries / transcripts.
+        order = {"diff": 0, "summary": 1, "transcript": 2}
+        artifacts_sorted = sorted(
+            artifacts,
+            key=lambda a: order.get(a.get("kind", ""), 99),
+        )
+        text = "\n\n".join(f"# {a['title']}\n\n{a['body']}" for a in artifacts_sorted)
         self.body.setPlainText(text)
         self.meta.setText(f"run {self._run_id} · {len(artifacts)} artifact(s)")
 
@@ -103,7 +121,7 @@ class ReviewPage(QtWidgets.QWidget):
                 "runs.approve",
                 {"run_id": self._run_id, "note": self.note.text() or None},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Approve failed", str(exc))
             return
         QtWidgets.QMessageBox.information(self, "Approved", "Run merged.")
@@ -113,7 +131,8 @@ class ReviewPage(QtWidgets.QWidget):
         if not self._run_id:
             return
         reason, ok = QtWidgets.QInputDialog.getText(
-            self, "Reject run",
+            self,
+            "Reject run",
             "Why is this run being rejected?",
             text=self.note.text(),
         )
@@ -129,7 +148,7 @@ class ReviewPage(QtWidgets.QWidget):
                 "runs.reject",
                 {"run_id": self._run_id, "reason": reason},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Reject failed", str(exc))
             return
         QtWidgets.QMessageBox.information(self, "Rejected", "Run closed.")

@@ -61,7 +61,10 @@ class ToolExecutor(Protocol):
 
     def tools(self) -> list[ToolDef]: ...
     async def execute(
-        self, tool_use_id: str, name: str, params: dict[str, Any],
+        self,
+        tool_use_id: str,
+        name: str,
+        params: dict[str, Any],
     ) -> ToolResult: ...
 
 
@@ -139,10 +142,15 @@ class WorktreeToolset:
         ]
 
     async def execute(
-        self, tool_use_id: str, name: str, params: dict[str, Any],
+        self,
+        tool_use_id: str,
+        name: str,
+        params: dict[str, Any],
     ) -> ToolResult:
         invocation = ToolInvocation(
-            tool_use_id=tool_use_id, name=name, params=params,
+            tool_use_id=tool_use_id,
+            name=name,
+            params=params,
         )
         try:
             if name == "read_file":
@@ -153,7 +161,7 @@ class WorktreeToolset:
                 content = await self._list_files(params.get("path", "."))
             else:
                 content = {"error": f"unknown tool: {name}"}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.exception("tool %s failed", name)
             content = {"error": f"{type(exc).__name__}: {exc}"}
 
@@ -200,12 +208,7 @@ class WorktreeToolset:
             return {"error": f"path escape rejected: {path!r}"}
         encoded = content.encode("utf-8")
         if len(encoded) > _MAX_BYTES:
-            return {
-                "error": (
-                    f"content too large ({len(encoded)} bytes); "
-                    f"limit is {_MAX_BYTES}"
-                )
-            }
+            return {"error": (f"content too large ({len(encoded)} bytes); limit is {_MAX_BYTES}")}
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(encoded)
         rel = str(target.relative_to(self.worktree))
@@ -231,11 +234,13 @@ class WorktreeToolset:
                 continue
             if rel.startswith(".agent-worktrees/"):
                 continue
-            entries.append({
-                "path": rel,
-                "is_file": p.is_file(),
-                "size": p.stat().st_size if p.is_file() else None,
-            })
+            entries.append(
+                {
+                    "path": rel,
+                    "is_file": p.is_file(),
+                    "size": p.stat().st_size if p.is_file() else None,
+                }
+            )
             if len(entries) >= 500:
                 break
         return {"root": path, "count": len(entries), "entries": entries}

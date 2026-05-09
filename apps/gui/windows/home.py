@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class HomePage(QtWidgets.QWidget):
-    def __init__(self, client: "RpcClient") -> None:
+    def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
         self.setStyleSheet("background:#fafbfc;")
@@ -61,9 +61,7 @@ class HomePage(QtWidgets.QWidget):
     @staticmethod
     def _section(title: str, body: QtWidgets.QWidget) -> QtWidgets.QWidget:
         wrap = QtWidgets.QFrame()
-        wrap.setStyleSheet(
-            "QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;}"
-        )
+        wrap.setStyleSheet("QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;}")
         v = QtWidgets.QVBoxLayout(wrap)
         v.setContentsMargins(16, 12, 16, 16)
         v.setSpacing(10)
@@ -79,15 +77,20 @@ class HomePage(QtWidgets.QWidget):
     async def _reload_async(self) -> None:
         try:
             runs = await self.client.call("runs.list", {})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "RPC error", str(exc))
             return
-        active = [r for r in runs if r["state"] in ("queued", "planning",
-                                                      "executing", "awaiting_approval")]
-        self._populate(self.active_table, active, ("id", "state", "branch_id",
-                                                     "cost_usd", "created_at"))
-        self._populate(self.recent_table, runs[:50], ("id", "card_id", "state",
-                                                       "cost_usd", "created_at"))
+        active = [
+            r
+            for r in runs
+            if r["state"] in ("queued", "planning", "executing", "awaiting_approval")
+        ]
+        self._populate(
+            self.active_table, active, ("id", "state", "branch_id", "cost_usd", "created_at")
+        )
+        self._populate(
+            self.recent_table, runs[:50], ("id", "card_id", "state", "cost_usd", "created_at")
+        )
 
     @staticmethod
     def _populate(table: QtWidgets.QTableWidget, rows: list[dict], cols: tuple[str, ...]) -> None:

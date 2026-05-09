@@ -125,7 +125,8 @@ class JSONLWatcher:
             content = payload["message"].get("content")
             if isinstance(content, list):
                 text = "\n".join(
-                    c.get("text", "") for c in content
+                    c.get("text", "")
+                    for c in content
                     if isinstance(c, dict) and c.get("type") == "text"
                 )
             elif isinstance(content, str):

@@ -52,13 +52,13 @@ _VAGUE_TERMS = {
 }
 
 _SECRET_PATTERNS = [
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),                       # OpenAI-style keys
-    re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"),                 # Anthropic
-    re.compile(r"AIza[0-9A-Za-z_-]{30,}"),                    # Google API
-    re.compile(r"AKIA[0-9A-Z]{16}"),                          # AWS access key
+    re.compile(r"sk-[A-Za-z0-9]{20,}"),  # OpenAI-style keys
+    re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"),  # Anthropic
+    re.compile(r"AIza[0-9A-Za-z_-]{30,}"),  # Google API
+    re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key
     re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----"),
-    re.compile(r"ghp_[A-Za-z0-9]{30,}"),                      # GitHub PAT
-    re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),              # Slack token
+    re.compile(r"ghp_[A-Za-z0-9]{30,}"),  # GitHub PAT
+    re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),  # Slack token
 ]
 
 
@@ -75,8 +75,9 @@ _CONFLICTING_PAIRS = [
 ]
 
 
-def lint(text: str, *, archetype: str | None = None,
-         variables: dict[str, Any] | None = None) -> list[LintIssue]:
+def lint(
+    text: str, *, archetype: str | None = None, variables: dict[str, Any] | None = None
+) -> list[LintIssue]:
     issues: list[LintIssue] = []
     issues.extend(_check_length(text))
     issues.extend(_check_vagueness(text))
@@ -92,18 +93,22 @@ def _check_length(text: str) -> list[LintIssue]:
     n = len(text.strip())
     out: list[LintIssue] = []
     if n < 30:
-        out.append(LintIssue(
-            rule="too-short",
-            severity=Severity.ERROR,
-            message="Instruction is too short to be actionable.",
-            suggestion="Add at least: a goal, one constraint, and a success criterion.",
-        ))
+        out.append(
+            LintIssue(
+                rule="too-short",
+                severity=Severity.ERROR,
+                message="Instruction is too short to be actionable.",
+                suggestion="Add at least: a goal, one constraint, and a success criterion.",
+            )
+        )
     elif n < 80:
-        out.append(LintIssue(
-            rule="brief",
-            severity=Severity.WARNING,
-            message="Instruction is very brief — agents do better with explicit success criteria.",
-        ))
+        out.append(
+            LintIssue(
+                rule="brief",
+                severity=Severity.WARNING,
+                message="Instruction is very brief — agents do better with explicit success criteria.",
+            )
+        )
     return out
 
 
@@ -188,12 +193,14 @@ def _check_archetype_requirements(
         if not re.search(pattern, lc):
             missing.append(pattern)
     if missing:
-        out.append(LintIssue(
-            rule=f"archetype:{archetype}:missing-context",
-            severity=Severity.WARNING,
-            message=str(rules["explanation"]),
-            suggestion="Add the relevant fields in the wizard before dispatching.",
-        ))
+        out.append(
+            LintIssue(
+                rule=f"archetype:{archetype}:missing-context",
+                severity=Severity.WARNING,
+                message=str(rules["explanation"]),
+                suggestion="Add the relevant fields in the wizard before dispatching.",
+            )
+        )
     return out
 
 
