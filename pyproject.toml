@@ -35,9 +35,15 @@ dependencies = [
 gui = [
     "PySide6>=6.7",
     "qasync>=0.27",
-    # Optional in-app annotation overlay (floating bar + Review dialog).
-    # Pinned per the integration requirements doc — bump deliberately
-    # and re-run the integration compatibility test on each upgrade.
+]
+annotator = [
+    # In-app annotation overlay (floating bar + Review dialog).  Not on
+    # PyPI yet — install separately from the source you have locally
+    # (wheel, git URL, or `pip install -e <path>`).  The GUI runs fine
+    # without it; `apps/gui/annotator.py` no-ops when the import fails.
+    # Pinned per TECHNICAL_INTEGRATION_REQUIREMENTS.md — bump
+    # deliberately and re-run test_integration_compatibility.py on
+    # each upgrade.
     "pyside6_annotator>=1.4.23",
 ]
 google = [
