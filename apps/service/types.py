@@ -3,9 +3,14 @@
 These models are the canonical shape of every entity. They are used by the
 event store, the worktree manager, the providers, the linter, and the IPC
 layer. Pydantic gives us validation at every boundary.
-"""
 
-from __future__ import annotations
+We deliberately omit ``from __future__ import annotations`` here.  Under
+PEP 563, Pydantic v2 has to resolve string annotations against module
+globals, and discriminated-union / forward-reference cases can produce
+PydanticUndefinedAnnotation errors that mention exactly that import line.
+Evaluating annotations eagerly avoids the trap.  Other modules in this
+service still use the future import where it's safe.
+"""
 
 import secrets
 import string
