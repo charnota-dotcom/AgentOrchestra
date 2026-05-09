@@ -487,7 +487,11 @@ class RunDispatcher:
             await self._transition_run(run, RunState.EXECUTING)
 
             # 2. Open the agent loop with the worktree toolset.
-            toolset = WorktreeToolset(worktree=Path(branch.worktree_path))
+            sandbox = await self._open_sandbox(card, Path(branch.worktree_path))
+            toolset = WorktreeToolset(
+                worktree=Path(branch.worktree_path),
+                sandbox=sandbox,
+            )
             provider = get_provider(card.provider)
 
             tokens_in = tokens_out = 0
@@ -605,7 +609,11 @@ class RunDispatcher:
                     elif ev.kind == "finish":
                         break
             finally:
-                pass
+                if sandbox is not None:
+                    try:
+                        await sandbox.close()
+                    except Exception:
+                        log.warning("sandbox close failed", exc_info=True)
 
             # 3. Cost accounting.
             cost = cost_for_call(card.provider, card.model, tokens_in, tokens_out)
@@ -702,6 +710,34 @@ class RunDispatcher:
                     await self.manager.abandon(branch.id, f"failed: {exc}")
                 except Exception:
                     pass
+
+    async def _open_sandbox(self, card: PersonalityCard, worktree: Path):
+        """Open a sandbox per the card's tier; fall back to local on
+        Docker errors and emit a warning event.
+        """
+        tier = card.sandbox_tier.value
+        if tier == "docker":
+            try:
+                from apps.service.sandbox.docker import DockerSandbox
+
+                return await DockerSandbox.open_async(worktree)
+            except Exception as exc:
+                log.warning("docker sandbox unavailable; falling back: %s", exc)
+                await self.store.append_event(
+                    Event(
+                        source=EventSource.SYSTEM,
+                        kind=EventKind.RUN_STATE_CHANGED,
+                        payload={
+                            "warning": "docker_sandbox_unavailable",
+                            "fallback": "local",
+                            "error": str(exc),
+                        },
+                        text=f"docker sandbox unavailable: {exc}",
+                    )
+                )
+        # Default: no sandbox object — toolset uses direct FS I/O, which
+        # is the V1 LocalSandbox behavior.
+        return None
 
     async def _plan_phase(
         self,

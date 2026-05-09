@@ -359,12 +359,12 @@ class WorktreeManager:
                         message=(f"Merge {branch.agent_branch_name}\n\nrun: {branch.run_id}"),
                     )
                 elif mode == "assisted":
-                    # Use Mergiraf-as-merge-driver if available.  We don't
-                    # rewrite the merge: we attempt a regular merge first
-                    # and rely on git's `merge.<driver>` config for tree-
-                    # sitter-aware files.  If Mergiraf isn't installed we
-                    # fall through to the normal merge with a logged note.
-                    if not await _merger.is_available():
+                    # Install Mergiraf as the per-repo merge driver and
+                    # rely on git's `merge.<driver>` config to invoke it
+                    # for tree-sitter-aware files.  Falls back to a
+                    # regular 3-way merge if Mergiraf isn't installed.
+                    installed = await _merger.install_as_merge_driver(repo)
+                    if not installed:
                         log.info("mergiraf not available; falling back to normal merge")
                     sha = await g.merge_into(
                         repo,

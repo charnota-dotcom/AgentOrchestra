@@ -86,6 +86,78 @@ def _parse_version(text: str) -> tuple[int, int, int] | None:
     return None
 
 
+_LANGUAGE_GLOBS = (
+    "*.py",
+    "*.rs",
+    "*.js",
+    "*.jsx",
+    "*.ts",
+    "*.tsx",
+    "*.go",
+    "*.java",
+    "*.kt",
+    "*.rb",
+    "*.c",
+    "*.h",
+    "*.cpp",
+    "*.cc",
+    "*.hpp",
+    "*.cs",
+    "*.swift",
+    "*.json",
+    "*.yaml",
+    "*.yml",
+    "*.toml",
+)
+
+
+async def install_as_merge_driver(repo: Path) -> bool:
+    """Register Mergiraf as a per-repo merge driver for tree-sitter
+    supported filetypes via .gitattributes.  Idempotent.  Returns True
+    if the driver is now active; False if Mergiraf is unavailable.
+    """
+    if not await is_available():
+        return False
+    await _git(["config", "merge.mergiraf.name", "mergiraf"], cwd=repo)
+    await _git(
+        [
+            "config",
+            "merge.mergiraf.driver",
+            f"{MERGIRAF_BINARY} merge --base %O --left %A --right %B --output %A",
+        ],
+        cwd=repo,
+    )
+    attrs_path = repo / ".gitattributes"
+    existing = attrs_path.read_text() if attrs_path.exists() else ""
+    if "agentorchestra:mergiraf" in existing:
+        return True
+    block = ["", "# agentorchestra:mergiraf"]
+    block.extend(f"{glob} merge=mergiraf" for glob in _LANGUAGE_GLOBS)
+    block.append("")
+    with attrs_path.open("a") as fh:
+        if existing and not existing.endswith("\n"):
+            fh.write("\n")
+        fh.write("\n".join(block))
+    return True
+
+
+async def _git(args: list[str], *, cwd: Path) -> None:
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        *args,
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, err = await proc.communicate()
+    if proc.returncode != 0:
+        log.warning(
+            "git %s failed: %s",
+            " ".join(args),
+            err.decode(errors="replace").strip(),
+        )
+
+
 async def merge_files(base: Path, left: Path, right: Path, *, output: Path) -> bool:
     """Run Mergiraf on a single file.  Returns True on clean merge.
 

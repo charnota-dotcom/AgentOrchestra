@@ -125,16 +125,146 @@ class GoogleProvider:
         executor: Any,  # ToolExecutor
         max_turns: int = 16,
     ) -> AsyncIterator[StreamEvent]:
-        # Agentic Gemini runs are deferred; surface a clear error.
-        yield StreamEvent(
-            kind="error",
-            text=(
-                "agentic Gemini runs are not yet implemented; pick an "
-                "Anthropic card or switch this card to chat mode"
-            ),
-        )
+        if isinstance(self._sdk, _MissingDependency):
+            yield StreamEvent(kind="error", text="google-genai SDK not installed")
+            return
+        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            yield StreamEvent(kind="error", text="GOOGLE_API_KEY not set")
+            return
+
+        client = self._sdk.Client(api_key=api_key)
+        tool_decls = [
+            {
+                "name": t.name,
+                "description": t.description,
+                "parameters": _strip_jsonschema_for_gemini(t.input_schema),
+            }
+            for t in executor.tools()
+        ]
+        gemini_tools = [{"function_declarations": tool_decls}]
+        contents: list[dict[str, Any]] = [
+            {"role": "user", "parts": [{"text": user_message}]},
+        ]
+        config: dict[str, Any] = {"tools": gemini_tools}
+        if system:
+            config["system_instruction"] = system
+
+        tokens_in = tokens_out = 0
+        try:
+            for turn in range(max_turns):
+                response = await client.aio.models.generate_content(
+                    model=card.model,
+                    contents=contents,
+                    config=config,
+                )
+                usage = getattr(response, "usage_metadata", None)
+                if usage:
+                    tokens_in += getattr(usage, "prompt_token_count", 0) or 0
+                    tokens_out += getattr(usage, "candidates_token_count", 0) or 0
+                yield StreamEvent(
+                    kind="usage",
+                    payload={"input_tokens": tokens_in, "output_tokens": tokens_out},
+                )
+
+                candidates = getattr(response, "candidates", None) or []
+                if not candidates:
+                    yield StreamEvent(kind="turn_end", payload={"turn": turn + 1})
+                    break
+                content = getattr(candidates[0], "content", None)
+                parts = getattr(content, "parts", []) if content else []
+
+                assistant_parts: list[dict[str, Any]] = []
+                tool_calls: list[tuple[str, str, dict[str, Any]]] = []
+                for part in parts:
+                    text = getattr(part, "text", None)
+                    fcall = getattr(part, "function_call", None)
+                    if text:
+                        assistant_parts.append({"text": text})
+                        yield StreamEvent(kind="text_delta", text=text)
+                        yield StreamEvent(kind="assistant_message", text=text)
+                    if fcall:
+                        name = getattr(fcall, "name", "")
+                        args = dict(getattr(fcall, "args", {}) or {})
+                        call_id = f"gemini-{turn}-{len(tool_calls)}"
+                        tool_calls.append((call_id, name, args))
+                        assistant_parts.append(
+                            {
+                                "function_call": {"name": name, "args": args},
+                            }
+                        )
+                        yield StreamEvent(
+                            kind="tool_call",
+                            text=name,
+                            payload={"tool_use_id": call_id, "name": name, "params": args},
+                        )
+
+                contents.append({"role": "model", "parts": assistant_parts})
+
+                if not tool_calls:
+                    yield StreamEvent(
+                        kind="turn_end",
+                        payload={"turn": turn + 1, "stop_reason": "end_turn"},
+                    )
+                    break
+
+                response_parts: list[dict[str, Any]] = []
+                for call_id, name, args in tool_calls:
+                    result = await executor.execute(call_id, name, args)
+                    yield StreamEvent(
+                        kind="tool_result",
+                        payload={
+                            "tool_use_id": result.tool_use_id,
+                            "name": result.name,
+                            "is_error": result.is_error,
+                            "content": result.content,
+                        },
+                    )
+                    response_parts.append(
+                        {
+                            "function_response": {
+                                "name": name,
+                                "response": result.content,
+                            }
+                        }
+                    )
+                contents.append({"role": "user", "parts": response_parts})
+                yield StreamEvent(
+                    kind="turn_end",
+                    payload={"turn": turn + 1, "tool_calls": len(tool_calls)},
+                )
+            else:
+                yield StreamEvent(
+                    kind="error",
+                    text=f"agent exceeded {max_turns}-turn budget",
+                )
+
+            yield StreamEvent(
+                kind="finish",
+                payload={"input_tokens": tokens_in, "output_tokens": tokens_out},
+            )
+        except Exception as exc:
+            log.exception("Gemini run_with_tools failed")
+            yield StreamEvent(kind="error", text=str(exc))
 
     async def healthcheck(self) -> bool:
         if isinstance(self._sdk, _MissingDependency):
             return False
         return bool(os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
+
+
+def _strip_jsonschema_for_gemini(schema: dict[str, Any]) -> dict[str, Any]:
+    """Gemini's function schema rejects some JSON-Schema fields; strip them."""
+    if not isinstance(schema, dict):
+        return schema  # type: ignore[return-value]
+    out: dict[str, Any] = {}
+    for k, v in schema.items():
+        if k in ("default", "additionalProperties"):
+            continue
+        if isinstance(v, dict):
+            out[k] = _strip_jsonschema_for_gemini(v)
+        elif isinstance(v, list):
+            out[k] = [_strip_jsonschema_for_gemini(it) if isinstance(it, dict) else it for it in v]
+        else:
+            out[k] = v
+    return out

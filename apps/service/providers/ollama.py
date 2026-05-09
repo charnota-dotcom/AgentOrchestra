@@ -122,13 +122,133 @@ class OllamaProvider:
         executor: Any,  # ToolExecutor
         max_turns: int = 16,
     ) -> AsyncIterator[StreamEvent]:
-        yield StreamEvent(
-            kind="error",
-            text=(
-                "agentic Ollama runs are deferred; pick a chat archetype "
-                "or use an Anthropic card for code editing"
-            ),
+        # OpenAI-compatible function-calling against Ollama.  Many local
+        # models have weak tool-call adherence; we cap turns and surface
+        # malformed-arg JSON as a tool error rather than aborting.
+        tool_defs = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.input_schema,
+                },
+            }
+            for t in executor.tools()
+        ]
+        messages: list[dict[str, Any]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": user_message})
+
+        client = httpx.AsyncClient(
+            base_url=_base_url(),
+            timeout=httpx.Timeout(180.0, connect=5.0),
         )
+        tokens_in = tokens_out = 0
+        try:
+            for turn in range(max_turns):
+                body = {
+                    "model": card.model,
+                    "messages": messages,
+                    "tools": tool_defs,
+                    "stream": False,
+                }
+                resp = await client.post("/chat/completions", json=body)
+                if resp.status_code != 200:
+                    yield StreamEvent(
+                        kind="error",
+                        text=f"ollama HTTP {resp.status_code}: {resp.text[:200]}",
+                    )
+                    return
+                data = resp.json()
+                usage = data.get("usage") or {}
+                tokens_in += int(usage.get("prompt_tokens") or 0)
+                tokens_out += int(usage.get("completion_tokens") or 0)
+                yield StreamEvent(
+                    kind="usage",
+                    payload={"input_tokens": tokens_in, "output_tokens": tokens_out},
+                )
+
+                choice = (data.get("choices") or [{}])[0]
+                msg = choice.get("message") or {}
+                tool_calls = msg.get("tool_calls") or []
+                text = msg.get("content") or ""
+                if text:
+                    yield StreamEvent(kind="text_delta", text=text)
+                    yield StreamEvent(kind="assistant_message", text=text)
+
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": text,
+                        "tool_calls": tool_calls,
+                    }
+                )
+
+                if not tool_calls:
+                    yield StreamEvent(
+                        kind="turn_end",
+                        payload={"turn": turn + 1, "stop_reason": "stop"},
+                    )
+                    break
+
+                for tc in tool_calls:
+                    fn = tc.get("function") or {}
+                    name = fn.get("name", "")
+                    raw_args = fn.get("arguments") or "{}"
+                    try:
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except json.JSONDecodeError:
+                        args = {}
+                    call_id = tc.get("id") or f"ollama-{turn}-{name}"
+                    yield StreamEvent(
+                        kind="tool_call",
+                        text=name,
+                        payload={
+                            "tool_use_id": call_id,
+                            "name": name,
+                            "params": args,
+                        },
+                    )
+                    result = await executor.execute(call_id, name, args)
+                    yield StreamEvent(
+                        kind="tool_result",
+                        payload={
+                            "tool_use_id": result.tool_use_id,
+                            "name": result.name,
+                            "is_error": result.is_error,
+                            "content": result.content,
+                        },
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": name,
+                            "content": json.dumps(result.content, default=str),
+                        }
+                    )
+
+                yield StreamEvent(
+                    kind="turn_end",
+                    payload={"turn": turn + 1, "tool_calls": len(tool_calls)},
+                )
+            else:
+                yield StreamEvent(
+                    kind="error",
+                    text=f"agent exceeded {max_turns}-turn budget",
+                )
+
+            yield StreamEvent(
+                kind="finish",
+                payload={"input_tokens": tokens_in, "output_tokens": tokens_out},
+            )
+        except Exception as exc:
+            log.exception("Ollama run_with_tools failed")
+            yield StreamEvent(kind="error", text=str(exc))
+        finally:
+            await client.aclose()
 
     async def healthcheck(self) -> bool:
         try:

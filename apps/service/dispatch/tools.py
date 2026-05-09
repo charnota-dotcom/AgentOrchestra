@@ -75,11 +75,17 @@ class ToolExecutor(Protocol):
 
 @dataclass
 class WorktreeToolset:
-    """File-touching tools confined to a single worktree path."""
+    """File-touching tools confined to a single worktree path.
+
+    If ``sandbox`` is provided, reads/writes go through it (V3 opt-in
+    tiers like DockerSandbox).  Otherwise we use direct filesystem I/O,
+    which is the V1 LocalSandbox-equivalent default.
+    """
 
     worktree: Path
     written_files: set[str] = field(default_factory=set)
     invocations: list[ToolInvocation] = field(default_factory=list)
+    sandbox: object | None = None
 
     def tools(self) -> list[ToolDef]:
         return [
@@ -189,13 +195,27 @@ class WorktreeToolset:
         target = self._resolve(path)
         if not target:
             return {"error": f"path escape rejected: {path!r}"}
+        rel = target.relative_to(self.worktree).as_posix()
+        if self.sandbox is not None:
+            try:
+                content_bytes = await self.sandbox.read_file(rel)  # type: ignore[attr-defined]
+            except Exception as exc:
+                return {"error": f"{type(exc).__name__}: {exc}"}
+            if len(content_bytes) > _MAX_BYTES:
+                return {
+                    "error": f"file too large ({len(content_bytes)} bytes); limit is {_MAX_BYTES}"
+                }
+            try:
+                text = content_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                return {"error": "file is not valid UTF-8"}
+            return {"path": rel, "size": len(content_bytes), "content": text}
+        # Local fallback.
         if not target.exists() or not target.is_file():
             return {"error": f"not a file: {path!r}"}
         size = target.stat().st_size
         if size > _MAX_BYTES:
-            return {
-                "error": f"file too large ({size} bytes); limit is {_MAX_BYTES}",
-            }
+            return {"error": f"file too large ({size} bytes); limit is {_MAX_BYTES}"}
         try:
             text = target.read_text(encoding="utf-8")
         except UnicodeDecodeError:
@@ -209,9 +229,15 @@ class WorktreeToolset:
         encoded = content.encode("utf-8")
         if len(encoded) > _MAX_BYTES:
             return {"error": (f"content too large ({len(encoded)} bytes); limit is {_MAX_BYTES}")}
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(encoded)
-        rel = str(target.relative_to(self.worktree))
+        rel = target.relative_to(self.worktree).as_posix()
+        if self.sandbox is not None:
+            try:
+                await self.sandbox.write_file(rel, encoded)  # type: ignore[attr-defined]
+            except Exception as exc:
+                return {"error": f"{type(exc).__name__}: {exc}"}
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(encoded)
         self.written_files.add(rel)
         return {"path": rel, "bytes_written": len(encoded)}
 
