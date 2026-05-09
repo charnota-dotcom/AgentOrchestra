@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtWidgets
 
+from apps.gui.widgets.workspace_map import WorkspaceMap
+
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
@@ -35,8 +37,13 @@ class HomePage(QtWidgets.QWidget):
         subtitle.setStyleSheet("color:#5b6068;")
         layout.addWidget(subtitle)
 
+        # Top: split workspace map and active runs side-by-side.
+        top = QtWidgets.QHBoxLayout()
         self.active_table = self._build_table(["Agent", "State", "Branch", "Cost", "Started"])
-        layout.addWidget(self._section("Active", self.active_table))
+        top.addWidget(self._section("Active", self.active_table), stretch=2)
+        self.workspace_map = WorkspaceMap(self.client)
+        top.addWidget(self.workspace_map, stretch=1)
+        layout.addLayout(top)
 
         self.recent_table = self._build_table(["Run ID", "Card", "State", "Cost", "Created"])
         layout.addWidget(self._section("Recent", self.recent_table), stretch=1)

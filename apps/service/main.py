@@ -169,6 +169,10 @@ class Handlers:
         )
         return {"ok": ok}
 
+    async def runs_approve_plan(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = await self.dispatcher.approve_plan(params["run_id"])
+        return {"ok": ok}
+
     async def runs_consensus(self, params: dict[str, Any]) -> dict[str, Any]:
         from apps.service.dispatch.consensus import run_consensus
 
@@ -271,6 +275,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("runs.cancel", h.runs_cancel)
     server.register("runs.replay", h.runs_replay)
     server.register("runs.consensus", h.runs_consensus)
+    server.register("runs.approve_plan", h.runs_approve_plan)
     server.register("runs.artifacts", h.runs_artifacts)
     server.register("search", h.search)
     server.register("lint.instruction", h.lint_instruction)

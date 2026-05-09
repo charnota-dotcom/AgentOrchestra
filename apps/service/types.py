@@ -113,6 +113,10 @@ class PersonalityCard(BaseModel):
     # When true and this card runs to REVIEWING, automatically dispatch
     # a QA-on-fix run targeting this run's diff.
     auto_qa: bool = False
+    # When true (agentic only), the dispatcher generates a written plan
+    # first and waits for human approval before letting the agent take
+    # any tool action.  Approval is via runs.approve_plan.
+    requires_plan: bool = False
     stale_minutes: int = 60
     max_commits_per_run: int = 50
     max_turns: int = 12

@@ -75,6 +75,9 @@ class RunDispatcher:
         self.bus = bus
         # Track in-flight runs so the GUI can request cancellation.
         self._tasks: dict[str, asyncio.Task] = {}
+        # Plan-approval gates: one event per Run that's waiting for the
+        # human to nod off the plan before executing.
+        self._plan_gates: dict[str, asyncio.Event] = {}
 
     # ------------------------------------------------------------------
     # Entry points
@@ -214,6 +217,23 @@ class RunDispatcher:
             instruction_id=instruction_id,
             rendered_text=rendered,
         )
+
+    async def approve_plan(self, run_id: str) -> bool:
+        """Release the plan-approval gate for a paused Run."""
+        gate = self._plan_gates.get(run_id)
+        if not gate:
+            return False
+        gate.set()
+        await self.store.append_event(
+            Event(
+                source=EventSource.SYSTEM,
+                kind=EventKind.APPROVAL_GRANTED,
+                run_id=run_id,
+                payload={"phase": "plan"},
+                text="plan approved",
+            )
+        )
+        return True
 
     async def cancel(self, run_id: str, reason: str = "user requested") -> bool:
         task = self._tasks.get(run_id)
@@ -457,6 +477,13 @@ class RunDispatcher:
             )
             await self.store.db.commit()
 
+            # Plan-act split (optional, agentic-only).  Generates a
+            # written plan via a chat session, persists it as a PLAN
+            # artifact, and waits for the user to call runs.approve_plan
+            # before invoking the tool-using agent loop.
+            if card.requires_plan:
+                await self._plan_phase(run, card, rendered_text)
+
             await self._transition_run(run, RunState.EXECUTING)
 
             # 2. Open the agent loop with the worktree toolset.
@@ -675,6 +702,65 @@ class RunDispatcher:
                     await self.manager.abandon(branch.id, f"failed: {exc}")
                 except Exception:
                     pass
+
+    async def _plan_phase(
+        self,
+        run: Run,
+        card: PersonalityCard,
+        rendered_text: str,
+    ) -> None:
+        """Generate a written plan via chat, persist it as a PLAN artifact,
+        await human approval before continuing.
+        """
+        provider = get_provider(card.provider)
+        plan_card = card.model_copy(update={"id": long_id(), "mode": CardMode.CHAT})
+        plan_prompt = (
+            "Before doing any work, produce a SHORT plan for what you will do "
+            "and what you will NOT do.  Use bullets.  Do not call any tools.\n\n"
+            f"Task:\n{rendered_text}"
+        )
+        session = await provider.open_chat(plan_card, system="Plan first; act later.")
+        plan_text_parts: list[str] = []
+        try:
+            async for ev in session.send(plan_prompt):
+                if ev.kind == "text_delta":
+                    plan_text_parts.append(ev.text)
+                elif ev.kind == "error":
+                    raise DispatchError(ev.text or "plan-phase error")
+                elif ev.kind == "finish":
+                    break
+        finally:
+            await session.close()
+
+        plan_text = "".join(plan_text_parts) or "(no plan produced)"
+        await self.store.insert_artifact(
+            Artifact(
+                id=long_id(),
+                run_id=run.id,
+                kind=ArtifactKind.PLAN,
+                title=f"{card.name} — plan (awaiting approval)",
+                body=plan_text,
+            )
+        )
+
+        # Pause for approval.
+        await self._transition_run(run, RunState.AWAITING_APPROVAL)
+        await self.store.append_event(
+            Event(
+                source=EventSource.SYSTEM,
+                kind=EventKind.APPROVAL_REQUESTED,
+                run_id=run.id,
+                payload={"phase": "plan", "artifact_kind": "plan"},
+                text="plan ready; awaiting approval",
+            )
+        )
+
+        gate = asyncio.Event()
+        self._plan_gates[run.id] = gate
+        try:
+            await gate.wait()
+        finally:
+            self._plan_gates.pop(run.id, None)
 
     async def _dispatch_auto_qa(
         self,
