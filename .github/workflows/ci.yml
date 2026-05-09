@@ -77,6 +77,32 @@ jobs:
           tail -200 /tmp/pytest.log 2>/dev/null || true
           echo "================ collect log tail ==============="
           tail -100 /tmp/collect.log 2>/dev/null || true
+      - name: Pytest failure summary
+        if: failure()
+        run: |
+          {
+            echo "## :red_circle: Test failure"
+            echo
+            echo "### pytest tail"
+            echo "\`\`\`"
+            tail -200 /tmp/pytest.log 2>/dev/null || echo "(no pytest log)"
+            echo "\`\`\`"
+            echo
+            echo "### pytest --collect-only tail"
+            echo "\`\`\`"
+            tail -100 /tmp/collect.log 2>/dev/null || echo "(no collect log)"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload pytest logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-logs
+          path: |
+            /tmp/pytest.log
+            /tmp/collect.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Pytest (integration)
         # Integration tests touch the filesystem and spawn git; allowed
         # to fail while we stabilise the suite (re-enabled hard gating
