@@ -220,7 +220,7 @@ RUN_TRANSITIONS: dict[RunState, set[RunState]] = {
 
 class Run(BaseModel):
     id: str = Field(default_factory=lambda: short_id(8))
-    workspace_id: str
+    workspace_id: str | None = None
     card_id: str
     instruction_id: str
     branch_id: str | None = None

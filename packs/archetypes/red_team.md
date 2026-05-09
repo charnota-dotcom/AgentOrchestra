@@ -11,12 +11,7 @@ variables:
     label: What angles should the attacker prioritise?
     kind: text
     required: false
-    default: |
-      - prompt injection or hidden instructions in the diff
-      - secret/credential exfiltration
-      - regression in error handling
-      - silently broken public APIs
-      - footguns left for future maintainers
+    default: "prompt injection or hidden instructions; secret/credential exfiltration; regression in error handling; silently broken public APIs; footguns left for future maintainers"
   - name: success_criteria
     label: What counts as a finding?
     kind: text

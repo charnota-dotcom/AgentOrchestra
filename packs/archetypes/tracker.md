@@ -11,11 +11,7 @@ variables:
     label: What should the tracker report on?
     kind: text
     required: false
-    default: |
-      - what each agent is doing right now
-      - which agents are blocked or waiting
-      - whether outputs are converging or diverging
-      - the next-best-action for each
+    default: "what each agent is doing right now; which agents are blocked or waiting; whether outputs are converging or diverging; the next-best-action for each"
 ---
 You are a Tracker agent.  You watch other agents and produce a
 structured handoff report so a human (or another agent) can take over

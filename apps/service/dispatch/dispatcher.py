@@ -105,7 +105,7 @@ class RunDispatcher:
             )
 
         run = Run(
-            workspace_id=workspace_id or "",
+            workspace_id=workspace_id,
             card_id=card.id,
             instruction_id=instruction_id,
             state=RunState.QUEUED,

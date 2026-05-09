@@ -97,7 +97,7 @@ async def run_consensus(
     await store.insert_instruction(instruction)
 
     run = Run(
-        workspace_id="",
+        workspace_id=None,
         card_id=consensus_card_id,
         instruction_id=instruction.id,
         state=RunState.QUEUED,

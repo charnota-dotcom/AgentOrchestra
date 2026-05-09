@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS instructions (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS runs (
     id                  TEXT PRIMARY KEY,
-    workspace_id        TEXT NOT NULL REFERENCES workspaces(id),
+    workspace_id        TEXT REFERENCES workspaces(id),
     card_id             TEXT NOT NULL REFERENCES cards(id),
     instruction_id      TEXT NOT NULL REFERENCES instructions(id),
     branch_id           TEXT,
