@@ -100,7 +100,11 @@ class PersonalityCard(BaseModel):
     archetype: str  # e.g. "broad-research", "qa-on-fix"
     description: str
     template_id: str  # FK to InstructionTemplate
-    provider: Literal["anthropic", "google", "openai", "ollama"] = "anthropic"
+    # Provider name registered in the LLMProvider registry.  Bundled
+    # values are anthropic / google / openai / ollama; we keep the
+    # type as plain ``str`` so tests can register fakes and so the
+    # registry can grow without a schema change.
+    provider: str = "anthropic"
     model: str = "claude-sonnet-4-5"
     mode: CardMode = CardMode.CHAT
     cost: CostPolicy = Field(default_factory=CostPolicy)
