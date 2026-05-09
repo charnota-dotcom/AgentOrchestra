@@ -224,10 +224,10 @@ class EventStore:
             """
             INSERT INTO cards (id, name, archetype, description, template_id,
                 provider, model, mode, cost, blast_radius, sandbox_tier,
-                tool_allowlist, stale_minutes, max_commits_per_run,
+                tool_allowlist, fallbacks, stale_minutes, max_commits_per_run,
                 max_turns, skip_pre_commit_hooks, version,
                 created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 c.id,
@@ -242,6 +242,7 @@ class EventStore:
                 c.blast_radius.model_dump_json(),
                 c.sandbox_tier.value,
                 json.dumps(c.tool_allowlist),
+                json.dumps(c.fallbacks),
                 c.stale_minutes,
                 c.max_commits_per_run,
                 c.max_turns,
@@ -261,10 +262,13 @@ class EventStore:
         d["blast_radius"] = json.loads(d["blast_radius"])
         d["tool_allowlist"] = json.loads(d["tool_allowlist"])
         d["skip_pre_commit_hooks"] = bool(d["skip_pre_commit_hooks"])
-        # Backwards-compat for DBs that predate the `mode` and
-        # `max_turns` columns.
+        # Backwards-compat for DBs that predate later-added columns.
         d.setdefault("mode", "chat")
         d.setdefault("max_turns", 12)
+        if d.get("fallbacks"):
+            d["fallbacks"] = json.loads(d["fallbacks"])
+        else:
+            d["fallbacks"] = []
         return PersonalityCard.model_validate(d)
 
     async def list_cards(self) -> list[PersonalityCard]:

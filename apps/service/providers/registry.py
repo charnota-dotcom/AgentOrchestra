@@ -8,6 +8,8 @@ OpenAI / Ollama a one-line change.
 from __future__ import annotations
 
 from apps.service.providers.anthropic import AnthropicProvider
+from apps.service.providers.google import GoogleProvider
+from apps.service.providers.ollama import OllamaProvider
 from apps.service.providers.protocol import LLMProvider
 from apps.service.types import ProviderError
 
@@ -30,7 +32,9 @@ def known_providers() -> list[str]:
 
 def install_default_providers() -> None:
     register("anthropic", AnthropicProvider())
-    # Gemini, OpenAI, Ollama: register here when their adapters land.
+    register("google", GoogleProvider())
+    register("ollama", OllamaProvider())
+    # OpenAI: register when its adapter lands.
 
 
 install_default_providers()

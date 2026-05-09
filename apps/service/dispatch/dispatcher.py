@@ -215,13 +215,44 @@ class RunDispatcher:
     # Internals
     # ------------------------------------------------------------------
 
+    async def _open_chat_with_fallbacks(
+        self,
+        card: PersonalityCard,
+    ) -> tuple[Any, PersonalityCard]:
+        """Open a ChatSession against card.provider; on open failure try
+        each declared fallback in order.  Returns (session, effective_card).
+        """
+        attempts: list[tuple[str, str]] = [(card.provider, card.model)]
+        for fb in card.fallbacks:
+            p = fb.get("provider")
+            m = fb.get("model")
+            if p and m:
+                attempts.append((p, m))
+        last_exc: Exception | None = None
+        for provider_name, model in attempts:
+            try:
+                provider = get_provider(provider_name)
+                effective = card.model_copy(update={"provider": provider_name, "model": model})
+                session = await provider.open_chat(effective, system=card.description)
+                if (provider_name, model) != (card.provider, card.model):
+                    log.info(
+                        "fallback engaged: %s/%s",
+                        provider_name,
+                        model,
+                    )
+                return session, effective
+            except Exception as exc:
+                log.warning("provider %s/%s open failed: %s", provider_name, model, exc)
+                last_exc = exc
+        raise DispatchError(f"all providers failed: {last_exc}" if last_exc else "no providers")
+
     async def _execute(self, run: Run, card: PersonalityCard, rendered_text: str) -> None:
         try:
             await self._transition_run(run, RunState.PLANNING)
             await self._transition_run(run, RunState.EXECUTING)
 
-            provider = get_provider(card.provider)
-            session = await provider.open_chat(card, system=card.description)
+            session, effective_card = await self._open_chat_with_fallbacks(card)
+            card = effective_card
 
             seq = 0
             full_text_parts: list[str] = []

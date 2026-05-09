@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS cards (
     blast_radius             TEXT NOT NULL,        -- JSON
     sandbox_tier             TEXT NOT NULL,
     tool_allowlist           TEXT NOT NULL,        -- JSON array
+    fallbacks                TEXT NOT NULL DEFAULT '[]',  -- JSON array of {provider, model}
     stale_minutes            INTEGER NOT NULL,
     max_commits_per_run      INTEGER NOT NULL,
     max_turns                INTEGER NOT NULL DEFAULT 12,

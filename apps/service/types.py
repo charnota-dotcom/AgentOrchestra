@@ -107,6 +107,9 @@ class PersonalityCard(BaseModel):
     blast_radius: BlastRadiusPolicy = Field(default_factory=BlastRadiusPolicy)
     sandbox_tier: SandboxTier = SandboxTier.DEVCONTAINER
     tool_allowlist: list[str] = Field(default_factory=list)  # empty = all bundled tools
+    # Ordered fallback list of {"provider": ..., "model": ...} used on
+    # rate-limit / 5xx errors before declaring the run failed.
+    fallbacks: list[dict[str, str]] = Field(default_factory=list)
     stale_minutes: int = 60
     max_commits_per_run: int = 50
     max_turns: int = 12
