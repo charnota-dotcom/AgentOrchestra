@@ -43,17 +43,40 @@ jobs:
           python -m pip list
       - name: Smoke imports
         run: |
-          set -x
-          python -c "import apps.service.types"
-          python -c "import apps.service.store.events"
-          python -c "import apps.service.dispatch.dispatcher"
-          python -c "import apps.service.providers.registry"
-          python -c "import apps.service.dispatch.tools"
-          python -c "import apps.service.dispatch.speculative"
+          set -e
+          for m in \
+            apps.service.types \
+            apps.service.store.events \
+            apps.service.dispatch.dispatcher \
+            apps.service.providers.registry \
+            apps.service.dispatch.tools \
+            apps.service.dispatch.speculative \
+            apps.service.dispatch.hot_swap \
+            apps.service.store.backup \
+            apps.service.dispatch.a2a \
+            apps.service.updates.client \
+          ; do
+            echo "::group::import $m"
+            python -c "import $m" || { echo "::error::FAILED: $m"; exit 1; }
+            echo "::endgroup::"
+          done
       - name: Pytest collect
-        run: pytest tests/unit --collect-only -q
+        id: pytest_collect
+        run: |
+          set -o pipefail
+          pytest tests/unit --collect-only -q 2>&1 | tee /tmp/collect.log
       - name: Pytest (unit)
-        run: pytest tests/unit -v --tb=long
+        id: pytest_unit
+        run: |
+          set -o pipefail
+          pytest tests/unit -v --tb=long --no-header 2>&1 | tee /tmp/pytest.log
+      - name: Show pytest tail on failure
+        if: failure()
+        run: |
+          echo "================ pytest log tail ================"
+          tail -200 /tmp/pytest.log 2>/dev/null || true
+          echo "================ collect log tail ==============="
+          tail -100 /tmp/collect.log 2>/dev/null || true
       - name: Pytest (integration)
         # Integration tests touch the filesystem and spawn git; allowed
         # to fail while we stabilise the suite (re-enabled hard gating
