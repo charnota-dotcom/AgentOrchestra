@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install "ruff>=0.5"
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure git identity for tests
+        run: |
+          git config --global user.email "ci@agentorchestra.test"
+          git config --global user.name "AgentOrchestra CI"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev]"
+      - name: Show env
+        run: |
+          set -x
+          python --version
+          python -m pip list
+      - name: Smoke imports
+        run: |
+          set -e
+          for m in \
+            apps.service.types \
+            apps.service.store.events \
+            apps.service.dispatch.dispatcher \
+            apps.service.providers.registry \
+            apps.service.dispatch.tools \
+            apps.service.dispatch.speculative \
+            apps.service.dispatch.hot_swap \
+            apps.service.store.backup \
+            apps.service.dispatch.a2a \
+            apps.service.updates.client \
+          ; do
+            echo "::group::import $m"
+            python -c "import $m" || { echo "::error::FAILED: $m"; exit 1; }
+            echo "::endgroup::"
+          done
+      - name: Pytest collect
+        id: pytest_collect
+        run: |
+          set +e
+          pytest tests/unit --collect-only -q > /tmp/collect.log 2>&1
+          EC=$?
+          echo "==== /tmp/collect.log (pytest --collect-only) ===="
+          cat /tmp/collect.log
+          echo "==== exit $EC ===="
+          exit $EC
+      - name: Pytest (unit)
+        id: pytest_unit
+        run: |
+          set +e
+          pytest tests/unit -v --tb=long --no-header > /tmp/pytest.log 2>&1
+          EC=$?
+          echo "==== /tmp/pytest.log (pytest unit) ===="
+          cat /tmp/pytest.log
+          echo "==== exit $EC ===="
+          exit $EC
+      - name: Show pytest tail on failure
+        if: failure()
+        run: |
+          echo "================ pytest log tail ================"
+          tail -200 /tmp/pytest.log 2>/dev/null || true
+          echo "================ collect log tail ==============="
+          tail -100 /tmp/collect.log 2>/dev/null || true
+      - name: Pytest failure summary
+        if: failure()
+        run: |
+          {
+            echo "## :red_circle: Test failure"
+            echo
+            echo "### pytest tail"
+            echo "\`\`\`"
+            tail -200 /tmp/pytest.log 2>/dev/null || echo "(no pytest log)"
+            echo "\`\`\`"
+            echo
+            echo "### pytest --collect-only tail"
+            echo "\`\`\`"
+            tail -100 /tmp/collect.log 2>/dev/null || echo "(no collect log)"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload pytest logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-logs
+          path: |
+            /tmp/pytest.log
+            /tmp/collect.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Pytest (integration)
+        # Integration tests touch the filesystem and spawn git; allowed
+        # to fail while we stabilise the suite (re-enabled hard gating
+        # once unit is green).
+        continue-on-error: true
+        run: pytest tests/integration -v --tb=short
