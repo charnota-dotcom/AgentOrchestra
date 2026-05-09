@@ -232,6 +232,16 @@ class Run(BaseModel):
     cost_tokens: int = 0
     error: str | None = None
 
+    @field_validator("workspace_id", "branch_id", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, v: object) -> object:
+        # SQLite + foreign-key enforcement rejects '' as if it were a real
+        # row id; normalise blanks to NULL at the model boundary so any
+        # call site that passes "" stops triggering FK violations.
+        if v == "":
+            return None
+        return v
+
 
 # ---------------------------------------------------------------------------
 # Step (single LLM call or tool call inside a Run)
