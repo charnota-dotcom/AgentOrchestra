@@ -32,7 +32,10 @@ _CARD_DEFAULTS: dict[str, dict] = {
     "broad-research": dict(
         name="Broad Research",
         description="Wide-net research with indexed findings.",
-        provider="anthropic",
+        # Defaults to claude-cli so a Max-plan user gets working cards
+        # with no API key.  Override per-card to "anthropic" + key for
+        # heavy programmatic use.
+        provider="claude-cli",
         model="claude-sonnet-4-5",
         cost=CostPolicy(
             soft_cap_usd=0.50, hard_cap_usd=2.00, soft_cap_tokens=200_000, hard_cap_tokens=600_000
@@ -49,7 +52,7 @@ _CARD_DEFAULTS: dict[str, dict] = {
     "narrow-research": dict(
         name="Narrow Research",
         description="Deep dive on one topic with citations.",
-        provider="anthropic",
+        provider="claude-cli",
         model="claude-sonnet-4-5",
         cost=CostPolicy(
             soft_cap_usd=0.40, hard_cap_usd=1.50, soft_cap_tokens=150_000, hard_cap_tokens=500_000
@@ -66,7 +69,7 @@ _CARD_DEFAULTS: dict[str, dict] = {
     "qa-on-fix": dict(
         name="QA on Fix",
         description="Adversarial review of another agent's diff.",
-        provider="anthropic",
+        provider="claude-cli",
         model="claude-sonnet-4-5",
         cost=CostPolicy(
             soft_cap_usd=0.30, hard_cap_usd=1.00, soft_cap_tokens=100_000, hard_cap_tokens=300_000
@@ -106,7 +109,7 @@ _CARD_DEFAULTS: dict[str, dict] = {
     "red-team": dict(
         name="Red Team",
         description="Adversarial reviewer that tries to break a target run's diff.",
-        provider="anthropic",
+        provider="claude-cli",
         model="claude-sonnet-4-5",
         cost=CostPolicy(
             soft_cap_usd=0.40, hard_cap_usd=1.50, soft_cap_tokens=150_000, hard_cap_tokens=400_000
@@ -126,7 +129,7 @@ _CARD_DEFAULTS: dict[str, dict] = {
             "Watcher agent that observes other runs and emits HandoffCards"
             " so the next agent (or human) can pick up the work cleanly."
         ),
-        provider="anthropic",
+        provider="claude-cli",
         model="claude-haiku-4-5",
         cost=CostPolicy(
             soft_cap_usd=0.10, hard_cap_usd=0.50, soft_cap_tokens=50_000, hard_cap_tokens=200_000
@@ -146,7 +149,9 @@ _CARD_DEFAULTS: dict[str, dict] = {
             "Asks several vendors the same question in parallel and uses a "
             "judge model to synthesise a single answer."
         ),
-        provider="anthropic",
+        # Judge defaults to the CLI; the candidates are picked at
+        # dispatch time and can mix providers freely.
+        provider="claude-cli",
         model="claude-sonnet-4-5",
         cost=CostPolicy(
             soft_cap_usd=1.50,

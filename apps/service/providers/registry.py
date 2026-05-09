@@ -8,6 +8,8 @@ OpenAI / Ollama a one-line change.
 from __future__ import annotations
 
 from apps.service.providers.anthropic import AnthropicProvider
+from apps.service.providers.claude_cli import ClaudeCLIProvider
+from apps.service.providers.gemini_cli import GeminiCLIProvider
 from apps.service.providers.google import GoogleProvider
 from apps.service.providers.ollama import OllamaProvider
 from apps.service.providers.protocol import LLMProvider
@@ -31,6 +33,10 @@ def known_providers() -> list[str]:
 
 
 def install_default_providers() -> None:
+    # CLI-backed providers first so subscription-using operators get
+    # zero-friction defaults.
+    register("claude-cli", ClaudeCLIProvider())
+    register("gemini-cli", GeminiCLIProvider())
     register("anthropic", AnthropicProvider())
     register("google", GoogleProvider())
     register("ollama", OllamaProvider())
