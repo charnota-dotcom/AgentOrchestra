@@ -81,6 +81,10 @@ class FirstRunWizard(QtWidgets.QWizard):
         layout.addSpacing(8)
         layout.addWidget(
             self._label(
+                "If you already use Claude Code on a Pro or Max subscription, "
+                "the bundled cards work out of the box — they pipe through "
+                "the local `claude` CLI and reuse your existing auth.  No "
+                "API key needed for the simple chat cards.\n\n"
                 "What stays on your machine: every instruction you write, "
                 "every transcript, every diff, all credentials.\n\n"
                 "What leaves: only the prompts and tool-call outputs the "
@@ -96,7 +100,12 @@ class FirstRunWizard(QtWidgets.QWizard):
     def _keys_page(self) -> QtWidgets.QWizardPage:
         page = QtWidgets.QWizardPage()
         page.setTitle("Provider keys")
-        page.setSubTitle("Saved to your OS keychain.  Skip any provider you don't plan to use.")
+        page.setSubTitle(
+            "If you already use Claude Code on a Pro / Max subscription, "
+            "you can skip every key here — the bundled cards default to "
+            "the local `claude` CLI and use that subscription's auth.  "
+            "Add API keys only if you want to call providers directly."
+        )
         form = QtWidgets.QFormLayout(page)
 
         self._anth = QtWidgets.QLineEdit()

@@ -8,6 +8,7 @@ OpenAI / Ollama a one-line change.
 from __future__ import annotations
 
 from apps.service.providers.anthropic import AnthropicProvider
+from apps.service.providers.claude_cli import ClaudeCLIProvider
 from apps.service.providers.google import GoogleProvider
 from apps.service.providers.ollama import OllamaProvider
 from apps.service.providers.protocol import LLMProvider
@@ -31,6 +32,9 @@ def known_providers() -> list[str]:
 
 
 def install_default_providers() -> None:
+    # claude-cli first so it shows up at the top of the providers list
+    # in the GUI — that's what most Max-plan users will pick.
+    register("claude-cli", ClaudeCLIProvider())
     register("anthropic", AnthropicProvider())
     register("google", GoogleProvider())
     register("ollama", OllamaProvider())
