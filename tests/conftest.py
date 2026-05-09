@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
@@ -11,11 +10,6 @@ import pytest
 import pytest_asyncio
 
 from apps.service.store.events import EventStore
-
-
-@pytest.fixture(scope="session")
-def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
-    return asyncio.DefaultEventLoopPolicy()
 
 
 @pytest_asyncio.fixture
@@ -46,5 +40,9 @@ def isolated_repo(tmp_path: Path) -> Iterator[Path]:
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
     (repo / "README.md").write_text("# test repo\n")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "-m", "init"],
+        check=True,
+        env=env,
+    )
     yield repo
