@@ -80,14 +80,30 @@ class WorktreeToolset:
     If ``sandbox`` is provided, reads/writes go through it (V3 opt-in
     tiers like DockerSandbox).  Otherwise we use direct filesystem I/O,
     which is the V1 LocalSandbox-equivalent default.
+
+    ``mcp_tools`` lets the dispatcher merge tool catalogs from trusted
+    MCP servers into the bundled set.  The mapping key is the public
+    tool name presented to the agent (``mcp:<server>:<tool>``); the
+    value is a callable that takes (params) and returns a coroutine
+    yielding the same dict shape our local tools produce.
     """
 
     worktree: Path
     written_files: set[str] = field(default_factory=set)
     invocations: list[ToolInvocation] = field(default_factory=list)
     sandbox: object | None = None
+    mcp_tools: dict[str, MCPRunTimeTool] = field(default_factory=dict)
 
     def tools(self) -> list[ToolDef]:
+        builtin = self._builtin_tools()
+        if not self.mcp_tools:
+            return builtin
+        # Append MCP-sourced tools.  Names are pre-prefixed with
+        # mcp:<server>:<tool> by the dispatcher so they can't shadow
+        # the bundled tools.
+        return builtin + [t.definition for t in self.mcp_tools.values()]
+
+    def _builtin_tools(self) -> list[ToolDef]:
         return [
             ToolDef(
                 name="read_file",
@@ -165,6 +181,8 @@ class WorktreeToolset:
                 content = await self._write_file(params["path"], params["content"])
             elif name == "list_files":
                 content = await self._list_files(params.get("path", "."))
+            elif name in self.mcp_tools:
+                content = await self.mcp_tools[name].invoke(params)
             else:
                 content = {"error": f"unknown tool: {name}"}
         except Exception as exc:
@@ -278,6 +296,27 @@ class WorktreeToolset:
         out = set(self.written_files)
         self.written_files.clear()
         return out
+
+
+@dataclass
+class MCPRunTimeTool:
+    """Adapter that exposes a single MCP server tool to our toolset.
+
+    The dispatcher constructs one of these per (trusted server, tool)
+    pair when it opens an agentic Run.  Agent-visible name is
+    ``mcp:<server>:<tool>`` so it can never collide with bundled tools.
+    """
+
+    server_name: str
+    tool_name: str
+    definition: ToolDef
+    invoke_fn: Any  # Callable[[dict], Awaitable[dict]]
+
+    async def invoke(self, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return await self.invoke_fn(self.tool_name, params)
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 def serialize_invocations(invocations: list[ToolInvocation]) -> str:

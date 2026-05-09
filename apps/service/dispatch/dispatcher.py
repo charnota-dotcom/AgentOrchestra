@@ -488,9 +488,11 @@ class RunDispatcher:
 
             # 2. Open the agent loop with the worktree toolset.
             sandbox = await self._open_sandbox(card, Path(branch.worktree_path))
+            mcp_tools, mcp_clients = await self._open_mcp_tools(card)
             toolset = WorktreeToolset(
                 worktree=Path(branch.worktree_path),
                 sandbox=sandbox,
+                mcp_tools=mcp_tools,
             )
             provider = get_provider(card.provider)
 
@@ -614,6 +616,11 @@ class RunDispatcher:
                         await sandbox.close()
                     except Exception:
                         log.warning("sandbox close failed", exc_info=True)
+                for client in mcp_clients:
+                    try:
+                        await client.close()
+                    except Exception:
+                        log.warning("mcp client close failed", exc_info=True)
 
             # 3. Cost accounting.
             cost = cost_for_call(card.provider, card.model, tokens_in, tokens_out)
@@ -710,6 +717,78 @@ class RunDispatcher:
                     await self.manager.abandon(branch.id, f"failed: {exc}")
                 except Exception:
                     pass
+
+    async def _open_mcp_tools(self, card: PersonalityCard):
+        """Resolve any MCP server names in card.tool_allowlist against
+        the registry, open trusted ones, and return (tool_dict, clients).
+        Untrusted / blocked / unknown / non-stdio entries are skipped
+        with a logged warning so a Run never exposes a tool the user
+        hasn't explicitly trusted.
+        """
+        from apps.service.dispatch.tools import MCPRunTimeTool, ToolDef
+        from apps.service.mcp.client import MCPClient
+        from apps.service.mcp.registry import MCPTrust, list_servers
+
+        if not card.tool_allowlist:
+            return {}, []
+        catalog = {s.name: s for s in list_servers()}
+        out_tools: dict[str, MCPRunTimeTool] = {}
+        clients: list[MCPClient] = []
+        for name in card.tool_allowlist:
+            entry = catalog.get(name)
+            if entry is None:
+                log.warning("mcp server %r not in registry; skipping", name)
+                continue
+            if entry.trust is not MCPTrust.TRUSTED:
+                log.warning(
+                    "mcp server %r trust=%s; skipping (mark TRUSTED to use)",
+                    name,
+                    entry.trust.value,
+                )
+                continue
+            if entry.transport.value != "stdio":
+                log.warning(
+                    "mcp server %r transport=%s not yet supported; skipping",
+                    name,
+                    entry.transport.value,
+                )
+                continue
+            client = MCPClient(
+                command=entry.command,
+                args=entry.args or [],
+                env=entry.env or {},
+            )
+            try:
+                await client.open()
+                tool_list = await client.list_tools()
+            except Exception as exc:
+                log.warning("mcp server %r open failed: %s", name, exc)
+                await client.close()
+                continue
+            clients.append(client)
+            for t in tool_list:
+                public_name = f"mcp:{name}:{t.name}"
+                tool_def = ToolDef(
+                    name=public_name,
+                    description=t.description or f"MCP tool {t.name} on {name}",
+                    input_schema=t.input_schema,
+                )
+
+                async def _invoke(
+                    _real_name: str,
+                    params: dict,
+                    _c: MCPClient = client,
+                    _real: str = t.name,
+                ) -> dict:
+                    return await _c.call_tool(_real, params)
+
+                out_tools[public_name] = MCPRunTimeTool(
+                    server_name=name,
+                    tool_name=t.name,
+                    definition=tool_def,
+                    invoke_fn=_invoke,
+                )
+        return out_tools, clients
 
     async def _open_sandbox(self, card: PersonalityCard, worktree: Path):
         """Open a sandbox per the card's tier; fall back to local on
