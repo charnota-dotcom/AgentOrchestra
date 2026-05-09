@@ -39,6 +39,9 @@ class _FakeChat:
         )
         yield StreamEvent(kind="finish")
 
+    async def close(self) -> None:
+        return None
+
 
 class _FakeProvider:
     name = "fake"

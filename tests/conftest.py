@@ -17,6 +17,12 @@ async def store(tmp_path: Path) -> AsyncIterator[EventStore]:
     db_path = tmp_path / "test.sqlite"
     s = EventStore(db_path)
     await s.open()
+    # Tests insert minimal stubs that don't always satisfy every
+    # referential link (a single test wants an Artifact without a real
+    # Run, etc.); production runs with FK enforcement on, but in the
+    # test fixture we disable it so we don't have to seed full FK
+    # closures for every micro-test.
+    await s.db.execute("PRAGMA foreign_keys = OFF")
     try:
         yield s
     finally:
