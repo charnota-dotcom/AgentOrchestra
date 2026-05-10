@@ -120,6 +120,27 @@
         "scripts/doctor.cmd"
       ],
       "annotation_excerpt": "says probe failed: unknown method: limits"
+    },
+    {
+      "annotation_index": 7,
+      "version": "0.1.0+everything-to-main",
+      "status": "shipped",
+      "description": "Operator second follow-up: 'problem is still here, and where is the ai comment from the previous query?'. Two things: (1) The orphan-kill fix from PR #31 (and the start.cmd PowerShell redirect fix added in this same PR) had been merged into a stack of branches but NOT into main. The operator's running code therefore had none of the fixes — restart.cmd was still the old version that misses orphans. (2) The 'previous AI comment' was in PR #31's _pending_actions.json which never reached main, so the annotator never processed it on the operator's box. Consolidated PR #28 + #29 + #30 + #31 + start.cmd PowerShell redirect into ONE branch targeting main. After this lands, the operator's update.cmd will pull all four PR's worth of fixes at once.",
+      "change_overview": [
+        "scripts/start.cmd — PowerShell `Start-Process` probes use two distinct temp files (modern PS rejects same-target redirects)",
+        "Consolidates PR #28 (script call-prefix), PR #29 (blueprint provider tie), PR #30 (canvas drag), PR #31 (orphan kill + healthz probe) into a single merge target",
+        "_pending_actions.json — appends this entry so the operator can verify the AI thread is up to date once the file lands"
+      ],
+      "risk_level": "Low",
+      "risk_note": "All upstream PRs were already passed by you and merged into the stack; this PR just consolidates them onto main. No new code beyond the start.cmd PowerShell fix.",
+      "next_steps": [
+        "Merge this PR into main, then on your machine: scripts\\update.cmd (git pull + pip install) → scripts\\restart.cmd (the new orphan-kill catches the stale service) → click Limits in the Operator Panel.",
+        "If Limits STILL says unknown method, run scripts\\doctor.cmd — the new --- Service /healthz --- section will print the actual list of registered methods and explicitly flag whether limits.check is present. Paste that output if it still doesn't help."
+      ],
+      "files_changed": [
+        "scripts/start.cmd"
+      ],
+      "annotation_excerpt": "problem is still here, and where is"
     }
   ]
 }
