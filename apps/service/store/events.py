@@ -24,11 +24,8 @@ from typing import Any
 import aiosqlite
 
 from apps.service.types import (
-    Agent,
     Approval,
     Artifact,
-    Attachment,
-    AttachmentKind,
     BlueprintVersionConflict,
     Branch,
     BranchState,
@@ -104,29 +101,13 @@ class EventStore:
         # executescript wraps in its own transaction
         await self.db.executescript(sql)
         await self.db.commit()
-        # Code-side migrations for additive column changes.  SQLite
-        # CREATE TABLE IF NOT EXISTS won't add new columns to a pre-
-        # existing table, so we ALTER explicitly with a duplicate-
-        # column guard.  Each entry: (table, column, definition).
-        for table, column, defn in (
-            ("agents", "parent_preset", "TEXT"),
-            # NOT NULL with a default so SQLite can backfill existing
-            # rows in a single ALTER.  The Python-side json.loads is
-            # tolerant of the empty-list literal we set here.
-            ("agents", "reference_agent_ids", "TEXT NOT NULL DEFAULT '[]'"),
-            # Workspace binding for repo-aware agents.  Nullable; we
-            # don't enforce the FK on existing rows since SQLite
-            # doesn't validate FKs added via ALTER TABLE.
-            ("agents", "workspace_id", "TEXT"),
-        ):
-            if not await self._has_column(table, column):
-                await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {defn}")
+        # One-shot drop of the legacy Agent path.  The operator chose
+        # "drop the tables on next startup" during the rip-out planning
+        # — see docs/DRONE_MODEL.md.  Idempotent: DROP IF EXISTS is a
+        # no-op once the rows are gone.
+        for legacy in ("attachments", "agents"):
+            await self.db.execute(f"DROP TABLE IF EXISTS {legacy}")
         await self.db.commit()
-
-    async def _has_column(self, table: str, column: str) -> bool:
-        cur = await self.db.execute(f"PRAGMA table_info({table})")
-        rows = await cur.fetchall()
-        return any(r["name"] == column for r in rows)
 
     # ------------------------------------------------------------------
     # Event append
@@ -395,123 +376,6 @@ class EventStore:
         d["node_outputs"] = body.get("node_outputs") or {}
         d["error"] = body.get("error")
         return FlowRun.model_validate(d)
-
-    # ------------------------------------------------------------------
-    # Agents (named conversations).  See types.Agent for the model.
-    # ------------------------------------------------------------------
-
-    async def insert_agent(self, agent: Agent) -> Agent:
-        # Explicit column list (rather than VALUES (?, ?, ?...)) so
-        # adding new columns via the code-side migration doesn't break
-        # this insert when schema column order shifts.
-        async with self._lock:
-            await self.db.execute(
-                """
-                INSERT INTO agents (
-                    id, name, provider, model, system,
-                    parent_id, parent_name, parent_preset,
-                    reference_agent_ids, workspace_id,
-                    transcript, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    agent.id,
-                    agent.name,
-                    agent.provider,
-                    agent.model,
-                    agent.system,
-                    agent.parent_id,
-                    agent.parent_name,
-                    agent.parent_preset,
-                    json.dumps(agent.reference_agent_ids),
-                    agent.workspace_id,
-                    json.dumps(agent.transcript),
-                    agent.created_at.isoformat(),
-                    agent.updated_at.isoformat(),
-                ),
-            )
-            await self.db.commit()
-        return agent
-
-    async def update_agent(self, agent: Agent) -> Agent:
-        agent.updated_at = utc_now()
-        async with self._lock:
-            await self.db.execute(
-                """
-                UPDATE agents
-                   SET name = ?,
-                       system = ?,
-                       reference_agent_ids = ?,
-                       workspace_id = ?,
-                       transcript = ?,
-                       updated_at = ?
-                 WHERE id = ?
-                """,
-                (
-                    agent.name,
-                    agent.system,
-                    json.dumps(agent.reference_agent_ids),
-                    agent.workspace_id,
-                    json.dumps(agent.transcript),
-                    agent.updated_at.isoformat(),
-                    agent.id,
-                ),
-            )
-            await self.db.commit()
-        return agent
-
-    @staticmethod
-    def _hydrate_agent_row(row: aiosqlite.Row) -> Agent:
-        d = dict(row)
-        d["transcript"] = json.loads(d.get("transcript") or "[]")
-        # reference_agent_ids was added later via ALTER TABLE; older
-        # rows might not have it as a recognised column even though
-        # the migration ran (e.g. mid-upgrade). Default to [].
-        raw_refs = d.get("reference_agent_ids")
-        d["reference_agent_ids"] = json.loads(raw_refs) if raw_refs else []
-        return Agent.model_validate(d)
-
-    async def get_agent(self, agent_id: str) -> Agent | None:
-        cur = await self.db.execute("SELECT * FROM agents WHERE id = ?", (agent_id,))
-        row = await cur.fetchone()
-        if not row:
-            return None
-        return self._hydrate_agent_row(row)
-
-    async def list_agents(self) -> list[Agent]:
-        cur = await self.db.execute("SELECT * FROM agents ORDER BY updated_at DESC")
-        rows = await cur.fetchall()
-        return [self._hydrate_agent_row(r) for r in rows]
-
-    async def delete_agent(self, agent_id: str) -> bool:
-        # Detach children — keep their history but null out the
-        # parent ref so cascading deletes don't take a whole tree.
-        # Also scrub the deleted id out of any other agent's
-        # ``reference_agent_ids`` JSON list so dangling references
-        # don't accumulate over time (no FK on the JSON column, so
-        # this is the only place we can do it).
-        async with self._lock:
-            await self.db.execute(
-                "UPDATE agents SET parent_id = NULL WHERE parent_id = ?", (agent_id,)
-            )
-            cur_refs = await self.db.execute(
-                "SELECT id, reference_agent_ids FROM agents WHERE reference_agent_ids LIKE ?",
-                (f'%"{agent_id}"%',),
-            )
-            for row in await cur_refs.fetchall():
-                try:
-                    refs = json.loads(row["reference_agent_ids"] or "[]")
-                except json.JSONDecodeError:
-                    refs = []
-                if agent_id in refs:
-                    refs = [r for r in refs if r != agent_id]
-                    await self.db.execute(
-                        "UPDATE agents SET reference_agent_ids = ? WHERE id = ?",
-                        (json.dumps(refs), row["id"]),
-                    )
-            cur = await self.db.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
-            await self.db.commit()
-        return (cur.rowcount or 0) > 0
 
     async def delete_workspace(self, workspace_id: str) -> bool:
         """Remove a workspace.  Runs are kept (workspace_id stays set)
@@ -885,89 +749,6 @@ class EventStore:
             )
             await self.db.commit()
         return o
-
-    # ------------------------------------------------------------------
-    # Attachments — files (images, spreadsheets) the operator drops
-    # into a chat or agent dialog.
-    # ------------------------------------------------------------------
-
-    async def insert_attachment(self, a: Attachment) -> Attachment:
-        async with self._lock:
-            await self.db.execute(
-                """
-                INSERT INTO attachments (
-                    id, agent_id, turn_index, kind, original_name,
-                    stored_path, mime_type, bytes, rendered_text, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    a.id,
-                    a.agent_id,
-                    a.turn_index,
-                    a.kind.value,
-                    a.original_name,
-                    a.stored_path,
-                    a.mime_type,
-                    a.bytes,
-                    a.rendered_text,
-                    a.created_at.isoformat(),
-                ),
-            )
-            await self.db.commit()
-        return a
-
-    @staticmethod
-    def _hydrate_attachment(row: aiosqlite.Row) -> Attachment:
-        d = dict(row)
-        d["kind"] = AttachmentKind(d["kind"])
-        return Attachment.model_validate(d)
-
-    async def get_attachment(self, attachment_id: str) -> Attachment | None:
-        cur = await self.db.execute("SELECT * FROM attachments WHERE id = ?", (attachment_id,))
-        row = await cur.fetchone()
-        return self._hydrate_attachment(row) if row else None
-
-    async def list_attachments(self, agent_id: str) -> list[Attachment]:
-        cur = await self.db.execute(
-            "SELECT * FROM attachments WHERE agent_id = ? ORDER BY created_at",
-            (agent_id,),
-        )
-        rows = await cur.fetchall()
-        return [self._hydrate_attachment(r) for r in rows]
-
-    async def get_attachments_by_ids(self, ids: list[str]) -> list[Attachment]:
-        if not ids:
-            return []
-        qmarks = ",".join("?" for _ in ids)
-        cur = await self.db.execute(f"SELECT * FROM attachments WHERE id IN ({qmarks})", ids)
-        rows = await cur.fetchall()
-        # Preserve the caller's order so the prompt assembly matches
-        # what the operator selected.
-        by_id = {r["id"]: self._hydrate_attachment(r) for r in rows}
-        return [by_id[i] for i in ids if i in by_id]
-
-    async def delete_attachment(self, attachment_id: str) -> Attachment | None:
-        async with self._lock:
-            cur = await self.db.execute("SELECT * FROM attachments WHERE id = ?", (attachment_id,))
-            row = await cur.fetchone()
-            if not row:
-                return None
-            attachment = self._hydrate_attachment(row)
-            await self.db.execute("DELETE FROM attachments WHERE id = ?", (attachment_id,))
-            await self.db.commit()
-        return attachment
-
-    async def update_attachment_turn(
-        self, attachment_id: str, turn_index: int, *, agent_id: str
-    ) -> None:
-        # Scope the UPDATE to the owning agent so a future caller
-        # can't be tricked into bumping a foreign attachment's turn.
-        async with self._lock:
-            await self.db.execute(
-                "UPDATE attachments SET turn_index = ? WHERE id = ? AND agent_id = ?",
-                (turn_index, attachment_id, agent_id),
-            )
-            await self.db.commit()
 
     # ------------------------------------------------------------------
     # Drones — see docs/DRONE_MODEL.md.

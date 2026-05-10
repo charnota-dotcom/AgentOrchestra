@@ -524,31 +524,6 @@ class ProviderError(Exception):
     pass
 
 
-class AttachmentKind(StrEnum):
-    IMAGE = "image"
-    SPREADSHEET = "spreadsheet"
-
-
-class Attachment(BaseModel):
-    """A file the operator dropped into a chat or agent dialog.
-
-    Stored on disk; the row indexes the location plus a cached
-    rendered-text view (for spreadsheets — markdown table).  Images
-    pass straight through to the CLI as a path reference.
-    """
-
-    id: str = Field(default_factory=long_id)
-    agent_id: str
-    turn_index: int = -1  # -1 = not yet attached to a turn (just uploaded)
-    kind: AttachmentKind
-    original_name: str
-    stored_path: str
-    mime_type: str
-    bytes: int
-    rendered_text: str | None = None
-    created_at: datetime = Field(default_factory=utc_now)
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -564,47 +539,8 @@ def assert_run_transition(frm: RunState, to: RunState) -> None:
         raise IllegalTransitionError(frm.value, to.value)
 
 
-class Agent(BaseModel):
-    """A named, persistent conversation with a model.
-
-    Operators give agents human names ("Agent Smith") and can spawn
-    follow-up agents that reference a parent's transcript via the
-    ``parent_id`` link.  This is deliberately distinct from
-    ``PersonalityCard`` (a template-bound card that drives a Run with
-    cost caps and a state machine).  Agents are the lay-person path:
-    just a name, a model, and a conversation.
-    """
-
-    id: str = Field(default_factory=long_id)
-    name: str
-    provider: str
-    model: str
-    system: str = ""
-    # When bound to a Workspace, the CLI subprocess is spawned with
-    # cwd = workspace.repo_path so the model's built-in Read / Bash /
-    # Edit / Grep tools can browse the project.  None = chat-only
-    # agent with no repo access.
-    workspace_id: str | None = None
-    parent_id: str | None = None
-    parent_name: str | None = None  # denormalised for cheap display
-    # Which preset created this child (summarise / annotate / deep_dive
-    # / critique / verify / custom).  Becomes the directional-edge
-    # label on the canvas so the inter-agent relationship is visible.
-    # None for top-level agents.
-    parent_preset: str | None = None
-    # Agent ids whose full transcripts are inlined as a context
-    # preamble on every send.  Lets a fresh agent (potentially a
-    # different provider / model) read prior conversations without
-    # having to be a literal child via spawn_followup.  Sticky on
-    # the agent so the context is consistent across turns.
-    reference_agent_ids: list[str] = Field(default_factory=list)
-    transcript: list[dict[str, str]] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
-
-
 # ---------------------------------------------------------------------------
-# Drones — the new model.  See docs/DRONE_MODEL.md for the full design.
+# Drones — see docs/DRONE_MODEL.md for the full design.
 #
 # A *drone* is a messenger our app dispatches.  It carries a frozen
 # blueprint config + an action's live state to whichever external AI

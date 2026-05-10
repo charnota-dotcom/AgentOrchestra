@@ -278,8 +278,7 @@ class CanvasPage(QtWidgets.QWidget):
                 (
                     n
                     for n in self.scene.nodes()
-                    if isinstance(n, DroneActionNode)
-                    and n.action.get("id") == action.get("id")
+                    if isinstance(n, DroneActionNode) and n.action.get("id") == action.get("id")
                 ),
                 None,
             )
@@ -358,9 +357,7 @@ class CanvasPage(QtWidgets.QWidget):
         dlg.raise_()
         dlg.activateWindow()
 
-    def _refresh_drone_node(
-        self, node: DroneActionNode, updated_action: dict[str, Any]
-    ) -> None:
+    def _refresh_drone_node(self, node: DroneActionNode, updated_action: dict[str, Any]) -> None:
         node.action = updated_action
         snapshot = updated_action.get("blueprint_snapshot") or {}
         transcript = updated_action.get("transcript") or []
@@ -683,8 +680,7 @@ class CanvasPage(QtWidgets.QWidget):
                             for i in range(self.palette.drones_list.count())
                         ]
                         if c is not None
-                        and c.data(QtCore.Qt.ItemDataRole.UserRole)["action"].get("id")
-                        == action_id
+                        and c.data(QtCore.Qt.ItemDataRole.UserRole)["action"].get("id") == action_id
                     ),
                     {"id": action_id, "blueprint_snapshot": {"name": "Missing drone"}},
                 )

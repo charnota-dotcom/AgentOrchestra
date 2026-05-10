@@ -1,6 +1,8 @@
 # AgentOrchestra
 
-**Desktop orchestrator for multi-vendor AI sub-agents on Windows.** Drive Claude Code (Max plan), Gemini CLI (Free / AI Pro / AI Ultra), and local Ollama models from a single PySide6 GUI: chat with one model, spawn follow-up agents that build on the prior transcript, drag persistent conversations onto a canvas to see who can see what, attach images and spreadsheets, bind agents to a specific git repo so they can read / edit code with their built-in file tools, and design dispatchable Flow graphs that hand a task off through Trigger → Agent → Branch → Merge → Human → Output nodes.
+**Desktop orchestrator for multi-vendor AI sub-agents on Windows.** Drive Claude Code (Max plan), Gemini CLI (Free / AI Pro / AI Ultra), and local Ollama models from a single PySide6 GUI: design reusable **Blueprints** (templates with provider, model, system persona, default skills + role), deploy them as **Drones** (live conversations with their own transcripts), drag drones onto a canvas, attach repos so they can read / edit code with their built-in file tools, and design dispatchable Flow graphs that hand a task off through Trigger → Agent → Branch → Merge → Human → Output nodes.
+
+> **Heads up — Phase 6 rename.** The legacy "Agent" abstraction has been replaced by the Drone model (blueprints + actions).  Existing chats from earlier versions are dropped on first launch after the upgrade.  See `docs/DRONE_MODEL.md` for the design and `CHANGELOG.md` for what changed.
 
 Subscription-only by default — no API keys are required for the day-to-day flow. Auth piggybacks on whatever your local `claude` and `gemini` CLIs are already signed in to.
 

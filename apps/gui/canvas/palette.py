@@ -204,11 +204,7 @@ class PalettePanel(QtWidgets.QWidget):
 
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        skills = [
-            s.strip()
-            for s in skills_input.text().replace("\n", ",").split(",")
-            if s.strip()
-        ]
+        skills = [s.strip() for s in skills_input.text().replace("\n", ",").split(",") if s.strip()]
         await self._do_deploy(
             blueprint_id=bp_combo.currentData(),
             workspace_id=ws_combo.currentData() or None,
