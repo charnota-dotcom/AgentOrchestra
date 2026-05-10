@@ -1,16 +1,29 @@
 @echo off
-rem Stop AgentOrchestra.  Closes the GUI window (which atexit-kills
-rem the supervised service) and any orphaned service started directly.
+rem Stop AgentOrchestra.  Three-pass kill so nothing orphans:
+rem
+rem 1. Whatever window title we set on the GUI cmd host
+rem    (`AgentOrchestra` from launch.cmd / ops.cmd).
+rem 2. Whatever window title we set on a manually-started service
+rem    cmd window (`AgentOrchestra Service`).
+rem 3. Whatever process is actually listening on 127.0.0.1:8765.
+rem    This catches the supervisor-spawned service which has
+rem    ``CREATE_NO_WINDOW`` and so has NO window title for taskkill
+rem    to match.  Bulletproof, regardless of how the service was
+rem    started.
 
 echo Stopping AgentOrchestra...
 
-rem GUI window (titled "AgentOrchestra") and any of its child
-rem python.exe processes (the service the GUI spawned).
 taskkill /FI "WINDOWTITLE eq AgentOrchestra*" /F /T >nul 2>&1
-
-rem Any service started by hand from a separate cmd that didn't
-rem inherit the GUI window title.
 taskkill /FI "WINDOWTITLE eq AgentOrchestra Service*" /F /T >nul 2>&1
+
+rem Kill anything listening on the orchestrator port.  Skips the
+rem header line, picks the PID column (5th token), kills it.
+for /f "tokens=5" %%P in (
+    'netstat -ano ^| findstr ":8765" ^| findstr "LISTENING"'
+) do (
+    echo   killing PID %%P (listening on :8765)
+    taskkill /F /PID %%P >nul 2>&1
+)
 
 echo Done.
 echo.
