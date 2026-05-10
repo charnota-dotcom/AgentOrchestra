@@ -18,10 +18,13 @@ where claude >nul 2>&1
 if errorlevel 1 (
     echo claude: NOT FOUND on PATH.  Run scripts\test-claude.cmd first.
 ) else (
-    claude --version
+    rem `call` because `claude` is an npm-installed .cmd shim;
+    rem bare invocation from a .cmd file is a tail-call and would
+    rem drop us out of the script before the rest of the checks run.
+    call claude --version
     echo.
     echo Trying ``claude status`` ^(may not exist in older versions^):
-    claude status 2>&1
+    call claude status 2>&1
     echo.
     echo Per-message remaining-quota requires the interactive ``/status``
     echo flow ^(piping ``/status`` into ``claude`` does NOT work — slash
@@ -38,10 +41,12 @@ where gemini >nul 2>&1
 if errorlevel 1 (
     echo gemini: NOT FOUND on PATH.  Run scripts\test-gemini.cmd first.
 ) else (
-    gemini --version
+    rem `call` because `gemini` is an npm-installed .cmd shim;
+    rem bare invocation from a .cmd file is a tail-call.
+    call gemini --version
     echo.
     echo Trying ``gemini status`` ^(may not exist in older versions^):
-    gemini status 2>&1
+    call gemini status 2>&1
     echo.
     echo Per-tier quota: see the dashboards below.  ``gemini /quota``
     echo is not a real command and the older script versions calling

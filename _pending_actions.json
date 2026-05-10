@@ -31,6 +31,30 @@
         "apps/service/main.py"
       ],
       "annotation_excerpt": "I've created agent Taylor Grift, but it's not"
+    },
+    {
+      "annotation_index": 9,
+      "version": "0.1.0+start-cmd-call-fix",
+      "status": "no_change_needed",
+      "description": "Operator saw 'Reload failed: unknown method: blueprints.list' on the Blueprints tab. The friendlier-error wrapper from PR #19 (apps/gui/ipc/client.py:_friendlier) is already firing the correct hint: 'service is running an older code version than the GUI. Run scripts\\restart.cmd…' This is the intended diagnostic surface for the post-merge stale-service case (Phase 6 added blueprints.* and drones.* RPCs that an old service process won't know). No GUI code change can fix the underlying mismatch — the operator must restart the service so it picks up the new RPC registrations.",
+      "change_overview": [
+        "No code change for annotation #9 itself.",
+        "Bundled in this attempt: scripts/start.cmd, scripts/test-claude.cmd, scripts/test-gemini.cmd, scripts/limits.cmd, scripts/doctor.cmd — every bare `claude` / `gemini` invocation now goes through `call …` so cmd.exe doesn't tail-call out of the script (operator hit this earlier: pre-flight printed `claude --version` then exited without ever probing Gemini or launching the GUI; doctor.cmd had the same bug — `where claude && claude --version` would have bailed before the port / data-dir / annotator / version sections)."
+      ],
+      "risk_level": "Low",
+      "risk_note": "_friendlier text is unchanged; operator workaround (restart the service) was already the documented fix.",
+      "next_steps": [
+        "Run scripts\\restart.cmd (or click Restart in the Operator Panel) so the running service picks up the blueprints.* and drones.* registrations. Reload the Blueprints tab — the error should go away.",
+        "Future: consider auto-detecting 'unknown method' on a tab's first reload and offering a one-click 'Restart service' button inline. Tracked as a follow-up; not in scope for this attempt."
+      ],
+      "files_changed": [
+        "scripts/start.cmd",
+        "scripts/test-claude.cmd",
+        "scripts/test-gemini.cmd",
+        "scripts/limits.cmd",
+        "scripts/doctor.cmd"
+      ],
+      "annotation_excerpt": "error text - reload failed"
     }
   ]
 }
