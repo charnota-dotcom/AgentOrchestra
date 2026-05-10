@@ -23,8 +23,10 @@ if errorlevel 1 (
     echo Trying ``claude status`` ^(may not exist in older versions^):
     claude status 2>&1
     echo.
-    echo Trying ``claude /status`` ^(slash command^):
-    echo /status | claude 2>&1
+    echo Per-message remaining-quota requires the interactive ``/status``
+    echo flow ^(piping ``/status`` into ``claude`` does NOT work — slash
+    echo commands are only honoured in interactive mode^).  Open a
+    echo terminal, run:  claude   then type:  /status
     echo.
     echo Pro / Max plan dashboard:
     echo   https://claude.ai/settings/usage
@@ -41,8 +43,9 @@ if errorlevel 1 (
     echo Trying ``gemini status`` ^(may not exist in older versions^):
     gemini status 2>&1
     echo.
-    echo Trying ``gemini /quota``:
-    gemini /quota 2>&1
+    echo Per-tier quota: see the dashboards below.  ``gemini /quota``
+    echo is not a real command and the older script versions calling
+    echo it produced misleading "command not found" output.
     echo.
     echo Subscription dashboard:
     echo   https://aistudio.google.com/app/apikey
