@@ -1,42 +1,43 @@
 @echo off
 rem Verify CLI connections, then launch AgentOrchestra.
 rem
-rem Three steps:
+rem  [1/3] Probe `claude --version` (binary check)
+rem        + a hard-time-bounded `claude -p "ping"` (auth check).
+rem  [2/3] Same probes against `gemini`.
+rem  [3/3] If at least one provider is OK, launch the GUI.
+rem        Otherwise abort with fix-it instructions.
 rem
-rem   [1/3] Probe `claude --version` (binary check)
-rem         + a hard-time-bounded `claude -p "ping"` (auth check).
-rem   [2/3] Same probes against `gemini`.
-rem   [3/3] If at least one provider is OK, launch the GUI.
-rem         Otherwise abort with fix-it instructions.
+rem LF-safe rewrite (this file used to fail silently when stored
+rem with LF line endings — cmd.exe drops nested parenthesised
+rem `if/else if/else` blocks and `goto :label` jumps under LF).  We
+rem now avoid those constructs entirely:
 rem
-rem Use this for first-of-day belt-and-braces confidence.  Otherwise
-rem `launch.cmd` / `restart.cmd` are quicker.
+rem   * NO `goto :label` jumps — sequential commands only.
+rem   * NO nested parenthesised `if/else` — every branch is a
+rem     single-line `if "x"=="y" command` so cmd parses each line
+rem     independently and CRLF/LF stops mattering.
+rem   * Each subprocess's exit code captured to a NAMED var
+rem     immediately after the call.
+rem   * The headless `-p` probe is wrapped in PowerShell with a
+rem     hard 20-second timeout so a hung CLI can't freeze the
+rem     script forever.
 rem
-rem Implementation notes (this rewrite):
-rem   * `setlocal enabledelayedexpansion` + `!errorlevel!` so nested
-rem     ifs don't pick up parse-time stale values.
-rem   * Each subprocess's exit code is captured into a NAMED variable
-rem     immediately after the call, OUTSIDE any parenthesised block,
-rem     because `%errorlevel%` inside `(...)` is unreliable in cmd.exe.
-rem   * The headless `-p` probe is wrapped in PowerShell with a hard
-rem     20-second timeout — the previous version had no timeout at all,
-rem     so a hung claude / gemini would freeze the script forever and
-rem     the operator would never see the Gemini check or the launch.
-rem   * Both Claude AND Gemini blocks ALWAYS run regardless of what
-rem     happened to the first.
+rem Belt-and-braces — `.gitattributes` pins these files to CRLF on
+rem checkout, but if a stale local copy survives, this script still
+rem runs end-to-end.
 
 setlocal enabledelayedexpansion
 set REPO=%~dp0..
 
-if not exist "%REPO%\.venv\Scripts\activate.bat" (
-    echo [start] No virtual environment found at %REPO%\.venv
-    echo [start] Run setup.cmd first to install AgentOrchestra.
-    pause
-    exit /b 1
-)
+if not exist "%REPO%\.venv\Scripts\activate.bat" echo [start] No virtual environment found at %REPO%\.venv
+if not exist "%REPO%\.venv\Scripts\activate.bat" echo [start] Run setup.cmd first to install AgentOrchestra.
+if not exist "%REPO%\.venv\Scripts\activate.bat" pause
+if not exist "%REPO%\.venv\Scripts\activate.bat" exit /b 1
 
 set CLAUDE_OK=0
 set GEMINI_OK=0
+set CLAUDE_PRESENT=0
+set GEMINI_PRESENT=0
 
 echo ================ Pre-flight ================
 echo.
@@ -47,28 +48,24 @@ rem ====================================================================
 echo [1/3] Claude Code CLI
 where claude >nul 2>&1
 set CLAUDE_PATH_RC=!errorlevel!
-if not "!CLAUDE_PATH_RC!"=="0" (
-    echo   claude: NOT FOUND on PATH.
-    echo           Install with:  npm install -g @anthropic-ai/claude-code
-    goto :gemini
-)
+if "!CLAUDE_PATH_RC!"=="0" set CLAUDE_PRESENT=1
 
-claude --version
-echo   probing 'claude -p ping' with a hard 20-second timeout...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p = Start-Process -FilePath 'claude' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput 'NUL' -RedirectStandardError 'NUL'; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 }"
-set CLAUDE_PROBE_RC=!errorlevel!
-if "!CLAUDE_PROBE_RC!"=="0" (
-    echo   claude: OK
-    set CLAUDE_OK=1
-) else if "!CLAUDE_PROBE_RC!"=="124" (
-    echo   claude: probe TIMED OUT ^(^>20s^).  Probably hung on auth.
-    echo           Run 'claude' interactively, type '/login', then re-run start.cmd.
-) else (
-    echo   claude: probe FAILED ^(exit !CLAUDE_PROBE_RC!^).
-    echo           Likely 'Not logged in' — run 'claude' then '/login'.
-)
+if "!CLAUDE_PRESENT!"=="0" echo   claude: NOT FOUND on PATH.
+if "!CLAUDE_PRESENT!"=="0" echo           Install with:  npm install -g @anthropic-ai/claude-code
 
-:gemini
+if "!CLAUDE_PRESENT!"=="1" claude --version
+if "!CLAUDE_PRESENT!"=="1" echo   probing 'claude -p ping' with a hard 20-second timeout...
+if "!CLAUDE_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p = Start-Process -FilePath 'claude' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput 'NUL' -RedirectStandardError 'NUL'; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 }"
+if "!CLAUDE_PRESENT!"=="1" set CLAUDE_PROBE_RC=!errorlevel!
+if "!CLAUDE_PRESENT!"=="0" set CLAUDE_PROBE_RC=-1
+
+if "!CLAUDE_PROBE_RC!"=="0" set CLAUDE_OK=1
+if "!CLAUDE_PROBE_RC!"=="0" echo   claude: OK
+if "!CLAUDE_PROBE_RC!"=="124" echo   claude: probe TIMED OUT ^(^>20s^).  Probably hung on auth.
+if "!CLAUDE_PROBE_RC!"=="124" echo           Run 'claude' interactively, type '/login', then re-run start.cmd.
+if "!CLAUDE_PRESENT!"=="1" if not "!CLAUDE_PROBE_RC!"=="0" if not "!CLAUDE_PROBE_RC!"=="124" echo   claude: probe FAILED ^(exit !CLAUDE_PROBE_RC!^).
+if "!CLAUDE_PRESENT!"=="1" if not "!CLAUDE_PROBE_RC!"=="0" if not "!CLAUDE_PROBE_RC!"=="124" echo           Likely 'Not logged in' — run 'claude' then '/login'.
+
 echo.
 
 rem ====================================================================
@@ -77,57 +74,48 @@ rem ====================================================================
 echo [2/3] Gemini CLI
 where gemini >nul 2>&1
 set GEMINI_PATH_RC=!errorlevel!
-if not "!GEMINI_PATH_RC!"=="0" (
-    echo   gemini: NOT FOUND on PATH.
-    echo           Install with:  npm install -g @google/gemini-cli
-    goto :verdict
-)
+if "!GEMINI_PATH_RC!"=="0" set GEMINI_PRESENT=1
 
-gemini --version
-echo   probing 'gemini -p ping' with a hard 20-second timeout...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p = Start-Process -FilePath 'gemini' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput 'NUL' -RedirectStandardError 'NUL'; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 }"
-set GEMINI_PROBE_RC=!errorlevel!
-if "!GEMINI_PROBE_RC!"=="0" (
-    echo   gemini: OK
-    set GEMINI_OK=1
-) else if "!GEMINI_PROBE_RC!"=="124" (
-    echo   gemini: probe TIMED OUT ^(^>20s^).  Probably hung on auth.
-    echo           Run 'gemini' interactively to sign in, then re-run start.cmd.
-) else (
-    echo   gemini: probe FAILED ^(exit !GEMINI_PROBE_RC!^).
-    echo           Likely an auth issue — run 'gemini' to sign in.
-)
+if "!GEMINI_PRESENT!"=="0" echo   gemini: NOT FOUND on PATH.
+if "!GEMINI_PRESENT!"=="0" echo           Install with:  npm install -g @google/gemini-cli
 
-:verdict
+if "!GEMINI_PRESENT!"=="1" gemini --version
+if "!GEMINI_PRESENT!"=="1" echo   probing 'gemini -p ping' with a hard 20-second timeout...
+if "!GEMINI_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p = Start-Process -FilePath 'gemini' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput 'NUL' -RedirectStandardError 'NUL'; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 }"
+if "!GEMINI_PRESENT!"=="1" set GEMINI_PROBE_RC=!errorlevel!
+if "!GEMINI_PRESENT!"=="0" set GEMINI_PROBE_RC=-1
+
+if "!GEMINI_PROBE_RC!"=="0" set GEMINI_OK=1
+if "!GEMINI_PROBE_RC!"=="0" echo   gemini: OK
+if "!GEMINI_PROBE_RC!"=="124" echo   gemini: probe TIMED OUT ^(^>20s^).  Probably hung on auth.
+if "!GEMINI_PROBE_RC!"=="124" echo           Run 'gemini' interactively to sign in, then re-run start.cmd.
+if "!GEMINI_PRESENT!"=="1" if not "!GEMINI_PROBE_RC!"=="0" if not "!GEMINI_PROBE_RC!"=="124" echo   gemini: probe FAILED ^(exit !GEMINI_PROBE_RC!^).
+if "!GEMINI_PRESENT!"=="1" if not "!GEMINI_PROBE_RC!"=="0" if not "!GEMINI_PROBE_RC!"=="124" echo           Likely an auth issue — run 'gemini' to sign in.
+
 echo.
 
 rem ====================================================================
 rem [3/3] Verdict + launch
 rem ====================================================================
 echo [3/3] Verdict
-if "!CLAUDE_OK!"=="1" (
-    echo   Claude:  ready
-) else (
-    echo   Claude:  unavailable
-)
-if "!GEMINI_OK!"=="1" (
-    echo   Gemini:  ready
-) else (
-    echo   Gemini:  unavailable
-)
+if "!CLAUDE_OK!"=="1" echo   Claude:  ready
+if not "!CLAUDE_OK!"=="1" echo   Claude:  unavailable
+if "!GEMINI_OK!"=="1" echo   Gemini:  ready
+if not "!GEMINI_OK!"=="1" echo   Gemini:  unavailable
 echo.
 
-if "!CLAUDE_OK!"=="0" if "!GEMINI_OK!"=="0" (
-    echo Both providers failed.  Not launching the app.
-    echo.
-    echo Fixes:
-    echo   * Run scripts\test-claude.cmd  ^(diagnoses Claude auth^)
-    echo   * Run scripts\test-gemini.cmd  ^(diagnoses Gemini auth^)
-    echo   * Then re-run scripts\start.cmd
-    echo.
-    pause
-    exit /b 1
-)
+set BOTH_FAILED=0
+if "!CLAUDE_OK!"=="0" if "!GEMINI_OK!"=="0" set BOTH_FAILED=1
+
+if "!BOTH_FAILED!"=="1" echo Both providers failed.  Not launching the app.
+if "!BOTH_FAILED!"=="1" echo.
+if "!BOTH_FAILED!"=="1" echo Fixes:
+if "!BOTH_FAILED!"=="1" echo   * Run scripts\test-claude.cmd  ^(diagnoses Claude auth^)
+if "!BOTH_FAILED!"=="1" echo   * Run scripts\test-gemini.cmd  ^(diagnoses Gemini auth^)
+if "!BOTH_FAILED!"=="1" echo   * Then re-run scripts\start.cmd
+if "!BOTH_FAILED!"=="1" echo.
+if "!BOTH_FAILED!"=="1" pause
+if "!BOTH_FAILED!"=="1" exit /b 1
 
 echo Launching AgentOrchestra...
 start "AgentOrchestra" cmd /k "cd /d %REPO% && .venv\Scripts\activate.bat && python -m apps.gui.main"
@@ -136,4 +124,3 @@ echo.
 echo Press any key to close this pre-flight window.
 pause >nul
 endlocal
-
