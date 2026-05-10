@@ -410,6 +410,7 @@ class Handlers:
             description=params.get("description", ""),
             nodes=params.get("nodes", []),
             edges=params.get("edges", []),
+            is_draft=bool(params.get("is_draft", False)),
         )
         await self.store.insert_flow(flow)
         return {"id": flow.id}
@@ -422,6 +423,8 @@ class Handlers:
         flow.description = params.get("description", flow.description)
         flow.nodes = params.get("nodes", flow.nodes)
         flow.edges = params.get("edges", flow.edges)
+        if "is_draft" in params:
+            flow.is_draft = bool(params["is_draft"])
         flow.updated_at = utc_now()
         await self.store.update_flow(flow)
         return {"id": flow.id, "version": flow.version}
@@ -434,6 +437,11 @@ class Handlers:
         flow = await self.store.get_flow(params["flow_id"])
         if not flow:
             raise ValueError(f"unknown flow: {params['flow_id']}")
+        if flow.is_draft:
+            raise ValueError(
+                "flow is in draft mode — flip the Draft toggle off "
+                "in the Canvas toolbar to promote it to Live first."
+            )
         run = await self.flow_executor.dispatch(flow)
         return {"run_id": run.id}
 
@@ -625,6 +633,10 @@ class Handlers:
         reply = "".join(chunks)
         agent.transcript.append({"role": "assistant", "content": reply})
         await self.store.update_agent(agent)
+        # Record the send for the in-app message-tally counter so the
+        # Limits tab can show "X / cap" against the published plan
+        # caps without having to ask the CLI.
+        await self.store.record_provider_message(agent.provider, agent.model)
         return {"reply": reply, "agent": agent.model_dump(mode="json")}
 
     async def agents_spawn_followup(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -760,13 +772,23 @@ class Handlers:
             }
         )
 
+        from apps.service.limits import (
+            DATA_AS_OF,
+            claude_plans,
+            context_windows,
+            gemini_plans,
+        )
+
         return {
+            "data_as_of": DATA_AS_OF,
+            "context_windows": context_windows(),
             "providers": [
                 {
                     "id": "claude-cli",
                     "label": "Claude Code (Pro / Max plan)",
                     "version": claude_version,
                     "status": claude_status,
+                    "plans": claude_plans(),
                     "dashboards": [
                         {
                             "label": "Pro / Max usage dashboard",
@@ -775,10 +797,9 @@ class Handlers:
                         {"label": "Subscription page", "url": "https://claude.ai/settings"},
                     ],
                     "note": (
-                        "Per-message remaining-quota numbers aren't returned "
-                        "headlessly.  For a live readout, run ``claude`` in a "
-                        "terminal and type ``/status``.  The dashboards above "
-                        "show your plan tier, billing and usage history."
+                        "Per-message remaining-count isn't returned "
+                        "headlessly.  Caps below are the published plan "
+                        "limits; the dashboards above show live usage."
                     ),
                 },
                 {
@@ -786,6 +807,7 @@ class Handlers:
                     "label": "Gemini CLI",
                     "version": gemini_version,
                     "status": gemini_status,
+                    "plans": gemini_plans(),
                     "dashboards": [
                         {"label": "Gemini app + plan", "url": "https://gemini.google.com/"},
                         {
@@ -794,14 +816,41 @@ class Handlers:
                         },
                     ],
                     "note": (
-                        "Headless quota readout isn't documented.  Run "
-                        "``gemini`` interactively for a `/quota` style "
-                        "command if your version supports it; otherwise "
-                        "use the dashboards above."
+                        "Headless quota readout isn't documented.  Caps "
+                        "below are the published plan limits; the "
+                        "dashboards above show live usage."
                     ),
                 },
             ],
         }
+
+    async def limits_usage(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Local message-send tally per provider.
+
+        Returns rolling counts for the three windows operators care
+        about: 5 hours (Claude Pro/Max session window), 24 hours
+        (Gemini daily) and 7 days (Claude weekly).  Counts come from
+        the ``provider_messages`` table populated by every successful
+        agents.send.  Independent of any CLI status command — this
+        is what *we* observed.
+        """
+        from datetime import timedelta
+
+        from apps.service.types import utc_now
+
+        now = utc_now()
+        windows = {
+            "5h": (now - timedelta(hours=5)).isoformat(),
+            "24h": (now - timedelta(hours=24)).isoformat(),
+            "7d": (now - timedelta(days=7)).isoformat(),
+        }
+        out: dict[str, dict[str, int]] = {}
+        for provider in ("claude-cli", "gemini-cli"):
+            counts: dict[str, int] = {}
+            for label, since_iso in windows.items():
+                counts[label] = await self.store.count_provider_messages(provider, since_iso)
+            out[provider] = counts
+        return {"providers": out, "checked_at": now.isoformat()}
 
     async def hooks_status(self, params: dict[str, Any]) -> dict[str, Any]:
         return hook_status()
@@ -873,6 +922,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
     server.register("limits.check", h.limits_check)
+    server.register("limits.usage", h.limits_usage)
     server.register("hooks.status", h.hooks_status)
     server.register("hooks.install", h.hooks_install)
     server.register("hooks.uninstall", h.hooks_uninstall)

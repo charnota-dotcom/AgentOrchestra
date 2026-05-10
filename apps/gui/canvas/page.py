@@ -36,6 +36,7 @@ from apps.gui.canvas.commands import (
 from apps.gui.canvas.edges import DraftEdge, Edge
 from apps.gui.canvas.inspector import InspectorPanel
 from apps.gui.canvas.layout import auto_layout
+from apps.gui.canvas.lineage_box import LineageBox
 from apps.gui.canvas.minimap import Minimap
 from apps.gui.canvas.nodes.agent import AgentNode
 from apps.gui.canvas.nodes.base import BaseNode, NodeStatus
@@ -89,6 +90,13 @@ class CanvasPage(QtWidgets.QWidget):
         # Per-node "drag start" position so we can produce a single
         # MoveNodeCommand per drag rather than one per pixel of motion.
         self._drag_start: dict[str, QtCore.QPointF] = {}
+        # Lineage cluster boxes — one per parent that has at least
+        # one descendant on the canvas.  Recomputed on every drop
+        # via _refresh_lineage_boxes().
+        self._lineage_boxes: list[LineageBox] = []
+        # Draft mode flag mirrors Flow.is_draft.  Run is gated when
+        # True; the toolbar shows a "Draft" badge.
+        self._is_draft: bool = False
 
         # Layout: left palette | centre canvas | right inspector
         root = QtWidgets.QHBoxLayout(self)
@@ -168,6 +176,25 @@ class CanvasPage(QtWidgets.QWidget):
                 btn.setToolTip(f"{label} ({shortcut})")
             btn.clicked.connect(slot)  # type: ignore[arg-type]
             h.addWidget(btn)
+        h.addSpacing(8)
+
+        # Draft toggle — Run is disabled while on.  Mirrors
+        # Flow.is_draft on save/load; flipping it locally also
+        # updates the canvas tint via the toolbar badge.
+        self.draft_btn = QtWidgets.QPushButton("Draft")
+        self.draft_btn.setCheckable(True)
+        self.draft_btn.setToolTip(
+            "When on, this canvas is a scratchpad.  You can plan "
+            "freely but Run is disabled until you flip it off "
+            "(promoting the flow to Live)."
+        )
+        self.draft_btn.setStyleSheet(
+            "QPushButton{padding:4px 12px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;}"
+            "QPushButton:checked{background:#a96b00;color:#fff;border-color:#a96b00;}"
+        )
+        self.draft_btn.toggled.connect(self._on_draft_toggled)  # type: ignore[arg-type]
+        h.addWidget(self.draft_btn)
         h.addSpacing(8)
 
         # Visibility toggle.  When ON + a ConversationNode is
@@ -268,6 +295,7 @@ class CanvasPage(QtWidgets.QWidget):
         # to / from it.
         if isinstance(node, ConversationNode):
             self._refresh_lineage_edges()
+            self._refresh_lineage_boxes()
 
     def _wire_node(self, node: BaseNode) -> None:
         for port in node.input_ports + node.output_ports:
@@ -405,6 +433,62 @@ class CanvasPage(QtWidgets.QWidget):
                 cluster.add(child)
                 frontier.append(child)
         return cluster
+
+    def _on_draft_toggled(self, on: bool) -> None:
+        self._is_draft = on
+        # Visual feedback in the title — Run button gets disabled by
+        # the existing _on_run_clicked guard.
+        if on:
+            self.run_btn.setEnabled(False)
+            self.run_btn.setToolTip("Draft mode — flip Draft off to enable Run.")
+        else:
+            self.run_btn.setEnabled(True)
+            self.run_btn.setToolTip("")
+
+    def _refresh_lineage_boxes(self) -> None:
+        """Draw a translucent box around each lineage cluster on the
+        canvas.  Re-runs after any add / remove / load.  Operator
+        can read at a glance which conversations form a family.
+        """
+        # Tear down existing boxes first.
+        for box in self._lineage_boxes:
+            box.detach()
+            self.scene.removeItem(box)
+        self._lineage_boxes.clear()
+
+        convos = [n for n in self.scene.nodes() if isinstance(n, ConversationNode)]
+        if not convos:
+            return
+        by_id: dict[str, ConversationNode] = {
+            n.agent.get("id"): n for n in convos if n.agent.get("id")
+        }
+        # Group nodes by their root ancestor id.  Walk parent_id up
+        # until we hit a node whose parent isn't on the canvas (or
+        # whose parent_id is None).
+        groups: dict[str, list[ConversationNode]] = {}
+        for node in convos:
+            cursor = node
+            while True:
+                parent_id = cursor.agent.get("parent_id")
+                if parent_id and parent_id in by_id:
+                    cursor = by_id[parent_id]
+                else:
+                    break
+            root_id = cursor.agent.get("id")
+            if root_id is None:
+                continue
+            groups.setdefault(root_id, []).append(node)
+
+        for root_id, members in groups.items():
+            # A "cluster" only makes sense if there's ≥ 2 nodes
+            # (otherwise it's just a node with a wrapper around it).
+            if len(members) < 2:
+                continue
+            root_node = by_id.get(root_id)
+            label = root_node.agent.get("name", "?") if root_node else "?"
+            box = LineageBox(label, members)
+            self.scene.addItem(box)
+            self._lineage_boxes.append(box)
 
     def _refresh_lineage_edges(self) -> None:
         """Auto-draw a directional, labelled edge between a parent
@@ -636,6 +720,7 @@ class CanvasPage(QtWidgets.QWidget):
     async def _save_flow_async(self) -> None:
         payload = {
             "name": self._flow_name,
+            "is_draft": self._is_draft,
             "nodes": [n.to_payload() for n in self.scene.nodes()],
             "edges": [
                 {
@@ -690,6 +775,12 @@ class CanvasPage(QtWidgets.QWidget):
         self._new_flow()
         self._flow_id = flow.get("id")
         self._flow_name = flow.get("name", "Untitled flow")
+        # Flow.is_draft is on the top-level dict; toggle the toolbar
+        # so Run is gated correctly.
+        is_draft = bool(flow.get("is_draft", False))
+        if hasattr(self, "draft_btn"):
+            self.draft_btn.setChecked(is_draft)
+        self._is_draft = is_draft
         node_index: dict[str, BaseNode] = {}
         for n in flow.get("nodes", []) or []:
             node_type = n.get("type")
@@ -758,6 +849,7 @@ class CanvasPage(QtWidgets.QWidget):
         # Re-render lineage edges for any conversation nodes the
         # loaded flow brought back onto the canvas.
         self._refresh_lineage_edges()
+        self._refresh_lineage_boxes()
         self.inspector.show_for([])
         self.view.fit_all()
 

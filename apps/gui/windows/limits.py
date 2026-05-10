@@ -119,15 +119,32 @@ class LimitsPage(QtWidgets.QWidget):
             self.status_line.setText(f"Probe failed: {exc}")
             self.refresh_btn.setEnabled(True)
             return
-        self._render_providers(res.get("providers", []))
+        # Local-tally is cheap (one SQL count per window per
+        # provider); fetch it alongside the probe so cards render
+        # in one shot.
+        try:
+            usage = await self.client.call("limits.usage", {})
+        except Exception:
+            usage = {"providers": {}}
+        self._render_providers(
+            res.get("providers", []),
+            res.get("context_windows", {}),
+            res.get("data_as_of", "?"),
+            usage.get("providers", {}),
+        )
         self.status_line.setText(
             f"Last checked: {QtCore.QDateTime.currentDateTime().toString('HH:mm:ss')}  "
             f"·  Cooldown: {self._REFRESH_COOLDOWN_SECONDS // 60} min"
         )
         self.refresh_btn.setEnabled(True)
 
-    def _render_providers(self, providers: list[dict[str, Any]]) -> None:
-        # Clear existing cards.
+    def _render_providers(
+        self,
+        providers: list[dict[str, Any]],
+        context_windows: dict[str, int],
+        data_as_of: str,
+        local_usage: dict[str, dict[str, int]],
+    ) -> None:
         while self._cards_layout.count():
             item = self._cards_layout.takeAt(0)
             w = item.widget() if item else None
@@ -135,10 +152,22 @@ class LimitsPage(QtWidgets.QWidget):
                 w.deleteLater()
 
         for p in providers:
-            self._cards_layout.addWidget(self._build_card(p))
+            self._cards_layout.addWidget(
+                self._build_card(p, context_windows, data_as_of, local_usage)
+            )
+        # Per-model context-window summary card so the operator sees
+        # at a glance how big each model's prompt budget is.
+        if context_windows:
+            self._cards_layout.addWidget(self._build_context_card(context_windows))
         self._cards_layout.addStretch(1)
 
-    def _build_card(self, provider: dict[str, Any]) -> QtWidgets.QWidget:
+    def _build_card(
+        self,
+        provider: dict[str, Any],
+        context_windows: dict[str, int],
+        data_as_of: str,
+        local_usage: dict[str, dict[str, int]],
+    ) -> QtWidgets.QWidget:
         card = QtWidgets.QFrame()
         card.setStyleSheet("QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;}")
         v = QtWidgets.QVBoxLayout(card)
@@ -212,7 +241,104 @@ class LimitsPage(QtWidgets.QWidget):
                 dash_row.addWidget(btn)
             dash_row.addStretch(1)
             v.addLayout(dash_row)
+
+        # Plan + caps section.  Operator picks their plan from the
+        # dropdown; we render the published per-window message caps
+        # for that plan and the local tally for that window so the
+        # gap between "what the dashboard said you'd get" and "what
+        # we've sent so far this session" is visible.
+        plans = provider.get("plans") or []
+        if plans:
+            plan_row = QtWidgets.QHBoxLayout()
+            plan_row.addWidget(self._tag(f"Your plan ({data_as_of}):"))
+            plan_combo = QtWidgets.QComboBox()
+            for p in plans:
+                plan_combo.addItem(str(p.get("label", "?")), p)
+            plan_row.addWidget(plan_combo, stretch=1)
+            v.addLayout(plan_row)
+
+            caps_box = QtWidgets.QPlainTextEdit()
+            caps_box.setReadOnly(True)
+            caps_box.setStyleSheet(
+                "QPlainTextEdit{background:#f6f8fa;border:1px solid #e6e7eb;"
+                "border-radius:4px;padding:8px;font-size:11px;color:#0f1115;"
+                "font-family:ui-sans-serif,Inter,system-ui;}"
+            )
+            caps_box.setMinimumHeight(80)
+            caps_box.setMaximumHeight(160)
+            v.addWidget(caps_box)
+
+            usage_for_provider = local_usage.get(provider.get("id", ""), {})
+
+            def render_caps(_idx: int = -1) -> None:
+                idx = plan_combo.currentIndex()
+                plan = plan_combo.itemData(idx) if idx >= 0 else None
+                if not isinstance(plan, dict):
+                    return
+                lines: list[str] = []
+                for cap in plan.get("message_caps") or []:
+                    win = str(cap.get("window", "?"))
+                    model = str(cap.get("model", ""))
+                    msgs = cap.get("messages", "?")
+                    # Map our window labels to the local-tally
+                    # buckets (5h / 24h / 7d).
+                    bucket = {"5h": "5h", "daily": "24h", "weekly": "7d"}.get(win)
+                    used = usage_for_provider.get(bucket) if bucket else None
+                    used_part = f"  (this app: {used} sent)" if used is not None else ""
+                    lines.append(f"  • {win}  {model}: {msgs} msgs{used_part}")
+                if not lines:
+                    lines.append("  (no caps published for this plan)")
+                note = str(plan.get("notes", ""))
+                if note:
+                    lines.append("")
+                    lines.append(f"  Note: {note}")
+                caps_box.setPlainText("\n".join(lines))
+
+            plan_combo.currentIndexChanged.connect(render_caps)  # type: ignore[arg-type]
+            render_caps()
+
         return card
+
+    def _build_context_card(self, context_windows: dict[str, int]) -> QtWidgets.QWidget:
+        card = QtWidgets.QFrame()
+        card.setStyleSheet("QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;}")
+        v = QtWidgets.QVBoxLayout(card)
+        v.setContentsMargins(16, 14, 16, 14)
+        v.setSpacing(6)
+
+        title = QtWidgets.QLabel("<b>Per-model context windows</b>")
+        title.setStyleSheet("font-size:14px;color:#0f1115;border:none;")
+        v.addWidget(title)
+
+        sub = QtWidgets.QLabel(
+            "Maximum prompt size each model can take in a single call.  "
+            "Includes system + transcript + any inlined references."
+        )
+        sub.setStyleSheet("color:#5b6068;font-size:11px;border:none;")
+        sub.setWordWrap(True)
+        v.addWidget(sub)
+
+        body = QtWidgets.QPlainTextEdit()
+        body.setReadOnly(True)
+        body.setStyleSheet(
+            "QPlainTextEdit{background:#f6f8fa;border:1px solid #e6e7eb;"
+            "border-radius:4px;padding:8px;font-size:11px;color:#0f1115;"
+            "font-family:ui-monospace,Consolas,Menlo,monospace;}"
+        )
+        body.setMinimumHeight(80)
+        body.setMaximumHeight(220)
+        lines: list[str] = []
+        for model, tokens in sorted(context_windows.items()):
+            lines.append(f"  {model:<28}  {tokens:>9,} tokens")
+        body.setPlainText("\n".join(lines))
+        v.addWidget(body)
+        return card
+
+    @staticmethod
+    def _tag(text: str) -> QtWidgets.QLabel:
+        lbl = QtWidgets.QLabel(text)
+        lbl.setStyleSheet("color:#5b6068;font-size:11px;border:none;")
+        return lbl
 
     @staticmethod
     def _format_status_body(status: dict[str, Any], installed: bool) -> str:

@@ -262,3 +262,19 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
 CREATE INDEX IF NOT EXISTS idx_agents_updated ON agents(updated_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Provider-side message tally — append-only.  Lets the Limits tab show
+-- "X messages / cap" against the published plan limits without polling
+-- the CLI.  One row per successful agents.send / chat.send.  Pruned by
+-- a daily VACUUM-equivalent (left for a future cleanup pass; the cost
+-- is roughly 50 bytes per send).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS provider_messages (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider     TEXT NOT NULL,
+    model        TEXT NOT NULL DEFAULT '',
+    sent_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_messages_at ON provider_messages(provider, sent_at DESC);

@@ -219,7 +219,7 @@ class EventStore:
                 flow.id,
                 flow.name,
                 flow.description,
-                json.dumps({"nodes": flow.nodes, "edges": flow.edges}),
+                json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
                 flow.version,
                 flow.created_at.isoformat(),
                 flow.updated_at.isoformat(),
@@ -238,7 +238,7 @@ class EventStore:
             (
                 flow.name,
                 flow.description,
-                json.dumps({"nodes": flow.nodes, "edges": flow.edges}),
+                json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
                 flow.updated_at.isoformat(),
                 flow.id,
             ),
@@ -255,6 +255,7 @@ class EventStore:
         body = json.loads(d.pop("payload"))
         d["nodes"] = body.get("nodes", [])
         d["edges"] = body.get("edges", [])
+        d["is_draft"] = bool(body.get("is_draft", False))
         return Flow.model_validate(d)
 
     async def list_flows(self) -> list[Flow]:
@@ -266,8 +267,30 @@ class EventStore:
             body = json.loads(d.pop("payload"))
             d["nodes"] = body.get("nodes", [])
             d["edges"] = body.get("edges", [])
+            d["is_draft"] = bool(body.get("is_draft", False))
             out.append(Flow.model_validate(d))
         return out
+
+    # ------------------------------------------------------------------
+    # Provider-side message tally — local count of successful sends per
+    # provider, used by the Limits tab to show "X / cap" against the
+    # published plan limits without hitting a CLI status command.
+    # ------------------------------------------------------------------
+
+    async def record_provider_message(self, provider: str, model: str = "") -> None:
+        await self.db.execute(
+            "INSERT INTO provider_messages (provider, model, sent_at) VALUES (?, ?, ?)",
+            (provider, model, utc_now().isoformat()),
+        )
+        await self.db.commit()
+
+    async def count_provider_messages(self, provider: str, since_iso: str) -> int:
+        cur = await self.db.execute(
+            "SELECT COUNT(*) AS n FROM provider_messages WHERE provider = ? AND sent_at >= ?",
+            (provider, since_iso),
+        )
+        row = await cur.fetchone()
+        return int(row["n"]) if row else 0
 
     async def delete_flow(self, flow_id: str) -> bool:
         # Cascade to runs first so the foreign key check passes.

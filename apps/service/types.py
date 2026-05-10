@@ -586,6 +586,10 @@ class Flow(BaseModel):
     description: str = ""
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
+    # Draft flows are scratchpad canvases — operator can edit, drop
+    # nodes, simulate visually, but ``flows.dispatch`` refuses to
+    # run them.  Promoting to Live = setting this to False.
+    is_draft: bool = False
     version: int = 1
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
