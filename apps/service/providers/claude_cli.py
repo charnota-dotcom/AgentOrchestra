@@ -117,14 +117,17 @@ class ClaudeCLIChatSession(ChatSession):
             )
             return
 
+        raw_text = stdout_b.decode("utf-8", errors="replace")
+        payload: dict[str, Any] = {}
         try:
-            payload = json.loads(stdout_b.decode("utf-8", errors="replace"))
-        except json.JSONDecodeError as exc:
-            yield StreamEvent(
-                kind="error",
-                text=f"claude CLI returned non-JSON ({exc}): {stdout_b[:200]!r}",
-            )
-            return
+            payload = json.loads(raw_text)
+        except json.JSONDecodeError:
+            # Some CLI versions or invocations don't honour
+            # ``--output-format json`` (e.g. when the model returns a
+            # plain conversational reply).  Treat the whole stdout as
+            # the assistant text so the user still sees the answer;
+            # token / cost info is unavailable in that mode.
+            payload = {"result": raw_text.strip()}
 
         text = payload.get("result", "")
         if isinstance(text, list):
