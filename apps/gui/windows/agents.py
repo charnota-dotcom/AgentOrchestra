@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from apps.gui.presets import MODE_CODING, MODEL_PRESETS
+from apps.gui.presets import MODE_CODING, MODEL_PRESETS, ModelPreset
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
@@ -34,15 +34,20 @@ if TYPE_CHECKING:
 # mode + thinking + skills pickers.  Operators who want those should
 # use the canvas New-Conversation dialog or the Chat tab.  Showing the
 # full 12-row matrix here would be confusing without those companion
-# fields.
-_AGENTS_TAB_PRESETS: tuple = tuple(p for p in MODEL_PRESETS if p.mode == MODE_CODING)
+# fields.  Annotated with the element type so mypy / Pyright can still
+# check `chosen.model` lookups downstream.
+_AGENTS_TAB_PRESETS: tuple[ModelPreset, ...] = tuple(
+    p for p in MODEL_PRESETS if p.mode == MODE_CODING
+)
 # Loud import-time check — if the Coding mode constant ever drifts or
 # gets renamed and this list ends up empty, the dialog would silently
-# open with zero rows and IndexError on accept.  Better to crash on
-# launch than to mislead the operator at runtime.
-assert _AGENTS_TAB_PRESETS, (
-    "apps.gui.presets has no Coding-mode entries; the Agents tab dialog depends on at least one"
-)
+# open with zero rows and IndexError on accept.  ``assert`` is stripped
+# under ``python -O`` / ``PYTHONOPTIMIZE=1``, so we use an explicit
+# ``raise`` to keep the defence under optimised launches.
+if not _AGENTS_TAB_PRESETS:
+    raise RuntimeError(
+        "apps.gui.presets has no Coding-mode entries; the Agents tab dialog depends on at least one"
+    )
 
 
 class AgentsPage(QtWidgets.QWidget):

@@ -154,11 +154,20 @@ class ChatPage(QtWidgets.QWidget):
         # Tiny inline status label — shows briefly after the operator
         # changes thinking / skills mid-thread so they understand the
         # change won't take effect until the next New chat.  Hidden
-        # otherwise to keep the page uncluttered.
+        # otherwise to keep the page uncluttered.  Use a size-policy
+        # that *retains* layout space when visible but reclaims it when
+        # hidden, so the label doesn't reserve a permanent gap.
         self._apply_hint = QtWidgets.QLabel("")
         self._apply_hint.setStyleSheet("color:#a96b00;font-size:11px;padding-left:48px;")
+        sp = self._apply_hint.sizePolicy()
+        sp.setRetainSizeWhenHidden(False)
+        self._apply_hint.setSizePolicy(sp)
         self._apply_hint.setVisible(False)
         layout.addWidget(self._apply_hint)
+        # Snapshot of the last *committed* skills value so we don't fire
+        # the hint on every focus loss — `editingFinished` triggers on
+        # any tab-out, even when the field hasn't changed.
+        self._last_seen_skills: str = ""
 
         # Workspace picker — when set, the CLI subprocess is spawned
         # with cwd = repo_path so the model can use its built-in file
@@ -598,17 +607,32 @@ class ChatPage(QtWidgets.QWidget):
         self.transcript.clear()
         self.message_input.clear()
         # Hide the "applies on new chat" hint — that warning is moot
-        # now that we *are* a new chat.
+        # now that we *are* a new chat.  Reset the skills snapshot too
+        # so a stale value can't fire a hint on the first focus-loss
+        # of the fresh session.
         self._apply_hint.setVisible(False)
+        self._last_seen_skills = self.skills_input.text().strip()
 
     def _show_apply_on_new_chat_hint(self, *_: object) -> None:
         """Surface a tiny amber line under thinking/skills when the
         operator changes either mid-thread.  Cleared by ``_new_chat``.
+
+        Connected to ``thinking_combo.currentIndexChanged`` (which only
+        fires on actual changes) and ``skills_input.editingFinished``
+        (which fires on every focus loss — including no-op tab-outs).
+        We snapshot the last seen skills text and only fire the hint
+        when the field's content actually differs, otherwise the
+        operator gets a phantom warning every time they click away.
         """
         if self._agent_id is None:
             # No agent yet — first send will pick up the new value, no
             # warning needed.
             return
+        current_skills = self.skills_input.text().strip()
+        if current_skills == self._last_seen_skills:
+            # Pure focus-loss with no edit; suppress the hint.
+            return
+        self._last_seen_skills = current_skills
         self._apply_hint.setText(
             "↳ Thinking / skills changes apply to the next New chat — "
             "the current agent's system prompt is locked."

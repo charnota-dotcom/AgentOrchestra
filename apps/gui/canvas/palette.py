@@ -193,7 +193,9 @@ class PalettePanel(QtWidgets.QWidget):
                     model_combo.setCurrentIndex(0)
             model_combo.blockSignals(False)
 
-        provider_filter.currentIndexChanged.connect(_filter_models)  # type: ignore[arg-type]
+        # Connection deferred until the OK-button gate is wired below
+        # so we connect `_filter_then_refresh` directly — no fragile
+        # disconnect/reconnect dance.
 
         # Thinking-depth picker.  Same ladder as the Chat tab.
         thinking_combo = QtWidgets.QComboBox()
@@ -284,14 +286,13 @@ class PalettePanel(QtWidgets.QWidget):
         def _refresh_ok_state(*_: object) -> None:
             ok_btn.setEnabled(model_combo.count() > 0)
 
-        # Wrap _filter_models so OK gating runs after every refresh.
-        _orig_filter = _filter_models
-
+        # Single connect: filter + OK-button refresh as one unit.  Avoids
+        # the fragile disconnect/reconnect dance the previous version
+        # had (which would TypeError on any future re-ordering).
         def _filter_then_refresh(idx: int) -> None:
-            _orig_filter(idx)
+            _filter_models(idx)
             _refresh_ok_state()
 
-        provider_filter.currentIndexChanged.disconnect(_filter_models)  # type: ignore[arg-type]
         provider_filter.currentIndexChanged.connect(_filter_then_refresh)  # type: ignore[arg-type]
         _refresh_ok_state()
 
@@ -352,15 +353,21 @@ class PalettePanel(QtWidgets.QWidget):
             return
 
         async def _go() -> None:
+            # Same parent-deletion guard as `_palette_clone_repo`: use
+            # `self` for message-box parent and survive the combo being
+            # gone if the dialog was closed mid-call.
             try:
                 ws = await self.client.call(
                     "workspaces.register",
                     {"path": path, "name": Path(path).name},
                 )
             except Exception as exc:
-                QtWidgets.QMessageBox.warning(parent, "Couldn't register repo", str(exc))
+                QtWidgets.QMessageBox.warning(self, "Couldn't register repo", str(exc))
                 return
-            await self._populate_workspaces(combo, select_id=ws.get("id"))
+            try:
+                await self._populate_workspaces(combo, select_id=ws.get("id"))
+            except RuntimeError:
+                pass
 
         asyncio.ensure_future(_go())
 
@@ -400,12 +407,24 @@ class PalettePanel(QtWidgets.QWidget):
         branch = branch_input.text().strip() or None
 
         async def _go() -> None:
+            # Clone can take minutes; the parent dialog may be closed
+            # by the operator mid-clone.  Use the persistent palette
+            # (`self`) as the message-box parent and guard the combo
+            # write so we don't poke a wrapped C++ object that has
+            # already been deleted.
             try:
                 ws = await self.client.call("workspaces.clone", {"url": url, "branch": branch})
             except Exception as exc:
-                QtWidgets.QMessageBox.warning(parent, "Clone failed", str(exc))
+                QtWidgets.QMessageBox.warning(self, "Clone failed", str(exc))
                 return
-            await self._populate_workspaces(combo, select_id=ws.get("id"))
+            try:
+                # If the parent dialog is gone, `combo` may be deleted.
+                # `_populate_workspaces` reads currentData() first, which
+                # would raise; catch + give up silently — the next dialog
+                # open will repopulate from a fresh list.
+                await self._populate_workspaces(combo, select_id=ws.get("id"))
+            except RuntimeError:
+                pass
 
         asyncio.ensure_future(_go())
 

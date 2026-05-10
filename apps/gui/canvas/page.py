@@ -131,8 +131,9 @@ class CanvasPage(QtWidgets.QWidget):
         )
         self.draft_banner.setWordWrap(True)
         self.draft_banner.setStyleSheet(
+            # Canonical amber from the rest of the codebase.
             "QLabel{background:#fff5e0;border:1px solid #f0c97a;"
-            "color:#7a4f00;padding:6px 10px;border-radius:4px;font-size:11px;}"
+            "color:#a96b00;padding:6px 10px;border-radius:4px;font-size:11px;}"
         )
         self.draft_banner.setVisible(False)
         c.addWidget(self.draft_banner)
@@ -650,6 +651,10 @@ class CanvasPage(QtWidgets.QWidget):
         # deleted and Qt raises RuntimeError.
         self._refresh_lineage_edges()
         self._refresh_lineage_boxes()
+        # If the operator deleted the visibility-anchor node, clear the
+        # dim so surviving nodes don't sit at 0.25 opacity until the
+        # next selection change.
+        self._clear_visibility_highlight()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         if event.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace):
@@ -664,6 +669,7 @@ class CanvasPage(QtWidgets.QWidget):
             if removed_any:
                 self._refresh_lineage_edges()
                 self._refresh_lineage_boxes()
+                self._clear_visibility_highlight()
         else:
             super().keyPressEvent(event)
 

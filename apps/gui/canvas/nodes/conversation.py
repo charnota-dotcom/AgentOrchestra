@@ -25,6 +25,7 @@ from typing import Any
 from PySide6 import QtGui
 
 from apps.gui.canvas.nodes.base import BaseNode
+from apps.gui.presets import model_label_for
 
 _PROVIDER_HEADER = {
     "claude-cli": QtGui.QColor("#7c3aed"),
@@ -60,11 +61,9 @@ class ConversationNode(BaseNode):
         # raw provider id ("claude-sonnet-4-6") so the canvas matches
         # the Chat tab's transcript header.  Falls back gracefully
         # for unknown (provider, model) pairs.
-        from apps.gui.presets import model_label_for as _mlf
-
         provider = str(agent.get("provider", ""))
         raw_model = str(agent.get("model", "?"))
-        friendly_model = _mlf(provider, raw_model) if provider else raw_model
+        friendly_model = model_label_for(provider, raw_model) if provider else raw_model
         super().__init__(
             node_id=node_id,
             title=str(agent.get("name") or "Agent"),
