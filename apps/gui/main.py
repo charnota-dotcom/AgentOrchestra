@@ -74,20 +74,17 @@ def main() -> int:
 
     # Close the underlying httpx.AsyncClient cleanly on quit so we don't
     # leak the connection pool / TLS sockets after the GUI exits.
-    # aboutToQuit fires before the loop stops; we drive the loop
-    # ourselves to completion of the close coroutine instead of
-    # ensure_future (which would never get awaited because the loop is
-    # about to halt).
-    def _shutdown_client() -> None:
+    # aboutToQuit fires while the loop is still running, so we can't
+    # drive run_until_complete from there.  Instead, after run_forever
+    # returns (QApp has quit, loop is stopped but not yet closed),
+    # await aclose synchronously before __exit__ closes the loop.
+    with loop:
+        loop.run_forever()
         try:
             loop.run_until_complete(client.aclose())
         except Exception:
             log.exception("RpcClient aclose failed")
-
-    app.aboutToQuit.connect(_shutdown_client)
-
-    with loop:
-        return loop.run_forever()
+    return 0
 
 
 if __name__ == "__main__":
