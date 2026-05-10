@@ -204,3 +204,27 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(
     body,
     tokenize = 'unicode61 remove_diacritics 2'
 );
+
+-- ---------------------------------------------------------------------------
+-- Flow Canvas (visual orchestration).  See docs/FLOW_CANVAS_PLAN.md.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS flows (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    payload      TEXT NOT NULL,        -- JSON: {nodes:[...], edges:[...]}
+    version      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS flow_runs (
+    id           TEXT PRIMARY KEY,
+    flow_id      TEXT NOT NULL REFERENCES flows(id),
+    state        TEXT NOT NULL,
+    started_at   TEXT NOT NULL,
+    ended_at     TEXT,
+    payload      TEXT NOT NULL          -- JSON: per-node outputs, errors
+);
+
+CREATE INDEX IF NOT EXISTS idx_flow_runs_flow ON flow_runs(flow_id);

@@ -24,6 +24,7 @@ from apps.service.cost.meter import forecast as cost_forecast
 from apps.service.dispatch.bus import EventBus
 from apps.service.dispatch.dispatcher import RunDispatcher
 from apps.service.dispatch.drift_sentinel import DriftSentinel
+from apps.service.flows import FlowExecutor
 from apps.service.ingestion.hook_installer import (
     install as install_hook,
 )
@@ -45,8 +46,10 @@ from apps.service.types import (
     Event,
     EventKind,
     EventSource,
+    Flow,
     Instruction,
     long_id,
+    utc_now,
 )
 from apps.service.worktrees.manager import WorktreeManager
 
@@ -73,10 +76,12 @@ class Handlers:
         store: EventStore,
         manager: WorktreeManager,
         dispatcher: RunDispatcher,
+        flow_executor: FlowExecutor | None = None,
     ) -> None:
         self.store = store
         self.manager = manager
         self.dispatcher = dispatcher
+        self.flow_executor = flow_executor or FlowExecutor(store)
 
     async def workspaces_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return [w.model_dump(mode="json") for w in await self.store.list_workspaces()]
@@ -314,6 +319,81 @@ class Handlers:
         )
         return {"text": text}
 
+    # ------------------------------------------------------------------
+    # Flow Canvas RPCs
+    # ------------------------------------------------------------------
+
+    async def flows_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        flows = await self.store.list_flows()
+        return [
+            {
+                "id": f.id,
+                "name": f.name,
+                "description": f.description,
+                "version": f.version,
+                "nodes": f.nodes,
+                "edges": f.edges,
+                "updated_at": f.updated_at.isoformat(),
+            }
+            for f in flows
+        ]
+
+    async def flows_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        flow = await self.store.get_flow(params["id"])
+        if not flow:
+            raise ValueError(f"unknown flow: {params['id']}")
+        return {
+            "id": flow.id,
+            "name": flow.name,
+            "description": flow.description,
+            "version": flow.version,
+            "nodes": flow.nodes,
+            "edges": flow.edges,
+        }
+
+    async def flows_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        flow = Flow(
+            name=params.get("name") or "Untitled flow",
+            description=params.get("description", ""),
+            nodes=params.get("nodes", []),
+            edges=params.get("edges", []),
+        )
+        await self.store.insert_flow(flow)
+        return {"id": flow.id}
+
+    async def flows_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        flow = await self.store.get_flow(params["id"])
+        if not flow:
+            raise ValueError(f"unknown flow: {params['id']}")
+        flow.name = params.get("name", flow.name)
+        flow.description = params.get("description", flow.description)
+        flow.nodes = params.get("nodes", flow.nodes)
+        flow.edges = params.get("edges", flow.edges)
+        flow.updated_at = utc_now()
+        await self.store.update_flow(flow)
+        return {"id": flow.id, "version": flow.version}
+
+    async def flows_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = await self.store.delete_flow(params["id"])
+        return {"deleted": bool(ok)}
+
+    async def flows_dispatch(self, params: dict[str, Any]) -> dict[str, Any]:
+        flow = await self.store.get_flow(params["flow_id"])
+        if not flow:
+            raise ValueError(f"unknown flow: {params['flow_id']}")
+        run = await self.flow_executor.dispatch(flow)
+        return {"run_id": run.id}
+
+    async def flows_cancel(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = await self.flow_executor.cancel(params["run_id"])
+        return {"cancelled": bool(ok)}
+
+    async def flows_approve_human(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = await self.flow_executor.approve_human(
+            params["run_id"], params["node_id"], bool(params.get("approved", True))
+        )
+        return {"ok": bool(ok)}
+
     async def hooks_status(self, params: dict[str, Any]) -> dict[str, Any]:
         return hook_status()
 
@@ -364,6 +444,14 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("cost.forecast", h.cost_forecast)
     server.register("templates.render", h.render_template)
     server.register("templates.get", h.templates_get)
+    server.register("flows.list", h.flows_list)
+    server.register("flows.get", h.flows_get)
+    server.register("flows.create", h.flows_create)
+    server.register("flows.update", h.flows_update)
+    server.register("flows.delete", h.flows_delete)
+    server.register("flows.dispatch", h.flows_dispatch)
+    server.register("flows.cancel", h.flows_cancel)
+    server.register("flows.approve_human", h.flows_approve_human)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
     server.register("hooks.status", h.hooks_status)

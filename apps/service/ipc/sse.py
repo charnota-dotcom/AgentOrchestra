@@ -40,8 +40,8 @@ def make_run_stream_route(bus: EventBus, *, token: str):
                         "payload": ev.payload,
                     }
                     yield f"event: {ev.kind.value}\ndata: {json.dumps(payload)}\n\n"
-                    if ev.kind.value in ("run.completed",) or (
-                        ev.payload.get("state") in ("merged", "rejected", "aborted")
+                    if ev.kind.value in ("run.completed", "flow.completed") or (
+                        ev.payload.get("state") in ("merged", "rejected", "aborted", "finished")
                     ):
                         break
             except asyncio.CancelledError:

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from PySide6 import QtCore, QtWidgets
 
 from apps.gui.annotator import setup_annotator
+from apps.gui.canvas import CanvasPage
 from apps.gui.windows.composer import ComposerPage
 from apps.gui.windows.first_run import FirstRunWizard, first_run_pending
 from apps.gui.windows.history import HistoryPage
@@ -51,6 +52,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.review = ReviewPage(self.client)
         self.history = HistoryPage(self.client)
         self.settings = SettingsPage(self.client)
+        self.canvas = CanvasPage(self.client)
 
         self.stack.addWidget(self.home)  # 0
         self.stack.addWidget(self.composer)  # 1
@@ -58,6 +60,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.addWidget(self.review)  # 3
         self.stack.addWidget(self.history)  # 4
         self.stack.addWidget(self.settings)  # 5
+        self.stack.addWidget(self.canvas)  # 6
 
         self.setCentralWidget(central)
 
@@ -103,7 +106,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addSpacing(12)
 
         self._nav_buttons: list[QtWidgets.QPushButton] = []
-        for label in ("Home", "Compose", "History", "Settings"):
+        for label in ("Home", "Compose", "Canvas", "History", "Settings"):
             btn = QtWidgets.QPushButton(label)
             btn.setCheckable(True)
             btn.setStyleSheet(
@@ -123,7 +126,8 @@ class MainWindow(QtWidgets.QMainWindow):
         return rail
 
     # Map rail button index -> stack widget index.
-    _NAV_TO_STACK = {0: 0, 1: 1, 2: 4, 3: 5}
+    # Home → 0 (HomePage), Compose → 1, Canvas → 6, History → 4, Settings → 5
+    _NAV_TO_STACK = {0: 0, 1: 1, 2: 6, 3: 4, 4: 5}
 
     def _wire_navigation(self) -> None:
         for i, btn in enumerate(self._nav_buttons):

@@ -1,13 +1,16 @@
 @echo off
-rem Stop AgentOrchestra: closes the Service and GUI windows opened
-rem by launch.cmd.  Matches by window title so unrelated python.exe
-rem processes (e.g. Jupyter, other apps) are left alone.
+rem Stop AgentOrchestra.  Closes the GUI window (which atexit-kills
+rem the supervised service) and any orphaned service started directly.
 
 echo Stopping AgentOrchestra...
 
+rem GUI window (titled "AgentOrchestra") and any of its child
+rem python.exe processes (the service the GUI spawned).
+taskkill /FI "WINDOWTITLE eq AgentOrchestra*" /F /T >nul 2>&1
+
+rem Any service started by hand from a separate cmd that didn't
+rem inherit the GUI window title.
 taskkill /FI "WINDOWTITLE eq AgentOrchestra Service*" /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq AgentOrchestra GUI*"     /F /T >nul 2>&1
 
 echo Done.
-echo This window will close in a moment.
 timeout /t 2 /nobreak >nul
