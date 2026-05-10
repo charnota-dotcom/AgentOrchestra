@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from collections.abc import AsyncIterator
 from typing import Any
@@ -92,11 +93,19 @@ class GeminiCLIChatSession(ChatSession):
         if model:
             args.extend(["--model", model])
 
+        # The Gemini CLI refuses to run in an "untrusted" working
+        # directory in headless mode; instead of asking the operator
+        # to trust each repo manually we set the documented escape
+        # hatch in the subprocess env.  See
+        # https://geminicli.com/docs/cli/trusted-folders/#headless-and-automated-environments
+        env = {**os.environ, "GEMINI_CLI_TRUST_WORKSPACE": "true"}
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
         except FileNotFoundError:
             yield StreamEvent(kind="error", text="`gemini` binary not found")
