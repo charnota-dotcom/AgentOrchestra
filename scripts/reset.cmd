@@ -36,3 +36,4 @@ if exist "%DATA%" (
 )
 echo [reset] Done.  Next launch will run the first-run wizard.
 pause
+
