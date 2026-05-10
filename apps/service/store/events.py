@@ -185,6 +185,15 @@ class EventStore:
         rows = await cur.fetchall()
         return [Workspace.model_validate(dict(r)) for r in rows]
 
+    async def delete_workspace(self, workspace_id: str) -> bool:
+        """Remove a workspace.  Runs are kept (workspace_id stays set)
+        so historical context isn't lost; only the workspace row goes
+        away.  Returns True if a row was removed.
+        """
+        cur = await self.db.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+        await self.db.commit()
+        return (cur.rowcount or 0) > 0
+
     # ------------------------------------------------------------------
     # Templates & Cards
     # ------------------------------------------------------------------
