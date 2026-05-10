@@ -90,6 +90,10 @@ class Handlers:
         )
         return ws.model_dump(mode="json")
 
+    async def workspaces_remove(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = await self.store.delete_workspace(params["workspace_id"])
+        return {"removed": bool(ok)}
+
     async def cards_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return [c.model_dump(mode="json") for c in await self.store.list_cards()]
 
@@ -344,6 +348,7 @@ class Handlers:
 def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("workspaces.list", h.workspaces_list)
     server.register("workspaces.register", h.workspaces_register)
+    server.register("workspaces.remove", h.workspaces_remove)
     server.register("cards.list", h.cards_list)
     server.register("runs.list", h.runs_list)
     server.register("runs.dispatch", h.runs_dispatch)

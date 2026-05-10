@@ -366,7 +366,11 @@ class RunDispatcher:
                                 source=EventSource.DISPATCH_RUN,
                                 kind=EventKind.LLM_CALL_COMPLETED,
                                 run_id=run.id,
-                                payload={"delta": ev.text[:200]},
+                                # Truncation kept generous (was 200, which
+                                # cut every CLI-provider reply mid-sentence
+                                # since those send one big chunk rather
+                                # than a token stream).
+                                payload={"delta": ev.text[:8000]},
                                 text="",  # deltas don't go to FTS
                             )
                         )

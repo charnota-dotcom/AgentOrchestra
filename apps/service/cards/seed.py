@@ -171,24 +171,90 @@ _CARD_DEFAULTS: dict[str, dict] = {
 }
 
 
+# Extra Gemini-CLI variants of the chat archetypes so multi-vendor
+# parallelism works out of the box (Claude + Gemini side-by-side via
+# their respective CLIs, no API keys).  These reuse the same template
+# as the primary card; only the card-level provider/model differ.
+_GEMINI_VARIANTS: dict[str, dict] = {
+    "broad-research": dict(
+        name="Broad Research (Gemini)",
+        description="Wide-net research with indexed findings — via Gemini CLI.",
+        provider="gemini-cli",
+        model="gemini-2.5-pro",
+        cost=CostPolicy(
+            soft_cap_usd=0.50, hard_cap_usd=2.00, soft_cap_tokens=200_000, hard_cap_tokens=600_000
+        ),
+        sandbox_tier=SandboxTier.DEVCONTAINER,
+        blast_radius=BlastRadiusPolicy(
+            file_count_threshold=999,
+            network_egress_requires_approval=False,
+            deletion_requires_approval=True,
+            push_requires_approval=True,
+        ),
+        stale_minutes=45,
+    ),
+    "narrow-research": dict(
+        name="Narrow Research (Gemini)",
+        description="Deep dive on one topic with citations — via Gemini CLI.",
+        provider="gemini-cli",
+        model="gemini-2.5-pro",
+        cost=CostPolicy(
+            soft_cap_usd=0.40, hard_cap_usd=1.50, soft_cap_tokens=150_000, hard_cap_tokens=500_000
+        ),
+        sandbox_tier=SandboxTier.DEVCONTAINER,
+        blast_radius=BlastRadiusPolicy(
+            file_count_threshold=999,
+            network_egress_requires_approval=False,
+            deletion_requires_approval=True,
+            push_requires_approval=True,
+        ),
+        stale_minutes=30,
+    ),
+}
+
+
 async def seed_default_cards(store: EventStore) -> list[PersonalityCard]:
-    existing = {c.archetype for c in await store.list_cards()}
+    existing_cards = await store.list_cards()
+    existing_names = {c.name for c in existing_cards}
+    existing_archetypes = {c.archetype for c in existing_cards}
     created: list[PersonalityCard] = []
     for path in sorted(PACK_PATH.glob("*.md")):
         template = load_template(path)
-        if template.archetype in existing:
-            continue
         defaults = _CARD_DEFAULTS.get(template.archetype)
         if not defaults:
             log.warning("no card defaults for archetype %s", template.archetype)
             continue
-        await store.insert_template(template)
-        card = PersonalityCard(
-            archetype=template.archetype,
-            template_id=template.id,
-            **defaults,
-        )
-        await store.insert_card(card)
-        created.append(card)
-        log.info("seeded card: %s", template.archetype)
+
+        # Insert the template once per archetype.  Other cards built
+        # below reuse the same template_id.
+        if template.archetype not in existing_archetypes:
+            await store.insert_template(template)
+
+        # Primary card — keyed by archetype for backwards-compatible
+        # idempotency.
+        if template.archetype not in existing_archetypes:
+            card = PersonalityCard(
+                archetype=template.archetype,
+                template_id=template.id,
+                **defaults,
+            )
+            await store.insert_card(card)
+            created.append(card)
+            existing_names.add(card.name)
+            log.info("seeded card: %s", template.archetype)
+
+        # Extra Gemini variants — keyed by name so adding new variants
+        # in code seeds them on the next service start without
+        # disturbing primary cards.
+        variant = _GEMINI_VARIANTS.get(template.archetype)
+        if variant and variant["name"] not in existing_names:
+            v_card = PersonalityCard(
+                archetype=template.archetype,
+                template_id=template.id,
+                **variant,
+            )
+            await store.insert_card(v_card)
+            created.append(v_card)
+            existing_names.add(v_card.name)
+            log.info("seeded variant card: %s", v_card.name)
     return created

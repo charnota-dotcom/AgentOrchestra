@@ -82,7 +82,7 @@ class WorkspaceMap(QtWidgets.QFrame):
             runs = []
 
         for ws in workspaces:
-            self.body.addWidget(_workspace_row(ws))
+            self.body.addWidget(self._workspace_row(ws))
             ws_runs = [r for r in runs if r.get("workspace_id") == ws["id"]]
             if not ws_runs:
                 self.body.addWidget(_label("    (no runs yet)", italic=True))
@@ -90,22 +90,53 @@ class WorkspaceMap(QtWidgets.QFrame):
             for run in ws_runs[:8]:
                 self.body.addWidget(_run_lane(run))
 
+    def _workspace_row(self, ws: dict) -> QtWidgets.QWidget:
+        row = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(row)
+        h.setContentsMargins(0, 6, 0, 2)
+        icon = QtWidgets.QLabel("◆")
+        icon.setStyleSheet("color:#1f6feb;font-size:14px;")
+        h.addWidget(icon)
+        name = QtWidgets.QLabel(f"<b>{ws.get('name', '?')}</b>")
+        name.setStyleSheet("color:#0f1115;")
+        h.addWidget(name)
+        path = QtWidgets.QLabel(ws.get("repo_path", ""))
+        path.setStyleSheet("color:#5b6068;font-size:11px;")
+        h.addWidget(path)
+        h.addStretch(1)
+        remove_btn = QtWidgets.QPushButton("Remove")
+        remove_btn.setStyleSheet(
+            "QPushButton{padding:2px 8px;font-size:11px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;color:#5b6068;}"
+            "QPushButton:hover{background:#fde8e7;border-color:#b3261e;color:#b3261e;}"
+        )
+        ws_id = ws["id"]
+        ws_name = ws.get("name", "?")
+        remove_btn.clicked.connect(  # type: ignore[arg-type]
+            lambda _checked=False, i=ws_id, n=ws_name: self._confirm_remove(i, n)
+        )
+        h.addWidget(remove_btn)
+        return row
 
-def _workspace_row(ws: dict) -> QtWidgets.QWidget:
-    row = QtWidgets.QWidget()
-    h = QtWidgets.QHBoxLayout(row)
-    h.setContentsMargins(0, 6, 0, 2)
-    icon = QtWidgets.QLabel("◆")
-    icon.setStyleSheet("color:#1f6feb;font-size:14px;")
-    h.addWidget(icon)
-    name = QtWidgets.QLabel(f"<b>{ws.get('name', '?')}</b>")
-    name.setStyleSheet("color:#0f1115;")
-    h.addWidget(name)
-    path = QtWidgets.QLabel(ws.get("repo_path", ""))
-    path.setStyleSheet("color:#5b6068;font-size:11px;")
-    h.addWidget(path)
-    h.addStretch(1)
-    return row
+    def _confirm_remove(self, ws_id: str, ws_name: str) -> None:
+        resp = QtWidgets.QMessageBox.question(
+            self,
+            "Remove workspace",
+            f"Remove '{ws_name}' from the orchestrator?\n\n"
+            "Past runs are preserved; only the workspace registration is "
+            "removed.  The repo on disk is not touched.",
+        )
+        if resp != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        asyncio.ensure_future(self._do_remove(ws_id))
+
+    async def _do_remove(self, ws_id: str) -> None:
+        try:
+            await self.client.call("workspaces.remove", {"workspace_id": ws_id})
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Remove failed", str(exc))
+            return
+        await self.reload()
 
 
 def _run_lane(run: dict) -> QtWidgets.QWidget:
