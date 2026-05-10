@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from apps.service.store.events import EventStore
-from apps.service.types import Flow, FlowVersionConflict, Workspace
+from apps.service.store.events import EventStore, FlowVersionConflict
+from apps.service.types import Flow, Workspace
 
 
 @pytest.mark.asyncio
