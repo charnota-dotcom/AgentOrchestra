@@ -6,12 +6,18 @@ or type any of it.
 
 | Script | What it does | When to run |
 |--------|--------------|-------------|
+| **`ops.cmd`** | Opens the Operator Panel — a tiny GUI with one button per command in this folder, plus a live output pane. Reads `manifest.json`, so any command added there shows up automatically. | Every day. The single "I want to do an operation" entry point. |
 | **`setup.cmd`** | First-time install: creates `.venv`, installs the project + `[gui]` extras, optionally installs `pyside6_annotator` if it lives at `..\Annotator\pyside6_annotator_pkg`. | Once, after cloning. Re-run any time `.venv` goes missing. |
-| **`launch.cmd`** | Opens the GUI. The service is auto-spawned in the background by the GUI itself; no separate window. | Every session. Make this your desktop shortcut. |
+| **`launch.cmd`** | Opens the main AgentOrchestra GUI. The service is auto-spawned in the background; no separate window. | Every session — also reachable from the Ops Panel. |
 | **`stop.cmd`** | Closes the GUI window and any background service it supervised. Matches by window title — leaves unrelated Python processes alone. | When you close the laptop or want to free port 8765. |
 | **`update.cmd`** | `git pull --ff-only origin main` + `pip install -e .[gui] --upgrade`. | After GitHub Desktop's "Pull origin", or before reporting a bug. |
 | **`doctor.cmd`** | One-page health report: Python version, `.venv` status, `claude` / `gemini` on PATH, port 8765, local data dir, annotator import, AgentOrchestra version. | When something's wrong. Copy/paste the output into a bug report. |
 | **`reset.cmd`** | Wipes local state (SQLite store, first-run sentinel, annotation logs). Does **not** touch your repo, git history, or CLI auth. Confirms before deleting. | When the local DB is wedged and you want a clean slate. |
+
+The Operator Panel (`ops.cmd`) is the simplest entry point: every
+other script becomes a button there with its own summary, "when to
+run" hint, and live output. The plain `.cmd` files stay double-
+clickable too — you choose the workflow.
 
 ## Make them all desktop shortcuts (one-time)
 

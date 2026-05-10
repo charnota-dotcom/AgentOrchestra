@@ -6,6 +6,15 @@
   "platform": "windows",
   "commands": [
     {
+      "id": "ops",
+      "label": "Open the Operator Panel",
+      "file": "ops.cmd",
+      "summary": "Tiny GUI window with one button per command in this folder + a live output pane.  Reads this manifest, so any command added here shows up automatically.",
+      "when_to_run": "Make this your everyday desktop shortcut if you want one clickable thing that exposes every operation.",
+      "writes": [],
+      "needs_internet": false
+    },
+    {
       "id": "setup",
       "label": "First-time install",
       "file": "setup.cmd",
