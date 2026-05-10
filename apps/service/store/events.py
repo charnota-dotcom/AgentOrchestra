@@ -24,6 +24,7 @@ from typing import Any
 import aiosqlite
 
 from apps.service.types import (
+    Agent,
     Approval,
     Artifact,
     Branch,
@@ -299,6 +300,74 @@ class EventStore:
         d["node_outputs"] = body.get("node_outputs") or {}
         d["error"] = body.get("error")
         return FlowRun.model_validate(d)
+
+    # ------------------------------------------------------------------
+    # Agents (named conversations).  See types.Agent for the model.
+    # ------------------------------------------------------------------
+
+    async def insert_agent(self, agent: Agent) -> Agent:
+        await self.db.execute(
+            "INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                agent.id,
+                agent.name,
+                agent.provider,
+                agent.model,
+                agent.system,
+                agent.parent_id,
+                agent.parent_name,
+                json.dumps(agent.transcript),
+                agent.created_at.isoformat(),
+                agent.updated_at.isoformat(),
+            ),
+        )
+        await self.db.commit()
+        return agent
+
+    async def update_agent(self, agent: Agent) -> Agent:
+        agent.updated_at = utc_now()
+        await self.db.execute(
+            """
+            UPDATE agents SET name = ?, system = ?, transcript = ?, updated_at = ?
+             WHERE id = ?
+            """,
+            (
+                agent.name,
+                agent.system,
+                json.dumps(agent.transcript),
+                agent.updated_at.isoformat(),
+                agent.id,
+            ),
+        )
+        await self.db.commit()
+        return agent
+
+    async def get_agent(self, agent_id: str) -> Agent | None:
+        cur = await self.db.execute("SELECT * FROM agents WHERE id = ?", (agent_id,))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["transcript"] = json.loads(d["transcript"])
+        return Agent.model_validate(d)
+
+    async def list_agents(self) -> list[Agent]:
+        cur = await self.db.execute("SELECT * FROM agents ORDER BY updated_at DESC")
+        rows = await cur.fetchall()
+        out: list[Agent] = []
+        for r in rows:
+            d = dict(r)
+            d["transcript"] = json.loads(d["transcript"])
+            out.append(Agent.model_validate(d))
+        return out
+
+    async def delete_agent(self, agent_id: str) -> bool:
+        # Detach children — keep their history but null out the
+        # parent ref so cascading deletes don't take a whole tree.
+        await self.db.execute("UPDATE agents SET parent_id = NULL WHERE parent_id = ?", (agent_id,))
+        cur = await self.db.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
+        await self.db.commit()
+        return (cur.rowcount or 0) > 0
 
     async def delete_workspace(self, workspace_id: str) -> bool:
         """Remove a workspace.  Runs are kept (workspace_id stays set)

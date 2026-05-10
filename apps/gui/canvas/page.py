@@ -25,8 +25,17 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.canvas.commands import (
+    AddEdgeCommand,
+    AddNodeCommand,
+    MoveNodeCommand,
+    RemoveEdgeCommand,
+    RemoveNodeCommand,
+)
 from apps.gui.canvas.edges import DraftEdge, Edge
 from apps.gui.canvas.inspector import InspectorPanel
+from apps.gui.canvas.layout import auto_layout
+from apps.gui.canvas.minimap import Minimap
 from apps.gui.canvas.nodes.agent import AgentNode
 from apps.gui.canvas.nodes.base import BaseNode, NodeStatus
 from apps.gui.canvas.nodes.control import (
@@ -72,6 +81,13 @@ class CanvasPage(QtWidgets.QWidget):
 
         self.setStyleSheet("background:#fafbfc;")
 
+        # Undo stack for Add/Remove/Move/Connect operations.  Bound
+        # to Ctrl+Z / Ctrl+Shift+Z below.
+        self.undo_stack = QtGui.QUndoStack(self)
+        # Per-node "drag start" position so we can produce a single
+        # MoveNodeCommand per drag rather than one per pixel of motion.
+        self._drag_start: dict[str, QtCore.QPointF] = {}
+
         # Layout: left palette | centre canvas | right inspector
         root = QtWidgets.QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -90,6 +106,15 @@ class CanvasPage(QtWidgets.QWidget):
         self.scene = CanvasScene()
         self.view = _CanvasViewWithDrop(self.scene, self)
         c.addWidget(self.view, stretch=1)
+
+        # Minimap floats in the bottom-right corner of the centre
+        # column.  Parented to the centre widget so it survives
+        # resize and layout changes.
+        self.minimap = Minimap(self.view, centre)
+        # Position via raise + manual placement on resize.
+        self._reposition_minimap()
+        centre.installEventFilter(self)
+
         root.addWidget(centre, stretch=1)
 
         self.inspector = InspectorPanel()
@@ -122,7 +147,29 @@ class CanvasPage(QtWidgets.QWidget):
             btn = QtWidgets.QPushButton(label)
             btn.clicked.connect(slot)  # type: ignore[arg-type]
             h.addWidget(btn)
+        h.addSpacing(8)
+
+        for label, slot, shortcut in (
+            ("Undo", self.undo_stack.undo, "Ctrl+Z"),
+            ("Redo", self.undo_stack.redo, "Ctrl+Shift+Z"),
+            ("Auto layout", self._auto_layout, ""),
+        ):
+            btn = QtWidgets.QPushButton(label)
+            if shortcut:
+                btn.setToolTip(f"{label} ({shortcut})")
+            btn.clicked.connect(slot)  # type: ignore[arg-type]
+            h.addWidget(btn)
         h.addSpacing(12)
+
+        # Wire keyboard shortcuts up front so they fire even when the
+        # toolbar buttons aren't focused.
+        for keyseq, slot in (
+            ("Ctrl+Z", self.undo_stack.undo),
+            ("Ctrl+Shift+Z", self.undo_stack.redo),
+            ("Ctrl+Y", self.undo_stack.redo),
+        ):
+            sc = QtGui.QShortcut(QtGui.QKeySequence(keyseq), self)
+            sc.activated.connect(slot)  # type: ignore[arg-type]
 
         self.run_btn = QtWidgets.QPushButton("Run")
         self.run_btn.setStyleSheet(
@@ -168,11 +215,28 @@ class CanvasPage(QtWidgets.QWidget):
             return
         node.setPos(scene_pos)
         self._wire_node(node)
-        self.scene.add_node(node)
+        # Add via undo stack so a misclick is one Ctrl+Z away.
+        self.undo_stack.push(AddNodeCommand(self.scene, node))
 
     def _wire_node(self, node: BaseNode) -> None:
         for port in node.input_ports + node.output_ports:
             port.edge_drag_started.connect(self._begin_edge_drag)  # type: ignore[arg-type]
+        node.geometry_changed.connect(  # type: ignore[arg-type]
+            lambda nid=node.node_id: self._note_node_moved(nid)
+        )
+
+    def _note_node_moved(self, node_id: str) -> None:
+        # We can't tell from a single ItemPositionHasChanged whether
+        # this was a press, a drag, or a release — so we capture the
+        # start-of-drag position lazily on the first move and let the
+        # release handler push the command.  A noop if we're inside
+        # an undo/redo (Qt blocks signals during undo so we don't
+        # land here).
+        node = next((n for n in self.scene.nodes() if n.node_id == node_id), None)
+        if node is None:
+            return
+        if node_id not in self._drag_start:
+            self._drag_start[node_id] = QtCore.QPointF(node.pos())
 
     # ------------------------------------------------------------------
     # Edge drawing
@@ -189,6 +253,14 @@ class CanvasPage(QtWidgets.QWidget):
         self._draft_edge.update_to(port.scene_position())
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        # Reposition the minimap on parent resize so it always lives
+        # in the bottom-right corner of the centre column.
+        if (
+            event.type() == QtCore.QEvent.Type.Resize
+            and hasattr(self, "minimap")
+            and watched is self.minimap.parentWidget()
+        ):
+            self._reposition_minimap()
         if watched is self.view and self._draft_edge is not None:
             if event.type() == QtCore.QEvent.Type.MouseMove:
                 pos = self.view.mapToScene(event.position().toPoint())  # type: ignore[attr-defined]
@@ -199,6 +271,14 @@ class CanvasPage(QtWidgets.QWidget):
                     self.view.mapToScene(event.position().toPoint())  # type: ignore[attr-defined]
                 )
                 return True
+        # Mouse-up on the view (without a draft edge) is the end of
+        # a node drag — push the accumulated move command.
+        if (
+            watched is self.view
+            and event.type() == QtCore.QEvent.Type.MouseButtonRelease
+            and self._drag_start
+        ):
+            self._flush_drag_moves()
         return super().eventFilter(watched, event)
 
     def _finish_edge_drag(self, scene_pos: QtCore.QPointF) -> None:
@@ -209,6 +289,10 @@ class CanvasPage(QtWidgets.QWidget):
                 break
         source = self._draft_source
         self._cancel_edge_drag()
+        # Drop the move-tracking entries that any in-flight node drag
+        # accumulated; the release event also lands here so this is
+        # the right moment to push the move command.
+        self._flush_drag_moves()
         if (
             source is None
             or target_port is None
@@ -216,7 +300,7 @@ class CanvasPage(QtWidgets.QWidget):
         ):
             return
         edge = Edge(source, target_port)
-        self.scene.add_edge(edge)
+        self.undo_stack.push(AddEdgeCommand(self.scene, edge))
 
     def _cancel_edge_drag(self) -> None:
         if self._draft_edge is not None:
@@ -229,17 +313,84 @@ class CanvasPage(QtWidgets.QWidget):
     # ------------------------------------------------------------------
 
     def _delete_node(self, node: BaseNode) -> None:
-        self.scene.remove_node(node)
+        self.undo_stack.push(RemoveNodeCommand(self.scene, node))
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         if event.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace):
             for item in list(self.scene.selectedItems()):
                 if isinstance(item, BaseNode):
-                    self.scene.remove_node(item)
+                    self.undo_stack.push(RemoveNodeCommand(self.scene, item))
                 elif isinstance(item, Edge):
-                    self.scene.remove_edge(item)
+                    self.undo_stack.push(RemoveEdgeCommand(self.scene, item))
         else:
             super().keyPressEvent(event)
+
+    # ------------------------------------------------------------------
+    # Move tracking (pushes a single MoveNodeCommand per drag)
+    # ------------------------------------------------------------------
+
+    def _flush_drag_moves(self) -> None:
+        """Convert the current drag's accumulated motion into Move
+        commands.  ``QUndoStack.push()`` calls ``redo()`` on the
+        command, which sets the position to ``new_pos`` — that's a
+        no-op since the node is already there, so we only see one
+        history entry per drag with no visual flicker.
+        """
+        if not self._drag_start:
+            return
+        for node_id, start in list(self._drag_start.items()):
+            node = next((n for n in self.scene.nodes() if n.node_id == node_id), None)
+            if node is None:
+                continue
+            new_pos = QtCore.QPointF(node.pos())
+            if (new_pos - start).manhattanLength() < 1.0:
+                continue
+            self.undo_stack.push(MoveNodeCommand(node, start, new_pos))
+        self._drag_start.clear()
+
+    # ------------------------------------------------------------------
+    # Auto layout
+    # ------------------------------------------------------------------
+
+    def _auto_layout(self) -> None:
+        nodes = self.scene.nodes()
+        edges = self.scene.edges()
+        if not nodes:
+            return
+        # Snapshot positions, run the layout, then push one Move
+        # command per node that actually moved.  Wrapped in a macro
+        # so a single undo reverts the whole thing.
+        old_positions = {n.node_id: QtCore.QPointF(n.pos()) for n in nodes}
+        auto_layout(nodes, edges)
+        moves: list[tuple[BaseNode, QtCore.QPointF, QtCore.QPointF]] = []
+        for n in nodes:
+            old = old_positions[n.node_id]
+            new = QtCore.QPointF(n.pos())
+            if (old - new).manhattanLength() >= 0.5:
+                moves.append((n, old, new))
+        if not moves:
+            return
+        self.undo_stack.beginMacro("Auto layout")
+        for n, old, new in moves:
+            self.undo_stack.push(MoveNodeCommand(n, old, new))
+        self.undo_stack.endMacro()
+        self.view.fit_all()
+
+    # ------------------------------------------------------------------
+    # Minimap positioning
+    # ------------------------------------------------------------------
+
+    def _reposition_minimap(self) -> None:
+        if not hasattr(self, "minimap"):
+            return
+        parent = self.minimap.parentWidget()
+        if parent is None:
+            return
+        margin = 12
+        x = parent.width() - self.minimap.width() - margin
+        y = parent.height() - self.minimap.height() - margin
+        self.minimap.move(max(margin, x), max(margin, y))
+        self.minimap.raise_()
 
     # ------------------------------------------------------------------
     # Save / Open / New

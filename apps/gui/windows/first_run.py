@@ -27,6 +27,7 @@ from apps.service.secrets.keyring_store import set_secret
 def _which(binary: str) -> str | None:
     return shutil.which(binary)
 
+
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 

@@ -19,6 +19,7 @@ from typing import Any
 
 import uvicorn
 
+from apps.service.agents import FOLLOWUP_PRESETS, followup_instruction
 from apps.service.cards.seed import seed_default_cards
 from apps.service.cost.meter import forecast as cost_forecast
 from apps.service.dispatch.bus import EventBus
@@ -43,6 +44,7 @@ from apps.service.secrets.keyring_store import hook_token
 from apps.service.store.events import EventStore
 from apps.service.templates.engine import render
 from apps.service.types import (
+    Agent,
     Event,
     EventKind,
     EventSource,
@@ -57,6 +59,25 @@ log = logging.getLogger(__name__)
 
 
 DEFAULT_DATA_DIR = Path.home() / ".local" / "share" / "agentorchestra"
+
+
+def _render_transcript(agent: Agent) -> str:
+    """Fold an agent's structured transcript into a flat prompt string.
+
+    The CLI adapters take a single prompt; chat history is preserved
+    by inlining it the same way ``ClaudeCLIChatSession._render_prompt``
+    does.  Done at the orchestrator layer (rather than in each
+    provider) because the agent's transcript includes the user's
+    follow-up task seed for spawned agents — provider-level history
+    folding would lose that context.
+    """
+    parts: list[str] = []
+    if agent.system:
+        parts.append(f"System: {agent.system}")
+    for m in agent.transcript:
+        role = "User" if m.get("role") == "user" else "Assistant"
+        parts.append(f"{role}: {m.get('content', '')}")
+    return "\n\n".join(parts)
 
 
 def _data_dir() -> Path:
@@ -456,6 +477,148 @@ class Handlers:
             await session.close()
         return {"reply": "".join(chunks)}
 
+    # ------------------------------------------------------------------
+    # Named agents — persistent conversations with follow-up linkage.
+    # ------------------------------------------------------------------
+
+    async def agents_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return [a.model_dump(mode="json") for a in await self.store.list_agents()]
+
+    async def agents_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent = await self.store.get_agent(params["id"])
+        if not agent:
+            raise ValueError(f"unknown agent: {params['id']}")
+        return agent.model_dump(mode="json")
+
+    async def agents_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent = Agent(
+            name=(params.get("name") or "Unnamed agent").strip(),
+            provider=params["provider"],
+            model=params["model"],
+            system=params.get("system", ""),
+        )
+        await self.store.insert_agent(agent)
+        return agent.model_dump(mode="json")
+
+    async def agents_send(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Append the user's message to the agent's transcript and
+        get a reply.  Multi-turn — every turn after the first builds
+        on the prior transcript.
+        """
+        from apps.service.providers.registry import get_provider
+
+        agent = await self.store.get_agent(params["agent_id"])
+        if not agent:
+            raise ValueError(f"unknown agent: {params['agent_id']}")
+        message = params["message"]
+        agent.transcript.append({"role": "user", "content": message})
+
+        # Fold transcript + system into a single prompt for the CLI
+        # adapter (which doesn't accept structured messages in
+        # headless mode).  Fresh providers keep their own session
+        # state per call; persisting it in our store is the
+        # source-of-truth.
+        prompt = _render_transcript(agent)
+
+        provider = get_provider(agent.provider)
+        # Use an ephemeral card to reuse the existing provider auth.
+        from apps.service.types import (
+            BlastRadiusPolicy,
+            CardMode,
+            CostPolicy,
+            PersonalityCard,
+            SandboxTier,
+        )
+
+        card = PersonalityCard(
+            name=f"(agent {agent.name})",
+            archetype="(agent)",
+            description="ephemeral card for a named agent",
+            template_id="(agent)",
+            provider=agent.provider,
+            model=agent.model,
+            mode=CardMode.CHAT,
+            cost=CostPolicy(),
+            blast_radius=BlastRadiusPolicy(),
+            sandbox_tier=SandboxTier.DEVCONTAINER,
+        )
+        session = await provider.open_chat(card, system=agent.system or None)
+        chunks: list[str] = []
+        try:
+            async for ev in session.send(prompt):
+                if ev.kind == "text_delta":
+                    chunks.append(ev.text)
+                elif ev.kind == "error":
+                    raise RuntimeError(ev.text or "provider error")
+                elif ev.kind == "finish":
+                    break
+        finally:
+            await session.close()
+        reply = "".join(chunks)
+        agent.transcript.append({"role": "assistant", "content": reply})
+        await self.store.update_agent(agent)
+        return {"reply": reply, "agent": agent.model_dump(mode="json")}
+
+    async def agents_spawn_followup(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Spawn a new agent that builds on a parent's transcript.
+
+        ``params``:
+          parent_id: id of the agent to follow up on
+          name:      display name of the new agent (e.g. "Smith Reviewer")
+          preset:    one of FOLLOWUP_PRESETS keys, or "custom"
+          custom:    instruction text when preset == "custom"
+          provider / model: optional overrides — defaults to the parent's
+        """
+        parent = await self.store.get_agent(params["parent_id"])
+        if not parent:
+            raise ValueError(f"unknown parent agent: {params['parent_id']}")
+
+        instruction = followup_instruction(params.get("preset", "custom"), params.get("custom", ""))
+        if not instruction:
+            raise ValueError("follow-up instruction is empty")
+
+        # Build the new agent's transcript: prior conversation as
+        # context, then the follow-up instruction as the kick-off
+        # user message.  The reply will follow on the first .send().
+        seeded_transcript: list[dict[str, str]] = []
+        seeded_transcript.append(
+            {
+                "role": "user",
+                "content": (
+                    f"You are following up on '{parent.name}'.  "
+                    "Below is the full prior conversation between a user "
+                    "and that agent.  Read it carefully, then carry out "
+                    "the follow-up task at the end.\n\n"
+                    "=== Prior conversation ===\n"
+                    + _render_transcript(parent)
+                    + "\n=== Follow-up task ===\n"
+                    + instruction
+                ),
+            }
+        )
+
+        agent = Agent(
+            name=(params.get("name") or f"Follow-up of {parent.name}").strip(),
+            provider=params.get("provider") or parent.provider,
+            model=params.get("model") or parent.model,
+            system=parent.system,
+            parent_id=parent.id,
+            parent_name=parent.name,
+            transcript=seeded_transcript,
+        )
+        await self.store.insert_agent(agent)
+        return {"agent": agent.model_dump(mode="json")}
+
+    async def agents_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = await self.store.delete_agent(params["id"])
+        return {"deleted": bool(ok)}
+
+    async def agents_followup_presets(self, params: dict[str, Any]) -> list[dict[str, str]]:
+        return [
+            {"key": key, "label": label, "instruction": body}
+            for key, (label, body) in FOLLOWUP_PRESETS.items()
+        ]
+
     async def hooks_status(self, params: dict[str, Any]) -> dict[str, Any]:
         return hook_status()
 
@@ -515,6 +678,13 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("flows.cancel", h.flows_cancel)
     server.register("flows.approve_human", h.flows_approve_human)
     server.register("chat.send", h.chat_send)
+    server.register("agents.list", h.agents_list)
+    server.register("agents.get", h.agents_get)
+    server.register("agents.create", h.agents_create)
+    server.register("agents.send", h.agents_send)
+    server.register("agents.spawn_followup", h.agents_spawn_followup)
+    server.register("agents.delete", h.agents_delete)
+    server.register("agents.followup_presets", h.agents_followup_presets)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
     server.register("hooks.status", h.hooks_status)

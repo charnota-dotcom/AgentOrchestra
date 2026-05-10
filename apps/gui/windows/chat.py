@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from PySide6 import QtGui, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
@@ -52,6 +52,11 @@ class ChatPage(QtWidgets.QWidget):
     def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
+        # In-memory turn buffer for the current session.  Cleared on
+        # "New chat".  Each entry is {"role": "user" | "assistant",
+        # "content": ...}.  We fold this into the prompt on every
+        # send so the CLI sees the full conversation.
+        self._history: list[dict[str, str]] = []
         self.setStyleSheet("background:#fafbfc;")
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -140,6 +145,15 @@ class ChatPage(QtWidgets.QWidget):
         bottom.addWidget(self.send_btn)
         layout.addLayout(bottom)
 
+        new_chat_btn = QtWidgets.QPushButton("New chat (clear history)")
+        new_chat_btn.setStyleSheet(
+            "QPushButton{padding:6px 14px;font-size:11px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;color:#5b6068;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        new_chat_btn.clicked.connect(self._new_chat)  # type: ignore[arg-type]
+        layout.addWidget(new_chat_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+
         # Ctrl+Enter to send from the input box.
         shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Return"), self.message_input)
         shortcut.activated.connect(self._send)  # type: ignore[arg-type]
@@ -152,9 +166,7 @@ class ChatPage(QtWidgets.QWidget):
         text = self.message_input.toPlainText().strip()
         if not text:
             return
-        skills = self.skills_input.text().strip()
-        if skills:
-            text = f"{skills}\n\n{text}"
+        self._history.append({"role": "user", "content": text})
         self._append("You", text)
         self.message_input.clear()
         self.send_btn.setEnabled(False)
@@ -166,14 +178,24 @@ class ChatPage(QtWidgets.QWidget):
         thinking_idx = self.thinking_combo.currentIndex()
         _t_label, system_thinking = _THINKING_PRESETS[thinking_idx]
 
+        # Skills + thinking depth are stitched into the system
+        # prompt rather than the user message.  The model treats
+        # system text as instructions; treating skills as user text
+        # made them feel like part of the user's actual question.
+        skills = self.skills_input.text().strip()
+        system_parts = [p for p in (system_thinking, _skills_to_system(skills)) if p]
+        system = "\n\n".join(system_parts)
+
+        full_prompt = self._render_for_send()
+
         try:
             res = await self.client.call(
                 "chat.send",
                 {
                     "provider": provider,
                     "model": model,
-                    "message": message,
-                    "system": system_thinking,
+                    "message": full_prompt,
+                    "system": system,
                 },
             )
             reply = res.get("reply", "")
@@ -181,8 +203,30 @@ class ChatPage(QtWidgets.QWidget):
             self._append("Error", str(exc))
             self.send_btn.setEnabled(True)
             return
+        self._history.append({"role": "assistant", "content": reply})
         self._append(_label_for(provider, model), reply or "(empty reply)")
         self.send_btn.setEnabled(True)
+
+    def _new_chat(self) -> None:
+        self._history.clear()
+        self.transcript.clear()
+        self.message_input.clear()
+
+    def _render_for_send(self) -> str:
+        """Fold the in-memory turn buffer into a single prompt.
+
+        Single-turn: just the user's text.  Multi-turn: prior turns
+        prefixed with role labels so the model can reconstruct the
+        conversation, ending with the latest user message at the end.
+        """
+        if len(self._history) <= 1:
+            return self._history[-1]["content"] if self._history else ""
+        parts: list[str] = []
+        for m in self._history[:-1]:
+            role = "User" if m["role"] == "user" else "Assistant"
+            parts.append(f"{role}: {m['content']}")
+        parts.append(f"User: {self._history[-1]['content']}")
+        return "\n\n".join(parts)
 
     # ------------------------------------------------------------------
     # Transcript
@@ -200,3 +244,20 @@ class ChatPage(QtWidgets.QWidget):
 
 def _label_for(provider: str, model: str) -> str:
     return f"{model} ({provider})"
+
+
+def _skills_to_system(skills: str) -> str:
+    """Turn the free-form ``/foo /bar baz`` skills field into a system
+    directive the model will read as instructions.  We don't try to
+    actually invoke Claude Code's first-class Skills feature here —
+    that only fires in interactive mode and our Chat tab is headless.
+    But we *do* tell the model "treat these as activation directives"
+    so the reply respects them in spirit.
+    """
+    if not skills.strip():
+        return ""
+    return (
+        "Skill directives (treat each `/name` token as an activation "
+        "instruction; respond as if those skills are active for this "
+        f"conversation): {skills.strip()}"
+    )

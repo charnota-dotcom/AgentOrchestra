@@ -531,6 +531,29 @@ def assert_run_transition(frm: RunState, to: RunState) -> None:
         raise IllegalTransitionError(frm.value, to.value)
 
 
+class Agent(BaseModel):
+    """A named, persistent conversation with a model.
+
+    Operators give agents human names ("Agent Smith") and can spawn
+    follow-up agents that reference a parent's transcript via the
+    ``parent_id`` link.  This is deliberately distinct from
+    ``PersonalityCard`` (a template-bound card that drives a Run with
+    cost caps and a state machine).  Agents are the lay-person path:
+    just a name, a model, and a conversation.
+    """
+
+    id: str = Field(default_factory=long_id)
+    name: str
+    provider: str
+    model: str
+    system: str = ""
+    parent_id: str | None = None
+    parent_name: str | None = None  # denormalised for cheap display
+    transcript: list[dict[str, str]] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class FlowState(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
