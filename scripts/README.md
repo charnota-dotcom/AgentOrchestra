@@ -11,10 +11,11 @@ or type any of it.
 | 2 | **`test-claude.cmd`** | Smoke-test the local `claude` CLI: PATH check + `claude -p "..."` headless call. Surfaces "Not logged in" if your Max-plan auth lapsed. | Right after Step 1, or when Claude cards stop replying. |
 | 3 | **`test-gemini.cmd`** | Smoke-test the local `gemini` CLI: PATH check + `gemini -p "..."` headless call. | Right after Step 2. Skip if you only use Claude. |
 | 4 | **`launch.cmd`** | Opens the main AgentOrchestra GUI. The service is auto-spawned in the background; no separate window. | Every session — also reachable from the Ops Panel. |
-| 5 | **`stop.cmd`** | Closes the GUI window and any background service it supervised. Matches by window title — leaves unrelated Python processes alone. | When you close the laptop or want to free port 8765. |
-| 6 | **`update.cmd`** | `git pull --ff-only origin main` + `pip install -e .[gui] --upgrade`. | After GitHub Desktop's "Pull origin", or before reporting a bug. |
-| 7 | **`doctor.cmd`** | One-page health report: Python version, `.venv` status, `claude` / `gemini` on PATH, port 8765, local data dir, annotator import, AgentOrchestra version. | When something's wrong. Copy/paste the output into a bug report. |
-| 8 | **`reset.cmd`** | Wipes local state (SQLite store, first-run sentinel, annotation logs). Does **not** touch your repo, git history, or CLI auth. Confirms before deleting. | Last resort, when the local DB is wedged and you want a clean slate. |
+| 5 | **`stop.cmd`** | Closes the GUI window and any background service (including the headless supervisor child). Three-pass kill: window-title match, then port-listening match. | When you close the laptop or want to free port 8765. |
+| 6 | **`restart.cmd`** | Stop + launch in one click. Frees port 8765, waits a tick, opens a fresh GUI. | After `update.cmd` or after pulling a PR that changed service code — the running service has the old code in memory. |
+| 7 | **`update.cmd`** | `git pull --ff-only origin main` + `pip install -e .[gui] --upgrade`. | After GitHub Desktop's "Pull origin". Follow with `restart.cmd`. |
+| 8 | **`doctor.cmd`** | One-page health report: Python version, `.venv` status, `claude` / `gemini` on PATH, port 8765, local data dir, annotator import, AgentOrchestra version. | When something's wrong. Copy/paste the output into a bug report. |
+| 9 | **`reset.cmd`** | Wipes local state (SQLite store, first-run sentinel, annotation logs). Does **not** touch your repo, git history, or CLI auth. Confirms before deleting. | Last resort, when the local DB is wedged and you want a clean slate. |
 
 The Operator Panel (`ops.cmd`) is the simplest entry point: every
 other script becomes a button there with its own summary, "when to
