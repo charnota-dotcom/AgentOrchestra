@@ -47,6 +47,10 @@ from apps.service.types import (
     Agent,
     Attachment,
     AttachmentKind,
+    BlueprintVersionConflict,
+    DroneAction,
+    DroneBlueprint,
+    DroneRole,
     Event,
     EventKind,
     EventSource,
@@ -220,6 +224,51 @@ def _data_dir() -> Path:
     p = DEFAULT_DATA_DIR
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+# ---------------------------------------------------------------------------
+# Drone authority — see docs/DRONE_MODEL.md ("Authority matrix").
+#
+# Encodes the role -> (op, scope) permission matrix as a single
+# function so the RPC layer + the authority unit-tests share the
+# exact same source of truth.  Raises ``PermissionError`` on denial;
+# the caller wraps that into a JSON-RPC error.
+# ---------------------------------------------------------------------------
+
+
+_DRONE_OPS = frozenset({"append_reference", "append_skill", "append_attachment"})
+
+
+def _check_drone_authority(
+    actor_role: DroneRole,
+    op: str,
+    *,
+    is_self: bool,
+) -> None:
+    """Gate a cross-action mutation against the actor's snapshotted role.
+
+    ``is_self=True`` means the action is mutating itself (e.g. a
+    drone appending a skill to its own action row).  Auditors are
+    read-only even on self.
+    """
+    if op not in _DRONE_OPS:
+        raise ValueError(f"unknown drone op: {op}")
+    if actor_role is DroneRole.AUDITOR:
+        # Auditors observe; they never mutate, including their own
+        # action.  Defence in depth — keeps a compromised auditor
+        # blueprint from being repurposed as a write surface.
+        raise PermissionError(f"auditor drones are read-only ({op} denied)")
+    if is_self:
+        # Worker / Supervisor / Courier can all mutate themselves.
+        return
+    # Cross-action mutation — narrower gate.
+    if actor_role is DroneRole.WORKER:
+        raise PermissionError(f"worker drones cannot {op} on other actions")
+    if actor_role is DroneRole.COURIER and op != "append_reference":
+        # Couriers carry context references between drones but don't
+        # add skills or attachments — keeps the surface tight.
+        raise PermissionError(f"courier drones can only append_reference, not {op}")
+    # Supervisor: any op on any peer.
 
 
 # ---------------------------------------------------------------------------
@@ -1401,6 +1450,211 @@ class Handlers:
         ]
 
     # ------------------------------------------------------------------
+    # Drones — see docs/DRONE_MODEL.md.
+    #
+    # Blueprint = operator-set frozen template (only the operator
+    # creates / edits — there is no auth gate on blueprints.* because
+    # the GUI is the only client and the operator IS the GUI user).
+    #
+    # Action    = deployed instance.  Cross-action mutations
+    # (append_reference / append_skill) are gated by the actor's
+    # snapshotted role via ``_check_drone_authority``.  drones.send
+    # lives in PR #24 alongside the chat dialog.
+    # ------------------------------------------------------------------
+
+    async def blueprints_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = await self.store.list_drone_blueprints()
+        return [r.model_dump(mode="json") for r in rows]
+
+    async def blueprints_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        bp = await self.store.get_drone_blueprint(params["id"])
+        if not bp:
+            raise ValueError(f"unknown blueprint: {params['id']}")
+        return bp.model_dump(mode="json")
+
+    async def blueprints_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        role = params.get("role") or DroneRole.WORKER.value
+        try:
+            role_enum = DroneRole(role)
+        except ValueError as e:
+            raise ValueError(f"unknown role: {role}") from e
+        bp = DroneBlueprint(
+            name=(params.get("name") or "Untitled blueprint").strip(),
+            description=params.get("description") or "",
+            role=role_enum,
+            provider=params["provider"],
+            model=params["model"],
+            system_persona=params.get("system_persona") or "",
+            skills=[str(s) for s in (params.get("skills") or []) if s],
+            reference_blueprint_ids=[
+                str(r) for r in (params.get("reference_blueprint_ids") or []) if r
+            ],
+        )
+        await self.store.insert_drone_blueprint(bp)
+        return bp.model_dump(mode="json")
+
+    async def blueprints_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Edit a blueprint.  Pass ``expected_version`` to detect
+        racing edits (mirrors ``flows.update``).  Returns the updated
+        blueprint or raises ``BlueprintVersionConflict`` re-formatted
+        as a ValueError so the JSON-RPC layer surfaces it cleanly.
+        """
+        bp = await self.store.get_drone_blueprint(params["id"])
+        if not bp:
+            raise ValueError(f"unknown blueprint: {params['id']}")
+        if "name" in params:
+            bp.name = (params["name"] or "Untitled blueprint").strip()
+        if "description" in params:
+            bp.description = params["description"] or ""
+        if "role" in params:
+            try:
+                bp.role = DroneRole(params["role"])
+            except ValueError as e:
+                raise ValueError(f"unknown role: {params['role']}") from e
+        if "provider" in params:
+            bp.provider = params["provider"]
+        if "model" in params:
+            bp.model = params["model"]
+        if "system_persona" in params:
+            bp.system_persona = params["system_persona"] or ""
+        if "skills" in params:
+            bp.skills = [str(s) for s in (params["skills"] or []) if s]
+        if "reference_blueprint_ids" in params:
+            bp.reference_blueprint_ids = [
+                str(r) for r in (params["reference_blueprint_ids"] or []) if r
+            ]
+        expected_version = params.get("expected_version")
+        try:
+            await self.store.update_drone_blueprint(
+                bp,
+                expected_version=int(expected_version) if expected_version is not None else None,
+            )
+        except BlueprintVersionConflict as e:
+            # Surface as a generic error so the GUI can refetch +
+            # re-prompt without needing to import the exception type.
+            raise ValueError(str(e)) from e
+        return bp.model_dump(mode="json")
+
+    async def blueprints_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Refuses if any actions still link to this blueprint.  Returns
+        ``{deleted: bool, linked_actions: int}`` so the GUI can show a
+        precise "N drones deployed from this blueprint, delete those
+        first" message.
+        """
+        blueprint_id = params["id"]
+        linked = await self.store.count_actions_for_blueprint(blueprint_id)
+        if linked > 0:
+            return {"deleted": False, "linked_actions": linked}
+        deleted = await self.store.delete_drone_blueprint(blueprint_id)
+        return {"deleted": bool(deleted), "linked_actions": 0}
+
+    async def drones_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        blueprint_id = params.get("blueprint_id")
+        rows = await self.store.list_drone_actions(blueprint_id=blueprint_id)
+        return [r.model_dump(mode="json") for r in rows]
+
+    async def drones_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        a = await self.store.get_drone_action(params["id"])
+        if not a:
+            raise ValueError(f"unknown action: {params['id']}")
+        return a.model_dump(mode="json")
+
+    async def drones_deploy(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Snapshot a blueprint + spawn a fresh action.
+
+        ``params``:
+          blueprint_id:                  required.
+          workspace_id:                  optional repo binding.
+          additional_skills:             optional one-off /tokens.
+          additional_reference_action_ids: optional cross-action refs.
+        """
+        bp = await self.store.get_drone_blueprint(params["blueprint_id"])
+        if not bp:
+            raise ValueError(f"unknown blueprint: {params['blueprint_id']}")
+        workspace_id = params.get("workspace_id")
+        if workspace_id:
+            ws = await self.store.get_workspace(workspace_id)
+            if not ws:
+                raise ValueError(f"unknown workspace: {workspace_id}")
+        action = DroneAction(
+            blueprint_id=bp.id,
+            blueprint_snapshot=bp.model_dump(mode="json"),
+            workspace_id=workspace_id or None,
+            additional_skills=[str(s) for s in (params.get("additional_skills") or []) if s],
+            additional_reference_action_ids=[
+                str(r) for r in (params.get("additional_reference_action_ids") or []) if r
+            ],
+        )
+        await self.store.insert_drone_action(action)
+        return action.model_dump(mode="json")
+
+    async def drones_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = await self.store.delete_drone_action(params["id"])
+        return {"deleted": bool(ok)}
+
+    async def _load_actor_for_authority(self, actor_id: str) -> DroneAction:
+        actor = await self.store.get_drone_action(actor_id)
+        if not actor:
+            raise ValueError(f"unknown actor action: {actor_id}")
+        return actor
+
+    async def drones_append_reference(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Append a cross-action reference onto a target action.
+
+        Gated by the actor's snapshotted role:
+        - WORKER:     self only.
+        - SUPERVISOR: any peer.
+        - COURIER:    any peer (this is the courier's main job).
+        - AUDITOR:    denied.
+        """
+        actor_id = params["actor_id"]
+        target_id = params["target_id"]
+        ref_id = params["reference_action_id"]
+        actor = await self._load_actor_for_authority(actor_id)
+        target = await self.store.get_drone_action(target_id)
+        if not target:
+            raise ValueError(f"unknown target action: {target_id}")
+        try:
+            _check_drone_authority(
+                actor.effective_role,
+                "append_reference",
+                is_self=(actor_id == target_id),
+            )
+        except PermissionError as e:
+            raise ValueError(str(e)) from e
+        if ref_id and ref_id not in target.additional_reference_action_ids:
+            target.additional_reference_action_ids.append(ref_id)
+            await self.store.update_drone_action(target)
+        return target.model_dump(mode="json")
+
+    async def drones_append_skill(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Append a one-off /skill onto a target action.
+
+        Authority: SUPERVISOR (any peer) or self (any non-AUDITOR).
+        """
+        actor_id = params["actor_id"]
+        target_id = params["target_id"]
+        skill = (params.get("skill") or "").strip()
+        if not skill:
+            raise ValueError("skill required")
+        actor = await self._load_actor_for_authority(actor_id)
+        target = await self.store.get_drone_action(target_id)
+        if not target:
+            raise ValueError(f"unknown target action: {target_id}")
+        try:
+            _check_drone_authority(
+                actor.effective_role,
+                "append_skill",
+                is_self=(actor_id == target_id),
+            )
+        except PermissionError as e:
+            raise ValueError(str(e)) from e
+        if skill not in target.additional_skills:
+            target.additional_skills.append(skill)
+            await self.store.update_drone_action(target)
+        return target.model_dump(mode="json")
+
+    # ------------------------------------------------------------------
     # Attachments — file uploads bound to an Agent
     # ------------------------------------------------------------------
 
@@ -1846,6 +2100,17 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("agents.set_workspace", h.agents_set_workspace)
     server.register("agents.delete", h.agents_delete)
     server.register("agents.followup_presets", h.agents_followup_presets)
+    server.register("blueprints.list", h.blueprints_list)
+    server.register("blueprints.get", h.blueprints_get)
+    server.register("blueprints.create", h.blueprints_create)
+    server.register("blueprints.update", h.blueprints_update)
+    server.register("blueprints.delete", h.blueprints_delete)
+    server.register("drones.list", h.drones_list)
+    server.register("drones.get", h.drones_get)
+    server.register("drones.deploy", h.drones_deploy)
+    server.register("drones.delete", h.drones_delete)
+    server.register("drones.append_reference", h.drones_append_reference)
+    server.register("drones.append_skill", h.drones_append_skill)
     server.register("attachments.upload", h.attachments_upload)
     server.register("attachments.list", h.attachments_list)
     server.register("attachments.delete", h.attachments_delete)
