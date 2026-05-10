@@ -645,8 +645,19 @@ class Handlers:
         return {"id": flow.id, "version": flow.version + 1}
 
     async def flows_delete(self, params: dict[str, Any]) -> dict[str, Any]:
-        ok = await self.store.delete_flow(params["id"])
-        return {"deleted": bool(ok)}
+        # Cancel any in-flight runs of this flow before deleting the
+        # row, otherwise the supervisor task would carry on writing
+        # update_flow_run against zero rows and silently mask its own
+        # cancellation path.
+        flow_id = params["id"]
+        cancelled = 0
+        for run_id, task in list(self.flow_executor._active.items()):
+            run = await self.store.get_flow_run(run_id)
+            if run and run.flow_id == flow_id and not task.done():
+                task.cancel()
+                cancelled += 1
+        ok = await self.store.delete_flow(flow_id)
+        return {"deleted": bool(ok), "cancelled_runs": cancelled}
 
     async def flows_dispatch(self, params: dict[str, Any]) -> dict[str, Any]:
         flow = await self.store.get_flow(params["flow_id"])

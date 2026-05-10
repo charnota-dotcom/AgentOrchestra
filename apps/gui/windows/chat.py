@@ -155,6 +155,10 @@ class ChatPage(QtWidgets.QWidget):
     def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
+        # Accept dropped local files anywhere on the page so the
+        # operator can drag from the OS file browser straight onto
+        # the chat input.
+        self.setAcceptDrops(True)
         # Each Chat session is automatically persisted as an Agent so
         # it shows up in the canvas Conversations palette and can be
         # dragged onto the canvas.  ``self._agent_id`` tracks the
@@ -297,10 +301,13 @@ class ChatPage(QtWidgets.QWidget):
         # Bottom: paperclip + message input + send button.
         bottom = QtWidgets.QHBoxLayout()
         self.attach_btn = QtWidgets.QPushButton("📎")
+        self.attach_btn.setShortcut(QtGui.QKeySequence("Ctrl+Shift+A"))
         self.attach_btn.setToolTip(
             "Attach an image (.png/.jpg/.gif/.webp) or a spreadsheet "
             "(.xlsx/.xls/.csv) to the next message.  Spreadsheets are "
-            "rendered as a markdown table; images pass through to the CLI."
+            "rendered as a markdown table; images pass through to the CLI.\n\n"
+            "Shortcut: Ctrl+Shift+A.  You can also drag a file onto the "
+            "input box."
         )
         self.attach_btn.setStyleSheet(
             "QPushButton{padding:10px 12px;border:1px solid #d0d3d9;"
@@ -368,6 +375,11 @@ class ChatPage(QtWidgets.QWidget):
     # Attachments
     # ------------------------------------------------------------------
 
+    _SUPPORTED_EXTS = {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp",
+        ".xlsx", ".xls", ".csv",
+    }
+
     def _attach_file(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -375,12 +387,22 @@ class ChatPage(QtWidgets.QWidget):
             "",
             _ATTACHMENT_FILTER,
         )
-        if not path:
+        if path:
+            self._queue_local_attachment(Path(path))
+
+    def _queue_local_attachment(self, p: Path) -> None:
+        """Queue a local file for upload at next send.
+
+        Shared by the paperclip dialog and the drag-drop handler.
+        Skips unsupported extensions with a transcript warning.
+        """
+        if p.suffix.lower() not in self._SUPPORTED_EXTS:
+            self._append(
+                "Warning",
+                f"unsupported file type {p.suffix!r}; "
+                f"supported: {sorted(self._SUPPORTED_EXTS)}",
+            )
             return
-        # We don't upload yet — the agent might not exist (first
-        # message of a session creates it).  Cache the local path and
-        # render a chip; the actual upload happens at send time.
-        p = Path(path)
         try:
             size = p.stat().st_size
         except OSError as exc:
@@ -393,6 +415,27 @@ class ChatPage(QtWidgets.QWidget):
             {"local_path": str(p), "original_name": p.name, "kind": kind, "bytes": size}
         )
         self._render_pending_attachments()
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # type: ignore[override]
+        if event.mimeData().hasUrls() and any(
+            u.toLocalFile() for u in event.mimeData().urls()
+        ):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event: QtGui.QDropEvent) -> None:  # type: ignore[override]
+        urls = event.mimeData().urls()
+        accepted = 0
+        for u in urls:
+            local = u.toLocalFile()
+            if local:
+                self._queue_local_attachment(Path(local))
+                accepted += 1
+        if accepted:
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
 
     def _render_pending_attachments(self) -> None:
         while self.attachments_row.count() > 1:

@@ -42,6 +42,9 @@ class AgentChatDialog(QtWidgets.QDialog):
         self.agent = agent
         self.setWindowTitle(f"Chat with {agent.get('name', '?')}")
         self.resize(620, 540)
+        # Accept dropped files so the operator can drag from the OS
+        # browser straight onto the dialog.
+        self.setAcceptDrops(True)
 
         v = QtWidgets.QVBoxLayout(self)
         v.setContentsMargins(14, 14, 14, 14)
@@ -152,10 +155,12 @@ class AgentChatDialog(QtWidgets.QDialog):
 
         bottom = QtWidgets.QHBoxLayout()
         self.attach_btn = QtWidgets.QPushButton("📎")
+        self.attach_btn.setShortcut(QtGui.QKeySequence("Ctrl+Shift+A"))
         self.attach_btn.setToolTip(
             "Attach an image (.png/.jpg/.gif/.webp) or a spreadsheet "
             "(.xlsx/.xls/.csv) to the next message.  Spreadsheets are "
-            "rendered as a markdown table; images pass through to the CLI."
+            "rendered as a markdown table; images pass through to the CLI.\n\n"
+            "Shortcut: Ctrl+Shift+A.  You can also drag a file onto the dialog."
         )
         self.attach_btn.setStyleSheet(
             "QPushButton{padding:10px 12px;border:1px solid #d0d3d9;"
@@ -280,6 +285,11 @@ class AgentChatDialog(QtWidgets.QDialog):
         self.agent = updated
         self.refs_label.setText(self._format_refs_label(self.agent))
 
+    _SUPPORTED_EXTS = {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp",
+        ".xlsx", ".xls", ".csv",
+    }
+
     def _attach_file(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -290,6 +300,35 @@ class AgentChatDialog(QtWidgets.QDialog):
         if not path:
             return
         asyncio.ensure_future(self._upload_attachment(Path(path)))
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # type: ignore[override]
+        if event.mimeData().hasUrls() and any(
+            u.toLocalFile() for u in event.mimeData().urls()
+        ):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event: QtGui.QDropEvent) -> None:  # type: ignore[override]
+        urls = event.mimeData().urls()
+        accepted = 0
+        for u in urls:
+            local = u.toLocalFile()
+            if not local:
+                continue
+            p = Path(local)
+            if p.suffix.lower() not in self._SUPPORTED_EXTS:
+                self.transcript.appendPlainText(
+                    f"Warning: unsupported file type {p.suffix!r}; "
+                    f"supported: {sorted(self._SUPPORTED_EXTS)}\n"
+                )
+                continue
+            asyncio.ensure_future(self._upload_attachment(p))
+            accepted += 1
+        if accepted:
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
 
     async def _upload_attachment(self, path: Path) -> None:
         # Reject obviously-too-big files up front (matches the service's
