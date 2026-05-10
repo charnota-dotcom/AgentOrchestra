@@ -38,3 +38,4 @@ echo [update] Failed.  Read the error above, fix it, then re-run update.cmd.
 echo.
 pause
 exit /b 1
+

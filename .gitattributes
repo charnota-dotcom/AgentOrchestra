@@ -1,0 +1,14 @@
+# Pin Windows batch files to CRLF line endings.
+#
+# cmd.exe is mostly tolerant of LF but specifically breaks `goto :label`
+# jumps and parenthesised `if/else` blocks when given LF-only files —
+# the script silently exits part-way through.  We had a real outage
+# (start.cmd appearing to "work" for the Claude block then never
+# running the Gemini probe or the launch) traced to this exact issue.
+#
+# Pinning these to CRLF keeps Linux / macOS git checkouts from
+# normalising to LF on commit, and Windows checkouts from getting
+# LF-only content via gitconfig core.autocrlf=input.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

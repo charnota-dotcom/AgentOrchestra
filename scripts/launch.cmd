@@ -27,3 +27,4 @@ start "AgentOrchestra" cmd /k ^
     "cd /d %REPO% && .venv\Scripts\activate.bat && python -m apps.gui.main"
 
 endlocal
+

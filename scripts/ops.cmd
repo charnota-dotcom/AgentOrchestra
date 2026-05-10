@@ -20,3 +20,4 @@ start "AgentOrchestra Ops Panel" cmd /k ^
     "cd /d %REPO% && .venv\Scripts\activate.bat && python scripts\ops.py"
 
 endlocal
+

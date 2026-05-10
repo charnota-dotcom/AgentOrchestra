@@ -57,3 +57,4 @@ echo [setup] Failed.  Read the error above, fix it, then re-run setup.cmd.
 echo.
 pause
 exit /b 1
+
