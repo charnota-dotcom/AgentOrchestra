@@ -23,17 +23,19 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.presets import MODE_CODING, MODEL_PRESETS
+
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
 
-_MODEL_PRESETS: list[tuple[str, str, str]] = [
-    ("Claude Sonnet 4.6  (Claude Code)", "claude-cli", "claude-sonnet-4-6"),
-    ("Claude Opus 4.7  (Claude Code)", "claude-cli", "claude-opus-4-7"),
-    ("Claude Haiku 4.5  (Claude Code)", "claude-cli", "claude-haiku-4-5"),
-    ("Gemini 2.5 Pro  (Gemini CLI)", "gemini-cli", "gemini-2.5-pro"),
-    ("Gemini 2.5 Flash  (Gemini CLI)", "gemini-cli", "gemini-2.5-flash"),
-]
+# Coding-mode subset of the shared MODEL_PRESETS — the Agents tab's
+# "+ New agent" dialog is for spawning a worker without the chat-style
+# mode + thinking + skills pickers.  Operators who want those should
+# use the canvas New-Conversation dialog or the Chat tab.  Showing the
+# full 12-row matrix here would be confusing without those companion
+# fields.
+_AGENTS_TAB_PRESETS: list = [p for p in MODEL_PRESETS if p.mode == MODE_CODING]
 
 
 class AgentsPage(QtWidgets.QWidget):
@@ -286,8 +288,8 @@ class AgentsPage(QtWidgets.QWidget):
         name.setPlaceholderText("e.g. Agent Smith")
         form.addRow("Name:", name)
         model = QtWidgets.QComboBox()
-        for label, _p, _m in _MODEL_PRESETS:
-            model.addItem(label)
+        for preset in _AGENTS_TAB_PRESETS:
+            model.addItem(preset.display())
         form.addRow("Model:", model)
         system = QtWidgets.QPlainTextEdit()
         system.setPlaceholderText("Optional system prompt — set the agent's persona / role.")
@@ -302,7 +304,8 @@ class AgentsPage(QtWidgets.QWidget):
         form.addRow(buttons)
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        provider, model_name = _MODEL_PRESETS[model.currentIndex()][1:]
+        chosen = _AGENTS_TAB_PRESETS[model.currentIndex()]
+        provider, model_name = chosen.provider, chosen.model
         asyncio.ensure_future(
             self._do_create(
                 name.text().strip() or "Unnamed agent",
