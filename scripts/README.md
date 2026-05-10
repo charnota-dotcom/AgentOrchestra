@@ -12,6 +12,8 @@ or type any of it.
 | **`stop.cmd`** | Closes the GUI window and any background service it supervised. Matches by window title — leaves unrelated Python processes alone. | When you close the laptop or want to free port 8765. |
 | **`update.cmd`** | `git pull --ff-only origin main` + `pip install -e .[gui] --upgrade`. | After GitHub Desktop's "Pull origin", or before reporting a bug. |
 | **`doctor.cmd`** | One-page health report: Python version, `.venv` status, `claude` / `gemini` on PATH, port 8765, local data dir, annotator import, AgentOrchestra version. | When something's wrong. Copy/paste the output into a bug report. |
+| **`test-claude.cmd`** | Smoke-test the local `claude` CLI: PATH check + `claude -p "..."` headless call. Surfaces "Not logged in" if your Max-plan auth lapsed. | First-time setup, or when Claude cards stop replying. |
+| **`test-gemini.cmd`** | Smoke-test the local `gemini` CLI: PATH check + `gemini -p "..."` headless call. | First-time setup, or when Gemini cards stop replying. |
 | **`reset.cmd`** | Wipes local state (SQLite store, first-run sentinel, annotation logs). Does **not** touch your repo, git history, or CLI auth. Confirms before deleting. | When the local DB is wedged and you want a clean slate. |
 
 The Operator Panel (`ops.cmd`) is the simplest entry point: every

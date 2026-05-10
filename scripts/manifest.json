@@ -60,6 +60,24 @@
       "needs_internet": false
     },
     {
+      "id": "test-claude",
+      "label": "Test Claude Code CLI",
+      "file": "test-claude.cmd",
+      "summary": "Smoke-test the local `claude` binary: confirm it's on PATH, then send `claude -p \"say hi in 5 words\"` to verify the Max-plan login is working in headless mode.",
+      "when_to_run": "First-time setup, after re-installing claude, or whenever a card dispatch is failing for unclear reasons.  If it says \"Not logged in\", run `claude` interactively and `/login`.",
+      "writes": [],
+      "needs_internet": true
+    },
+    {
+      "id": "test-gemini",
+      "label": "Test Gemini CLI",
+      "file": "test-gemini.cmd",
+      "summary": "Smoke-test the local `gemini` binary the same way: PATH check + a headless `gemini -p \"...\"` call to verify your Gemini CLI auth.",
+      "when_to_run": "First-time setup, after re-installing gemini, or when a Gemini card stops replying.  If auth fails, run `gemini` interactively to sign in.",
+      "writes": [],
+      "needs_internet": true
+    },
+    {
       "id": "reset",
       "label": "Wipe local state",
       "file": "reset.cmd",
