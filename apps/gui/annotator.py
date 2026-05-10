@@ -82,6 +82,8 @@ _SCREEN_TO_STACK_INDEX: dict[str, int] = {
 
 
 def _make_navigate_to(window: MainWindow):
+    from PySide6 import QtWidgets
+
     def navigate_to(screen_name: str) -> bool:
         idx = _SCREEN_TO_STACK_INDEX.get(screen_name)
         if idx is None:
@@ -90,6 +92,15 @@ def _make_navigate_to(window: MainWindow):
         # changes the stack page atomically — exactly what the
         # annotator's Jump retry expects.
         window._switch_to(idx)
+        # The annotator's Jump retry budget is ~1.5 s — if the target
+        # page isn't paint-ready by then it falls back to a heuristic
+        # geometry rectangle.  Drain pending events so the page's
+        # showEvent / first layout pass completes before we return.
+        # Cheap (a few ms typically); only matters for screens that
+        # build widgets lazily on first show (e.g. CanvasPage's view).
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.processEvents()
         return True
 
     return navigate_to
