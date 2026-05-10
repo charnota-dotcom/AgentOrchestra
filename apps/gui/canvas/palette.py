@@ -17,6 +17,14 @@ from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.presets import (
+    DEFAULT_MODEL_INDEX,
+    DEFAULT_THINKING_INDEX,
+    MODEL_PRESETS,
+    THINKING_PRESETS,
+    compose_system,
+)
+
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
@@ -111,54 +119,101 @@ class PalettePanel(QtWidgets.QWidget):
         await asyncio.gather(self.reload_cards(), self.reload_agents())
 
     # New-conversation dialog so the operator can mint an agent
-    # directly from the canvas, picking provider + model + type
-    # (Coding / General) without leaving the page.  On success the
-    # palette refreshes and the new entry is draggable.
-    _AGENT_PRESETS: list[tuple[str, str, str, str]] = [
-        # (label, provider, model, default system prompt)
-        ("Claude Sonnet 4.6  (Coding / Claude Code)", "claude-cli", "claude-sonnet-4-6", ""),
-        ("Claude Opus 4.7  (Coding / Claude Code)", "claude-cli", "claude-opus-4-7", ""),
-        (
-            "Claude Sonnet 4.6  (General Chat)",
-            "claude-cli",
-            "claude-sonnet-4-6",
-            "You are a friendly general-purpose assistant.  Help with "
-            "writing, research, brainstorming, planning, and everyday "
-            "questions.  Don't assume the user is asking about code.",
-        ),
-        (
-            "Claude Opus 4.7  (General Chat)",
-            "claude-cli",
-            "claude-opus-4-7",
-            "You are a friendly general-purpose assistant.  Help with "
-            "writing, research, brainstorming, planning, and everyday "
-            "questions.  Don't assume the user is asking about code.",
-        ),
-        ("Gemini 2.5 Pro  (Coding / Gemini CLI)", "gemini-cli", "gemini-2.5-pro", ""),
-        (
-            "Gemini 2.5 Pro  (General Chat)",
-            "gemini-cli",
-            "gemini-2.5-pro",
-            "You are a friendly general-purpose assistant.  Help with "
-            "writing, research, brainstorming, planning, and everyday "
-            "questions.  Don't assume the user is asking about code.",
-        ),
-    ]
-
+    # directly from the canvas with the *same* model / thinking / skills
+    # picker the live Chat tab uses.  Mirrors that screen so a flow
+    # drafted on the canvas behaves identically to the same prompt
+    # typed into Chat.  On success the palette refreshes and the new
+    # entry is draggable.
     def _new_conversation_dialog(self) -> None:
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("New conversation")
-        dlg.resize(460, 360)
-        form = QtWidgets.QFormLayout(dlg)
+        dlg.resize(560, 520)
+        outer = QtWidgets.QVBoxLayout(dlg)
+        outer.setContentsMargins(16, 16, 16, 12)
+        outer.setSpacing(12)
+
+        header = QtWidgets.QLabel(
+            "<b>New conversation</b><br/>"
+            "<span style='color:#5b6068;font-size:11px;'>Same picker as the "
+            "Chat tab — model, thinking depth, and skills all carry over to "
+            "this agent's system prompt.</span>"
+        )
+        header.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        outer.addWidget(header)
+
+        form = QtWidgets.QFormLayout()
+        form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(8)
 
         name_input = QtWidgets.QLineEdit()
-        name_input.setPlaceholderText("e.g. Agent Smith")
+        name_input.setPlaceholderText(
+            "e.g. Agent Smith  (auto-generated from first message if blank)"
+        )
         form.addRow("Name:", name_input)
 
+        # Provider filter — quick way to narrow the model dropdown when
+        # the operator only cares about Claude or Gemini.  "All" leaves
+        # every preset visible.
+        provider_filter = QtWidgets.QComboBox()
+        provider_filter.addItem("All", "")
+        provider_filter.addItem("Claude (claude-cli)", "claude-cli")
+        provider_filter.addItem("Gemini (gemini-cli)", "gemini-cli")
+        form.addRow("Provider:", provider_filter)
+
+        # Model + mode picker.  Item data carries the index into
+        # MODEL_PRESETS so we can recover the full ModelPreset on accept,
+        # even after the visible list has been filtered.
         model_combo = QtWidgets.QComboBox()
-        for label, _p, _m, _s in self._AGENT_PRESETS:
-            model_combo.addItem(label)
-        form.addRow("Model + type:", model_combo)
+        for i, preset in enumerate(MODEL_PRESETS):
+            model_combo.addItem(preset.display(), i)
+        model_combo.setCurrentIndex(DEFAULT_MODEL_INDEX)
+        model_combo.setToolTip(
+            "Each row is one (model + mode) cell.  Modes (Coding, General "
+            "Chat, File / artifact, Image prompt) swap the system prompt "
+            "without leaving the same provider, exactly like the Chat tab."
+        )
+        form.addRow("Model:", model_combo)
+
+        def _filter_models(_idx: int) -> None:
+            wanted = provider_filter.currentData() or ""
+            saved_real_idx = model_combo.currentData()
+            model_combo.blockSignals(True)
+            model_combo.clear()
+            for i, preset in enumerate(MODEL_PRESETS):
+                if not wanted or preset.provider == wanted:
+                    model_combo.addItem(preset.display(), i)
+            # Try to restore the previous real index; if it was filtered
+            # out, fall back to the first visible row.
+            for ci in range(model_combo.count()):
+                if model_combo.itemData(ci) == saved_real_idx:
+                    model_combo.setCurrentIndex(ci)
+                    break
+            else:
+                if model_combo.count() > 0:
+                    model_combo.setCurrentIndex(0)
+            model_combo.blockSignals(False)
+
+        provider_filter.currentIndexChanged.connect(_filter_models)  # type: ignore[arg-type]
+
+        # Thinking-depth picker.  Same ladder as the Chat tab.
+        thinking_combo = QtWidgets.QComboBox()
+        for tp in THINKING_PRESETS:
+            thinking_combo.addItem(tp.label)
+        thinking_combo.setCurrentIndex(DEFAULT_THINKING_INDEX)
+        thinking_combo.setToolTip(
+            "Tells the model how hard to think before answering.  Off keeps "
+            "the prompt clean; Hard / Very hard ask for explicit reasoning."
+        )
+        form.addRow("Thinking:", thinking_combo)
+
+        # Skills field — free-form `/foo /bar baz` that becomes a system
+        # directive.  Matches the Chat tab's Skills input character-for-
+        # character.
+        skills_input = QtWidgets.QLineEdit()
+        skills_input.setPlaceholderText(
+            "Optional, e.g. /research-deep /cite-sources  (free-form, passed in the prompt)"
+        )
+        form.addRow("Skills:", skills_input)
 
         # Repo picker — bind the new agent to a Workspace so the CLI
         # runs inside that directory and can use its file tools.
@@ -166,7 +221,7 @@ class PalettePanel(QtWidgets.QWidget):
         ws_combo.addItem("(no repo — chat only)", "")
         ws_combo.setToolTip(
             "Pick a repo to give the agent file-tool access to.  "
-            "Use the Add… button to register a new path."
+            "Add… registers an existing local path; Clone… clones a git URL."
         )
         ws_row = QtWidgets.QHBoxLayout()
         ws_row.addWidget(ws_combo, stretch=1)
@@ -198,29 +253,46 @@ class PalettePanel(QtWidgets.QWidget):
         # Populate asynchronously so the dialog appears immediately.
         asyncio.ensure_future(self._populate_workspaces(ws_combo))
 
+        outer.addLayout(form)
+
         first_msg = QtWidgets.QPlainTextEdit()
-        first_msg.setPlaceholderText("Optional: a first message to send right after creation.")
-        first_msg.setMinimumHeight(80)
-        form.addRow("First message:", first_msg)
+        first_msg.setPlaceholderText(
+            "Optional: a first message to send right after creation.  "
+            "Without one, the agent is created and you double-click it on "
+            "the canvas to start chatting."
+        )
+        first_msg.setMinimumHeight(90)
+        outer.addWidget(QtWidgets.QLabel("First message:"))
+        outer.addWidget(first_msg)
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Create")
         buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
         buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
-        form.addRow(buttons)
+        outer.addWidget(buttons)
 
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        idx = model_combo.currentIndex()
-        _label, provider, model, system = self._AGENT_PRESETS[idx]
+
+        # Recover the real preset via item data so the filter doesn't
+        # silently shift our index.
+        real_idx = model_combo.currentData()
+        if real_idx is None or not (0 <= int(real_idx) < len(MODEL_PRESETS)):
+            return
+        preset = MODEL_PRESETS[int(real_idx)]
+        thinking = THINKING_PRESETS[thinking_combo.currentIndex()]
+        skills = skills_input.text().strip()
+        # Same assembler the Chat tab uses → identical system prompt.
+        system = compose_system(preset, thinking, skills)
         ws_id = ws_combo.currentData() or ""
         asyncio.ensure_future(
             self._do_create(
                 (name_input.text() or "Unnamed conversation").strip(),
-                provider,
-                model,
+                preset.provider,
+                preset.model,
                 system,
                 first_msg.toPlainText().strip(),
                 ws_id,

@@ -118,6 +118,25 @@ class CanvasPage(QtWidgets.QWidget):
         self.view = _CanvasViewWithDrop(self.scene, self)
 
         c.addWidget(self._build_toolbar())
+
+        # Draft-mode banner.  Hidden by default; visible when
+        # ``_is_draft`` is on so the operator never confuses a planning
+        # surface with a live one.  Says explicitly that the picker
+        # behaviour mirrors the Chat tab — the canvas is the same
+        # experience, just with Run gated.
+        self.draft_banner = QtWidgets.QLabel(
+            "📐  Draft canvas — planning surface.  Run is disabled.  "
+            "Model / thinking / skills / repo binding all behave the same "
+            "as the Chat tab; flip Draft off to dispatch."
+        )
+        self.draft_banner.setWordWrap(True)
+        self.draft_banner.setStyleSheet(
+            "QLabel{background:#fff5e0;border:1px solid #f0c97a;"
+            "color:#7a4f00;padding:6px 10px;border-radius:4px;font-size:11px;}"
+        )
+        self.draft_banner.setVisible(False)
+        c.addWidget(self.draft_banner)
+
         c.addWidget(self.view, stretch=1)
 
         # Minimap floats in the bottom-right corner of the centre
@@ -436,14 +455,16 @@ class CanvasPage(QtWidgets.QWidget):
 
     def _on_draft_toggled(self, on: bool) -> None:
         self._is_draft = on
-        # Visual feedback in the title — Run button gets disabled by
-        # the existing _on_run_clicked guard.
+        # Run button is gated; the persistent banner makes the mode
+        # state legible from across the room and reminds the operator
+        # that the picker UX mirrors the Chat tab.
         if on:
             self.run_btn.setEnabled(False)
             self.run_btn.setToolTip("Draft mode — flip Draft off to enable Run.")
         else:
             self.run_btn.setEnabled(True)
             self.run_btn.setToolTip("")
+        self.draft_banner.setVisible(on)
 
     def _refresh_lineage_boxes(self) -> None:
         """Draw a translucent box around each lineage cluster on the

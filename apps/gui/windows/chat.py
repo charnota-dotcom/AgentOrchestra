@@ -19,6 +19,15 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.presets import (
+    DEFAULT_MODEL_INDEX,
+    DEFAULT_THINKING_INDEX,
+    MODEL_PRESETS,
+    THINKING_PRESETS,
+    compose_system,
+    model_label_for,
+)
+
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
@@ -31,124 +40,11 @@ _ATTACHMENT_FILTER = (
 )
 
 
-# Model presets — every option goes through a local CLI (Claude Code
-# or Gemini CLI) so chat reuses your Max-plan / Gemini-CLI auth and
-# never bills against an API key.
-#
-# Each entry is (display label, provider, model, system_prompt).  The
-# system prompt is what swaps the assistant's persona without leaving
-# the same provider — e.g. "Claude Sonnet 4.6 (General Chat)" goes
-# through claude-cli but with a friendlier general-purpose prompt
-# than the default coding-assistant behaviour you'd get with
-# "Claude Sonnet 4.6 (Claude Code)".
-_MODEL_PRESETS: list[tuple[str, str, str, str]] = [
-    # Coding-default rows — what you'd get from `claude` on its own.
-    ("Claude Sonnet 4.6  (Claude Code)", "claude-cli", "claude-sonnet-4-6", ""),
-    ("Claude Opus 4.7  (Claude Code)", "claude-cli", "claude-opus-4-7", ""),
-    ("Claude Haiku 4.5  (Claude Code)", "claude-cli", "claude-haiku-4-5", ""),
-    ("Gemini 2.5 Pro  (Gemini CLI)", "gemini-cli", "gemini-2.5-pro", ""),
-    ("Gemini 2.5 Flash  (Gemini CLI)", "gemini-cli", "gemini-2.5-flash", ""),
-    # General-chat rows — same models, friendlier prompt.  Useful for
-    # writing, research, brainstorming, planning, everyday questions.
-    (
-        "Claude Sonnet 4.6  (General Chat)",
-        "claude-cli",
-        "claude-sonnet-4-6",
-        "You are a friendly general-purpose assistant.  Help with "
-        "writing, research, brainstorming, planning, and everyday "
-        "questions.  Do not assume the user is asking about code; "
-        "if they are, treat code as one option among many.  Be "
-        "concise unless asked for depth.",
-    ),
-    (
-        "Claude Opus 4.7  (General Chat)",
-        "claude-cli",
-        "claude-opus-4-7",
-        "You are a friendly general-purpose assistant.  Help with "
-        "writing, research, brainstorming, planning, and everyday "
-        "questions.  Do not assume the user is asking about code; "
-        "if they are, treat code as one option among many.  Be "
-        "concise unless asked for depth.",
-    ),
-    (
-        "Gemini 2.5 Pro  (General Chat)",
-        "gemini-cli",
-        "gemini-2.5-pro",
-        "You are a friendly general-purpose assistant.  Help with "
-        "writing, research, brainstorming, planning, and everyday "
-        "questions.  Do not assume the user is asking about code; "
-        "if they are, treat code as one option among many.  Be "
-        "concise unless asked for depth.",
-    ),
-    # File / artifact mode — model emits the file's contents directly
-    # so the operator can hit "Save reply" and write it to disk.
-    (
-        "Claude Sonnet 4.6  (File / artifact)",
-        "claude-cli",
-        "claude-sonnet-4-6",
-        "Produce a self-contained artifact the user can save to "
-        "disk.  Format your reply as the file's literal contents "
-        "— no surrounding chatter, no Markdown fencing unless the "
-        "file format itself uses Markdown.  If the user didn't "
-        "specify a format, pick the most appropriate one (plain "
-        "text, JSON, CSV, Markdown, etc.) and start your reply "
-        "with a single header line `# filename.ext` so the file "
-        "can be saved with a sensible name.",
-    ),
-    (
-        "Gemini 2.5 Pro  (File / artifact)",
-        "gemini-cli",
-        "gemini-2.5-pro",
-        "Produce a self-contained artifact the user can save to "
-        "disk.  Format your reply as the file's literal contents "
-        "— no surrounding chatter, no Markdown fencing unless the "
-        "file format itself uses Markdown.  If the user didn't "
-        "specify a format, pick the most appropriate one (plain "
-        "text, JSON, CSV, Markdown, etc.) and start your reply "
-        "with a single header line `# filename.ext` so the file "
-        "can be saved with a sensible name.",
-    ),
-    # Image-prompt mode — useful for piping into a separate image
-    # generator (Midjourney, DALL-E, Stable Diffusion).  Native image
-    # generation needs a paid API; out of scope for the no-fees default.
-    (
-        "Claude Sonnet 4.6  (Image prompt)",
-        "claude-cli",
-        "claude-sonnet-4-6",
-        "The user wants an image.  Don't try to render one — "
-        "instead produce a precise, vivid prompt suitable for a "
-        "text-to-image generator (Midjourney / DALL-E / Stable "
-        "Diffusion / Imagen).  Include subject, composition, "
-        "style, lighting, mood, and any reference points.  Keep "
-        "the prompt under 200 words.  Output only the prompt; no "
-        "preamble.",
-    ),
-    (
-        "Gemini 2.5 Pro  (Image prompt)",
-        "gemini-cli",
-        "gemini-2.5-pro",
-        "The user wants an image.  Don't try to render one — "
-        "instead produce a precise, vivid prompt suitable for a "
-        "text-to-image generator (Midjourney / DALL-E / Stable "
-        "Diffusion / Imagen).  Include subject, composition, "
-        "style, lighting, mood, and any reference points.  Keep "
-        "the prompt under 200 words.  Output only the prompt; no "
-        "preamble.",
-    ),
-]
-
-
-_THINKING_PRESETS: list[tuple[str, str]] = [
-    ("Off", ""),
-    ("Normal", "Think briefly before answering."),
-    ("Hard", "Think carefully and step by step before answering. Show your reasoning."),
-    (
-        "Very hard",
-        "Think exhaustively step by step before answering. "
-        "Consider edge cases, alternative interpretations, and potential pitfalls. "
-        "Show your reasoning explicitly.",
-    ),
-]
+# Model presets, thinking-depth presets, and the system-prompt assembler
+# all live in apps/gui/presets so the canvas New-Conversation dialog can
+# render the *same* picker — historically the canvas had a narrower set
+# of choices and no thinking / skills field, so a flow drafted on the
+# canvas behaved subtly differently from the same prompt typed here.
 
 
 class ChatPage(QtWidgets.QWidget):
@@ -199,8 +95,9 @@ class ChatPage(QtWidgets.QWidget):
         model_label.setStyleSheet("color:#5b6068;font-size:12px;")
         top.addWidget(model_label)
         self.model_combo = QtWidgets.QComboBox()
-        for entry in _MODEL_PRESETS:
-            self.model_combo.addItem(entry[0])
+        for preset in MODEL_PRESETS:
+            self.model_combo.addItem(preset.display())
+        self.model_combo.setCurrentIndex(DEFAULT_MODEL_INDEX)
         # Switching model mid-thread would require a model swap on
         # the existing Agent, which our backend doesn't support.
         # Treat a model change as "start a new chat" so the operator
@@ -214,9 +111,9 @@ class ChatPage(QtWidgets.QWidget):
         thinking_label.setStyleSheet("color:#5b6068;font-size:12px;")
         top.addWidget(thinking_label)
         self.thinking_combo = QtWidgets.QComboBox()
-        for label, _ in _THINKING_PRESETS:
-            self.thinking_combo.addItem(label)
-        self.thinking_combo.setCurrentIndex(1)  # Normal
+        for tp in THINKING_PRESETS:
+            self.thinking_combo.addItem(tp.label)
+        self.thinking_combo.setCurrentIndex(DEFAULT_THINKING_INDEX)
         top.addWidget(self.thinking_combo)
 
         layout.addLayout(top)
@@ -579,18 +476,18 @@ class ChatPage(QtWidgets.QWidget):
 
     async def _send_async(self, message: str) -> None:
         idx = self.model_combo.currentIndex()
-        label, provider, model, mode_system = _MODEL_PRESETS[idx]
+        preset = MODEL_PRESETS[idx]
         thinking_idx = self.thinking_combo.currentIndex()
-        _t_label, system_thinking = _THINKING_PRESETS[thinking_idx]
+        thinking = THINKING_PRESETS[thinking_idx]
 
-        # System prompt is stitched together from three sources, in
-        # priority order: the model preset's mode prompt (Coding /
-        # General / File / Image), the thinking-depth directive,
-        # then the user's free-form skills field.  Joined with blank
-        # lines so each is its own paragraph for the model.
+        provider = preset.provider
+        model = preset.model
+        label = preset.label
+
+        # Compose the system prompt from mode + thinking + skills using
+        # the canonical assembler shared with the canvas.
         skills = self.skills_input.text().strip()
-        system_parts = [p for p in (mode_system, system_thinking, _skills_to_system(skills)) if p]
-        system = "\n\n".join(system_parts)
+        system = compose_system(preset, thinking, skills)
 
         # First message of the session: mint a persistent Agent so
         # this conversation shows up in the canvas Conversations
@@ -638,7 +535,7 @@ class ChatPage(QtWidgets.QWidget):
         self._pending_attachments = []
         self._render_pending_attachments()
         self._history.append({"role": "assistant", "content": reply})
-        self._append(_label_for(provider, model), reply or "(empty reply)")
+        self._append(model_label_for(provider, model), reply or "(empty reply)")
         self.send_btn.setEnabled(True)
 
     def _new_chat(self) -> None:
@@ -861,10 +758,6 @@ class ChatPage(QtWidgets.QWidget):
         self.transcript.ensureCursorVisible()
 
 
-def _label_for(provider: str, model: str) -> str:
-    return f"{model} ({provider})"
-
-
 def _auto_name_from(
     message: str,
     model_label: str,
@@ -893,20 +786,3 @@ def _auto_name_from(
     if len(one_line) <= 50:
         return one_line
     return one_line[:47] + "…"
-
-
-def _skills_to_system(skills: str) -> str:
-    """Turn the free-form ``/foo /bar baz`` skills field into a system
-    directive the model will read as instructions.  We don't try to
-    actually invoke Claude Code's first-class Skills feature here —
-    that only fires in interactive mode and our Chat tab is headless.
-    But we *do* tell the model "treat these as activation directives"
-    so the reply respects them in spirit.
-    """
-    if not skills.strip():
-        return ""
-    return (
-        "Skill directives (treat each `/name` token as an activation "
-        "instruction; respond as if those skills are active for this "
-        f"conversation): {skills.strip()}"
-    )
