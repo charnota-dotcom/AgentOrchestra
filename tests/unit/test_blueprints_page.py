@@ -55,3 +55,24 @@ def test_provider_constants_have_model_hints() -> None:
         # hint, otherwise the model combo opens empty and the operator
         # has to guess what to type.
         assert _MODEL_HINTS.get(p), f"provider {p!r} has no model hints"
+
+
+def test_belongs_to_other_provider() -> None:
+    """Pin the cross-provider model classifier that drives the
+    "tie model to provider" reset behaviour on the Provider/Model
+    combo boxes.
+    """
+    pytest.importorskip("PySide6")
+    from apps.gui.windows.blueprints import _belongs_to_other_provider
+
+    # Empty string never triggers a reset.
+    assert _belongs_to_other_provider("", "claude-cli") is False
+    # Known model for THIS provider — keep it.
+    assert _belongs_to_other_provider("claude-sonnet-4-6", "claude-cli") is False
+    assert _belongs_to_other_provider("gemini-2.5-pro", "gemini-cli") is False
+    # Known model for the OTHER provider — flag for reset.
+    assert _belongs_to_other_provider("gemini-2.5-pro", "claude-cli") is True
+    assert _belongs_to_other_provider("claude-opus-4-7", "gemini-cli") is True
+    # Custom string in nobody's hints — keep it (operator-typed).
+    assert _belongs_to_other_provider("my-custom-experimental", "claude-cli") is False
+    assert _belongs_to_other_provider("my-custom-experimental", "gemini-cli") is False

@@ -55,6 +55,29 @@
         "scripts/doctor.cmd"
       ],
       "annotation_excerpt": "error text - reload failed"
+    },
+    {
+      "annotation_index": 11,
+      "version": "0.1.0+blueprint-model-provider-tie",
+      "status": "shipped",
+      "description": "Operator selected Provider 'claude-cli' but the Model field still showed 'gemini-2.5-pro'. Root cause: _refresh_model_hints (and the matching _refresh_models on the New-blueprint dialog) unconditionally preserved the prior text across provider switches, so a known model belonging to the OTHER provider survived the change. Fixed by adding _belongs_to_other_provider — when the current text is a known hint for some other provider it gets replaced with the new provider's first hint; custom operator-typed strings (not in any hint set) are still preserved.",
+      "change_overview": [
+        "apps/gui/windows/blueprints.py — new _belongs_to_other_provider helper",
+        "apps/gui/windows/blueprints.py — _refresh_model_hints uses the helper to reset cross-provider models to the new provider's first hint",
+        "apps/gui/windows/blueprints.py — _NewBlueprintDialog._refresh_models — same fix on the create dialog so a freshly opened dialog also defaults sensibly when the operator switches providers",
+        "tests/unit/test_blueprints_page.py — test_belongs_to_other_provider pins the four cases (empty / same-provider / other-provider / custom-typed)"
+      ],
+      "risk_level": "Low",
+      "risk_note": "Custom operator-typed model strings (anything not in either provider's hint tuple) are still preserved across provider switches — only known cross-provider models get reset.",
+      "next_steps": [
+        "Run scripts\\restart.cmd, open Blueprints tab, switch Provider claude-cli ↔ gemini-cli — Model field should reset to the first hint of the new provider each time. Type a custom value (e.g. 'my-custom-model') and switch providers — custom value should survive.",
+        "Ready to merge."
+      ],
+      "files_changed": [
+        "apps/gui/windows/blueprints.py",
+        "tests/unit/test_blueprints_page.py"
+      ],
+      "annotation_excerpt": "I've selected Provider claude-cli, but the Model"
     }
   ]
 }
