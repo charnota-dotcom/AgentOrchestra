@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "agentorchestra-scripts",
+  "description": "One-click terminal commands for AgentOrchestra on Windows.  Double-click any .cmd from File Explorer, or right-click → Send to → Desktop (create shortcut) for one-click access.",
+  "version": 1,
+  "platform": "windows",
+  "commands": [
+    {
+      "id": "setup",
+      "label": "First-time install",
+      "file": "setup.cmd",
+      "summary": "Create the virtual environment and install AgentOrchestra + its [gui] extras.  Idempotent.  Re-run after a Python upgrade or if .venv goes missing.",
+      "when_to_run": "Once, the first time you clone the repo.  Or any time you nuked .venv.",
+      "writes": [".venv/"],
+      "needs_internet": true
+    },
+    {
+      "id": "launch",
+      "label": "Start AgentOrchestra",
+      "file": "launch.cmd",
+      "summary": "Open the GUI.  The service is auto-spawned in the background by the GUI itself if 127.0.0.1:8765 is free.",
+      "when_to_run": "Every session, normally double-clicked from a desktop shortcut.",
+      "writes": ["%USERPROFILE%\\.local\\share\\agentorchestra\\"],
+      "needs_internet": false
+    },
+    {
+      "id": "stop",
+      "label": "Stop AgentOrchestra",
+      "file": "stop.cmd",
+      "summary": "Close the GUI window and any background service it supervised.",
+      "when_to_run": "When you close the laptop or want to free port 8765.",
+      "writes": [],
+      "needs_internet": false
+    },
+    {
+      "id": "update",
+      "label": "Pull latest + refresh deps",
+      "file": "update.cmd",
+      "summary": "git pull --ff-only origin main, then pip install -e .[gui] --upgrade.",
+      "when_to_run": "After GitHub Desktop's Pull origin, when you've changed branch, or before reporting a bug.",
+      "writes": [".venv/", "<repo>/"],
+      "needs_internet": true
+    },
+    {
+      "id": "doctor",
+      "label": "Environment diagnostic",
+      "file": "doctor.cmd",
+      "summary": "Print a one-page health report: Python version, .venv status, claude / gemini on PATH, port 8765, local data directory, annotator import, AgentOrchestra version.",
+      "when_to_run": "When something's wrong.  Copy/paste the output into a bug report.",
+      "writes": [],
+      "needs_internet": false
+    },
+    {
+      "id": "reset",
+      "label": "Wipe local state",
+      "file": "reset.cmd",
+      "summary": "Delete %USERPROFILE%\\.local\\share\\agentorchestra (SQLite store, first-run sentinel, annotation logs).  Does NOT touch the repo, git history, or CLI auth.",
+      "when_to_run": "When the local DB is wedged and you want a clean slate.  Confirms before deleting.",
+      "writes": ["%USERPROFILE%\\.local\\share\\agentorchestra\\ (DELETED)"],
+      "needs_internet": false
+    }
+  ]
+}

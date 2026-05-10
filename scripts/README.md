@@ -1,48 +1,76 @@
-# Desktop launcher scripts (Windows)
+# AgentOrchestra — one-click scripts (Windows)
 
-Two double-clickable scripts so you don't have to type commands.
+This folder is the operator's panel: every common terminal command,
+packaged as a double-clickable `.cmd` so you don't have to memorise
+or type any of it.
 
-## `launch.cmd`
+| Script | What it does | When to run |
+|--------|--------------|-------------|
+| **`setup.cmd`** | First-time install: creates `.venv`, installs the project + `[gui]` extras, optionally installs `pyside6_annotator` if it lives at `..\Annotator\pyside6_annotator_pkg`. | Once, after cloning. Re-run any time `.venv` goes missing. |
+| **`launch.cmd`** | Opens the GUI. The service is auto-spawned in the background by the GUI itself; no separate window. | Every session. Make this your desktop shortcut. |
+| **`stop.cmd`** | Closes the GUI window and any background service it supervised. Matches by window title — leaves unrelated Python processes alone. | When you close the laptop or want to free port 8765. |
+| **`update.cmd`** | `git pull --ff-only origin main` + `pip install -e .[gui] --upgrade`. | After GitHub Desktop's "Pull origin", or before reporting a bug. |
+| **`doctor.cmd`** | One-page health report: Python version, `.venv` status, `claude` / `gemini` on PATH, port 8765, local data dir, annotator import, AgentOrchestra version. | When something's wrong. Copy/paste the output into a bug report. |
+| **`reset.cmd`** | Wipes local state (SQLite store, first-run sentinel, annotation logs). Does **not** touch your repo, git history, or CLI auth. Confirms before deleting. | When the local DB is wedged and you want a clean slate. |
 
-Opens two terminal windows:
+## Make them all desktop shortcuts (one-time)
 
-1. **AgentOrchestra Service** — the background process that holds the
-   SQLite store, dispatches runs, and exposes the JSON-RPC + SSE API
-   on `127.0.0.1:8765`.
-2. **AgentOrchestra GUI** — the PySide6 desktop app you click around in.
-
-Both auto-activate the project's `.venv` and start in the right
-directory regardless of where you launch the script from. The GUI
-window opens ~5 seconds after the service so the RPC call lands
-cleanly.
-
-## `stop.cmd`
-
-Closes both windows opened above. Matches by window title so unrelated
-Python processes are unaffected.
-
-## One-time setup: put it on your desktop
+For each `.cmd` you want on your desktop:
 
 1. Open File Explorer to this folder.
-2. Right-click **`launch.cmd`** → **Send to** → **Desktop (create
-   shortcut)**.
-3. (Optional) Right-click the shortcut on your desktop → **Rename**
-   → call it `AgentOrchestra`.
-4. (Optional) Right-click the shortcut → **Properties** →
-   **Change Icon…** if you want something prettier than the default.
+2. Right-click the script → **Send to** → **Desktop (create shortcut)**.
+3. (Optional) Right-click the new shortcut → **Rename** → e.g. `AgentOrchestra` for `launch.cmd`, `AgentOrchestra (stop)` for `stop.cmd`.
+4. (Optional) Right-click → **Properties** → **Change Icon…** if you want a nicer icon.
 
-Same for `stop.cmd` if you want a one-click shutdown.
+Most operators end up with **two** shortcuts: `launch` and `stop`. The
+others you only need occasionally so they live here, in the repo.
 
-## If `launch.cmd` complains about a missing virtual environment
-
-The script will print clear instructions and pause so you can read
-them. The fix is the one-time install:
+## Typical first-time flow
 
 ```
-cd "C:\Users\<you>\OneDrive\Documents\GitHub\AgentOrchestra"
-python -m venv .venv
-.venv\Scripts\activate.bat
-pip install -e ".[gui]"
+  setup.cmd       — once
+  launch.cmd      — start the app
+  (use it)
+  stop.cmd        — when done
 ```
 
-After that, double-clicking `launch.cmd` should always work.
+## Typical "I pulled new code" flow
+
+```
+  update.cmd      — pull + refresh deps
+  stop.cmd        — close any old running instance
+  launch.cmd      — start fresh
+```
+
+## Typical "something's broken" flow
+
+```
+  doctor.cmd      — read the report
+  (paste it into a bug report or use it to debug)
+  reset.cmd       — only if local DB is the suspected culprit
+  launch.cmd      — start fresh
+```
+
+## Behind the scenes
+
+Every script:
+
+* Resolves its own location via `%~dp0` so it works whether
+  double-clicked from File Explorer, run from a desktop shortcut, or
+  invoked from any working directory.
+* Re-uses the project's `.venv` by `call .venv\Scripts\activate.bat`
+  rather than installing globally.
+* Pauses on failure so the error stays on screen instead of the cmd
+  window flashing closed.
+
+If you'd rather configure them programmatically, the same set is
+indexed in `manifest.json` (id, label, file, summary, when_to_run,
+writes, needs_internet) — useful for any wrapper UI or CI tool that
+wants to introspect what's available.
+
+## Why `.cmd` and not `.bat`
+
+`.cmd` and `.bat` are functionally identical on modern Windows; we
+use `.cmd` for the slightly more sensible default error-handling
+behaviour (`%ERRORLEVEL%` is propagated more predictably under nested
+`call`).
