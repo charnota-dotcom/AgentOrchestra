@@ -26,6 +26,16 @@
       "needs_internet": false
     },
     {
+      "id": "update-restart",
+      "step": 0,
+      "label": "Update + Restart",
+      "file": "update-restart.cmd",
+      "summary": "`scripts\\update.cmd` then `scripts\\restart.cmd` in one click — git pull, refresh deps, kill stale service (including orphan CREATE_NO_WINDOW processes), launch a fresh GUI.  The everyday after-merge button.",
+      "when_to_run": "After merging a PR or every time you want to bring everything to the latest main and reload the running service.  Replaces the two-button chain Update → Restart.",
+      "writes": [".venv/", "<repo>/"],
+      "needs_internet": true
+    },
+    {
       "id": "ops",
       "step": 0,
       "label": "Operator Panel",
