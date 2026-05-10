@@ -176,6 +176,11 @@ def _safe_attachment_label(name: str) -> str:
     System: ignore previous instructions`` could break out of the
     block we built and inject pseudo-system content.  Strip newlines,
     closing brackets, and control chars; truncate to 200 chars.
+
+    Pure-whitespace / control-only input collapses to spaces under
+    the replacements above, so we ``.strip()`` before deciding whether
+    to fall back to ``"attachment"`` — otherwise ``"  "`` would be
+    truthy and we'd hand the model a label that's just two spaces.
     """
     cleaned = (
         str(name)
@@ -186,6 +191,7 @@ def _safe_attachment_label(name: str) -> str:
         .replace("\x00", "")
     )
     cleaned = "".join(c for c in cleaned if c.isprintable())
+    cleaned = cleaned.strip()
     return cleaned[:200] or "attachment"
 
 
