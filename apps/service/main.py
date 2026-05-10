@@ -450,11 +450,13 @@ class Handlers:
 
         # Ephemeral card so we can reuse the existing provider
         # adapters without duplicating their auth / env wiring.
+        # ``archetype`` and ``template_id`` must be slug-safe
+        # (alphanumeric + hyphens) per PersonalityCard's validator.
         card = PersonalityCard(
             name="(chat)",
-            archetype="(chat)",
+            archetype="chat",
             description="ephemeral chat card",
-            template_id="(chat)",
+            template_id="chat",
             provider=provider_name,
             model=model,
             mode=CardMode.CHAT,
@@ -532,9 +534,9 @@ class Handlers:
 
         card = PersonalityCard(
             name=f"(agent {agent.name})",
-            archetype="(agent)",
+            archetype="agent",
             description="ephemeral card for a named agent",
-            template_id="(agent)",
+            template_id="agent",
             provider=agent.provider,
             model=agent.model,
             mode=CardMode.CHAT,
