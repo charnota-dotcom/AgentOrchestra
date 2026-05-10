@@ -25,6 +25,12 @@ for /f "tokens=5" %%P in (
     taskkill /F /PID %%P >nul 2>&1
 )
 
+rem Belt-and-braces: kill orphan service processes whose command
+rem line includes apps.service.main, regardless of port binding.
+rem Mirrors restart.cmd — same root cause for both: a stale service
+rem from a previous session can survive a port-only kill.
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine -like '*apps.service.main*' } | ForEach-Object { Write-Host \"  killing orphan service PID $($_.ProcessId)\"; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+
 echo Done.
 echo.
 echo Press any key to close this window.

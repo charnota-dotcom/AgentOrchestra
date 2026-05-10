@@ -97,6 +97,29 @@
         "apps/gui/canvas/palette.py"
       ],
       "annotation_excerpt": "on the canvas the cards should be draggable"
+    },
+    {
+      "annotation_index": 7,
+      "version": "0.1.0+orphan-service-kill-hardening",
+      "status": "shipped",
+      "description": "Operator: 'Probe failed: unknown method: limits.check' persists across multiple restarts. Prior diagnosis (no_change_needed; just restart) was wrong because restart.cmd's kill missed the orphan: it only reaped processes by window-title (matches the visible cmd host) and by netstat-PID on :8765 (matches whatever currently binds the port). A CREATE_NO_WINDOW orphan service from an older session whose port binding is stale or whose service crashed mid-bind survives both. The GUI's supervisor then probes :8765, finds the orphan still answering, and attaches to its old in-memory RPC table. Hardened restart.cmd + stop.cmd to also kill any python.exe/pythonw.exe whose command line contains 'apps.service.main'. Added a /healthz probe to doctor.cmd that lists the registered methods and flags missing ones — the operator now has a one-button diagnostic to confirm whether the running service is actually on the latest code.",
+      "change_overview": [
+        "scripts/restart.cmd — additional PowerShell-based kill for any python whose command line includes apps.service.main (catches CREATE_NO_WINDOW orphans regardless of port state)",
+        "scripts/stop.cmd — same belt-and-braces kill",
+        "scripts/doctor.cmd — new '--- Service /healthz ---' section probes 127.0.0.1:8765/healthz, prints the registered method count, and explicitly flags whether limits.check / blueprints.list / drones.list / skills.list are present"
+      ],
+      "risk_level": "Low",
+      "risk_note": "PowerShell command-line filter only matches strings ending in 'apps.service.main' so it cannot kill an unrelated python process; doctor's probe uses a 3-second timeout so the script doesn't hang if the service isn't running.",
+      "next_steps": [
+        "Run scripts\\restart.cmd ONCE more — the new command-line kill will catch any orphan service the netstat-PID kill missed. Then click the Limits button in the Operator Panel; the Limits tab should populate.",
+        "If it still fails, run scripts\\doctor.cmd — the new '--- Service /healthz ---' section will say [MISSING] next to limits.check and tell you exactly which RPCs the running service knows about. Paste that output if it still doesn't help."
+      ],
+      "files_changed": [
+        "scripts/restart.cmd",
+        "scripts/stop.cmd",
+        "scripts/doctor.cmd"
+      ],
+      "annotation_excerpt": "says probe failed: unknown method: limits"
     }
   ]
 }
