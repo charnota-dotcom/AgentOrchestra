@@ -93,6 +93,35 @@ class AgentChatDialog(QtWidgets.QDialog):
         ws_row.addWidget(change_repo_btn)
         v.addLayout(ws_row)
 
+        # Live git-status banner — branch + dirty count + last commit.
+        # Refreshed when the dialog opens and after each send.  Hidden
+        # when no workspace is bound or the path isn't a git repo.
+        status_row = QtWidgets.QHBoxLayout()
+        self.git_status_label = QtWidgets.QLabel("")
+        self.git_status_label.setStyleSheet(
+            "color:#5b6068;font-size:11px;background:#f7f8fa;"
+            "border:1px solid #e6e7eb;border-radius:4px;padding:3px 8px;"
+        )
+        self.git_status_label.setWordWrap(True)
+        self.git_status_label.setVisible(False)
+        status_row.addWidget(self.git_status_label, stretch=1)
+        self.switch_branch_btn = QtWidgets.QPushButton("Switch branch")
+        self.switch_branch_btn.setStyleSheet(
+            "QPushButton{padding:3px 8px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        self.switch_branch_btn.setToolTip(
+            "Switch this workspace to a different git branch.  "
+            "Optionally creates the branch if it doesn't exist."
+        )
+        self.switch_branch_btn.setVisible(False)
+        self.switch_branch_btn.clicked.connect(self._switch_branch)  # type: ignore[arg-type]
+        status_row.addWidget(self.switch_branch_btn)
+        v.addLayout(status_row)
+        # Refresh once at construction.
+        asyncio.ensure_future(self._refresh_git_status())
+
         # References — read-only summary + "Edit" button.  Each
         # referenced agent's full transcript is inlined as context
         # on every send so this Claude / Gemini knows what those
@@ -485,6 +514,93 @@ class AgentChatDialog(QtWidgets.QDialog):
     def _change_workspace(self) -> None:
         asyncio.ensure_future(self._open_workspace_dialog())
 
+    async def _refresh_git_status(self) -> None:
+        ws_id = self.agent.get("workspace_id") or ""
+        if not ws_id:
+            self.git_status_label.setVisible(False)
+            self.switch_branch_btn.setVisible(False)
+            return
+        try:
+            res = await self.client.call(
+                "workspaces.git_status", {"workspace_id": ws_id}
+            )
+        except Exception as exc:
+            self.git_status_label.setText(f"⚠ git status failed: {exc}")
+            self.git_status_label.setVisible(True)
+            self.switch_branch_btn.setVisible(False)
+            return
+        if not res.get("is_git"):
+            self.git_status_label.setText(
+                "📁 not a git repo — file tools available, no branch tracking"
+            )
+            self.git_status_label.setVisible(True)
+            self.switch_branch_btn.setVisible(False)
+            return
+        branch = res.get("branch", "?")
+        ahead = res.get("ahead", 0)
+        behind = res.get("behind", 0)
+        modified = res.get("modified", 0)
+        staged = res.get("staged", 0)
+        untracked = res.get("untracked", 0)
+        last_sha = res.get("last_commit_sha", "")
+        last_subj = res.get("last_commit_subject", "")
+        dirty_bits: list[str] = []
+        if modified:
+            dirty_bits.append(f"{modified} modified")
+        if staged:
+            dirty_bits.append(f"{staged} staged")
+        if untracked:
+            dirty_bits.append(f"{untracked} untracked")
+        clean_marker = " · clean" if not dirty_bits else " · " + ", ".join(dirty_bits)
+        ahead_marker = ""
+        if ahead:
+            ahead_marker += f" ↑{ahead}"
+        if behind:
+            ahead_marker += f" ↓{behind}"
+        text = f"git: <b>{branch}</b>{ahead_marker}{clean_marker}"
+        if last_sha:
+            short_subj = last_subj if len(last_subj) <= 60 else last_subj[:57] + "…"
+            text += f"  ·  last: {last_sha} {short_subj}"
+        self.git_status_label.setText(text)
+        self.git_status_label.setVisible(True)
+        self.switch_branch_btn.setVisible(True)
+
+    def _switch_branch(self) -> None:
+        ws_id = self.agent.get("workspace_id") or ""
+        if not ws_id:
+            return
+        text, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Switch branch",
+            "Branch to switch to (prefix with `+` to create):",
+        )
+        if not ok or not text.strip():
+            return
+        branch = text.strip()
+        create = False
+        if branch.startswith("+"):
+            create = True
+            branch = branch[1:].strip()
+        if not branch:
+            return
+        asyncio.ensure_future(self._do_switch(ws_id, branch, create))
+
+    async def _do_switch(self, ws_id: str, branch: str, create: bool) -> None:
+        try:
+            await self.client.call(
+                "workspaces.switch_branch",
+                {"workspace_id": ws_id, "branch": branch, "create": create},
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't switch branch", str(exc))
+            return
+        self.transcript.appendPlainText(
+            f"System: switched to branch '{branch}'"
+            + (" (created)" if create else "")
+            + "\n"
+        )
+        await self._refresh_git_status()
+
     async def _open_workspace_dialog(self) -> None:
         try:
             workspaces = await self.client.call("workspaces.list", {})
@@ -572,6 +688,7 @@ class AgentChatDialog(QtWidgets.QDialog):
         self.agent = updated
         self.workspace_label.setText(self._format_workspace_label(self.agent))
         self.sent.emit(self.agent)
+        await self._refresh_git_status()
 
     async def _add_repo_from_dialog(self, listw: QtWidgets.QListWidget) -> None:
         from pathlib import Path
@@ -616,3 +733,7 @@ class AgentChatDialog(QtWidgets.QDialog):
         self._render_transcript()
         self.send_btn.setEnabled(True)
         self.sent.emit(self.agent)
+        # The agent may have run `git checkout`, edited files, or
+        # committed during this turn.  Re-read state so the banner
+        # reflects what actually changed.
+        asyncio.ensure_future(self._refresh_git_status())

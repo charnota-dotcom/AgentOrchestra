@@ -257,6 +257,192 @@ class Handlers:
         ok = await self.store.delete_workspace(params["workspace_id"])
         return {"removed": bool(ok)}
 
+    async def workspaces_clone(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Clone a remote git URL into a managed directory and register
+        it as a Workspace so a coding-session agent can be bound to it
+        in one click.
+
+        ``params``:
+          url:    git remote URL (https / ssh).  Must not start with -.
+          name:   optional display name; defaults to the repo name
+                  derived from the URL.
+          branch: optional branch to check out on clone.
+          depth:  optional shallow-clone depth for big repos.
+          dest:   optional explicit clone destination; defaults to
+                  ``<data_dir>/clones/<sanitized_repo_name>``.
+        """
+        from apps.service.attachments.render import sanitize_filename
+
+        url = (params.get("url") or "").strip()
+        if not url:
+            raise ValueError("url required")
+        # Derive a friendly directory name from the URL so the operator
+        # gets something readable in the clones/ folder.
+        derived = url.rstrip("/").rsplit("/", 1)[-1]
+        if derived.endswith(".git"):
+            derived = derived[: -len(".git")]
+        derived = sanitize_filename(derived) or "clone"
+        dest_str = params.get("dest")
+        if dest_str:
+            dest = Path(dest_str)
+        else:
+            dest = self.data_dir / "clones" / derived
+            # Append a numeric suffix if a clones/<name> already exists.
+            n = 2
+            while dest.exists():
+                dest = self.data_dir / "clones" / f"{derived}-{n}"
+                n += 1
+
+        ws = await self.manager.clone_workspace(
+            url,
+            dest_dir=dest,
+            name=(params.get("name") or derived),
+            branch=params.get("branch") or None,
+            depth=params.get("depth"),
+        )
+        return ws.model_dump(mode="json")
+
+    async def workspaces_git_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Live git state of a workspace.  The chat dialog reads this
+        on open + after each send so the operator sees what the agent
+        is actually working against.
+
+        Returns: branch, ahead, behind, modified (count), staged (count),
+        untracked (count), last_commit (sha+subject), is_git.
+        """
+        ws = await self.store.get_workspace(params["workspace_id"])
+        if not ws:
+            raise ValueError(f"unknown workspace: {params['workspace_id']}")
+        repo = Path(ws.repo_path)
+        if not (repo / ".git").exists() and not repo.is_dir():
+            return {"is_git": False, "repo_path": str(repo)}
+
+        async def _git(*args: str, timeout: float = 5.0) -> tuple[int, str, str]:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(repo),
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout
+                )
+            except TimeoutError:
+                proc.kill()
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(proc.communicate(), timeout=2.0)
+                return -1, "", "timed out"
+            return (
+                proc.returncode or 0,
+                stdout_b.decode("utf-8", errors="replace"),
+                stderr_b.decode("utf-8", errors="replace"),
+            )
+
+        # Fast probe: is it actually a working tree?
+        rc, _out, _err = await _git("rev-parse", "--is-inside-work-tree")
+        if rc != 0:
+            return {"is_git": False, "repo_path": str(repo)}
+
+        rc_b, branch_out, _ = await _git("rev-parse", "--abbrev-ref", "HEAD")
+        branch = branch_out.strip() if rc_b == 0 else "?"
+        # ahead/behind upstream — gracefully degrade if no upstream.
+        ahead = behind = 0
+        rc_ab, ab_out, _ = await _git(
+            "rev-list", "--left-right", "--count", "HEAD...@{u}"
+        )
+        if rc_ab == 0 and ab_out.strip():
+            try:
+                a_str, b_str = ab_out.strip().split()
+                ahead, behind = int(a_str), int(b_str)
+            except ValueError:
+                pass
+        # Status counts via porcelain v2 to keep the output stable.
+        rc_s, status_out, _ = await _git("status", "--porcelain=v1")
+        modified = staged = untracked = 0
+        if rc_s == 0:
+            for line in status_out.splitlines():
+                if not line:
+                    continue
+                code = line[:2]
+                if code == "??":
+                    untracked += 1
+                else:
+                    if code[0] != " ":
+                        staged += 1
+                    if code[1] != " ":
+                        modified += 1
+        # Last commit (subject only — short for the GUI banner).
+        last_sha = ""
+        last_subj = ""
+        rc_l, log_out, _ = await _git(
+            "log", "-1", "--format=%h %s", "--no-color"
+        )
+        if rc_l == 0 and log_out.strip():
+            parts = log_out.strip().split(maxsplit=1)
+            last_sha = parts[0]
+            last_subj = parts[1] if len(parts) > 1 else ""
+        return {
+            "is_git": True,
+            "repo_path": str(repo),
+            "branch": branch,
+            "ahead": ahead,
+            "behind": behind,
+            "modified": modified,
+            "staged": staged,
+            "untracked": untracked,
+            "last_commit_sha": last_sha,
+            "last_commit_subject": last_subj,
+        }
+
+    async def workspaces_switch_branch(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Switch (or create + switch to) a branch in a workspace.
+
+        ``params``:
+          workspace_id: id of the workspace.
+          branch:       branch name to switch to.
+          create:       if true, pass -c so the branch is created from HEAD.
+        """
+        ws = await self.store.get_workspace(params["workspace_id"])
+        if not ws:
+            raise ValueError(f"unknown workspace: {params['workspace_id']}")
+        branch = (params.get("branch") or "").strip()
+        if not branch:
+            raise ValueError("branch required")
+        # Reject obvious option-injection so the operator can't be
+        # tricked into passing `--upload-pack=…` etc.
+        if branch.startswith("-") or any(c in branch for c in ("\n", "\r", "\x00", " ")):
+            raise ValueError(f"invalid branch name: {branch!r}")
+        create = bool(params.get("create"))
+        repo = Path(ws.repo_path)
+        args = ["git", "-C", str(repo), "switch"]
+        if create:
+            args.append("-c")
+        # `--` separator so a branch literally named `-foo` (which we
+        # already reject) couldn't reach git's flag parser anyway.
+        args.extend(["--", branch])
+
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=15.0
+            )
+        except TimeoutError:
+            proc.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.communicate(), timeout=2.0)
+            raise ValueError("git switch timed out") from None
+        if proc.returncode != 0:
+            err = stderr_b.decode("utf-8", errors="replace").strip()
+            raise ValueError(f"git switch failed: {err[:300]}")
+        return {"workspace_id": ws.id, "branch": branch, "created": create}
+
     async def workspaces_tree(self, params: dict[str, Any]) -> dict[str, Any]:
         """Return a flat, gitignore-respecting file listing of a
         workspace's repo path so the GUI can show operators what
@@ -749,6 +935,121 @@ class Handlers:
     # Named agents — persistent conversations with follow-up linkage.
     # ------------------------------------------------------------------
 
+    # Project-convention files we look for at the repo root, in order
+    # of preference.  The first match wins; runner-up files are noted.
+    _CONVENTION_FILES = (
+        "CLAUDE.md",
+        "AGENTS.md",
+        "GEMINI.md",
+        ".cursorrules",
+        ".cursor/rules.md",
+    )
+
+    # Cap inlined convention text so a 500 KB CLAUDE.md doesn't dominate
+    # the prompt.  Honest truncation marker so the model knows.
+    _CONVENTION_INLINE_CAP = 8000
+
+    async def _build_repo_system_prompt(
+        self, ws: Any, *, base_system: str | None
+    ) -> str:
+        """Compose the system prompt for a repo-bound coding session.
+
+        Folds together (in order):
+          - the operator's own ``base_system`` (if any),
+          - a header naming the workspace,
+          - the current branch,
+          - the contents of the first project-convention file we find
+            at the repo root (CLAUDE.md / AGENTS.md / GEMINI.md /
+            .cursorrules), capped to 8 KB.
+
+        Best-effort: any failure (missing git, IO error, etc.) is
+        swallowed and we fall back to the basic header.
+        """
+        repo = Path(ws.repo_path)
+        # Branch lookup — graceful when not a git repo.
+        branch = ""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(repo),
+                "rev-parse",
+                "--abbrev-ref",
+                "HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            out, _err = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+            if proc.returncode == 0:
+                branch = out.decode("utf-8", errors="replace").strip()
+        except Exception:
+            log.debug("branch lookup failed for %s", repo, exc_info=True)
+
+        # Find the first convention file that exists.  Read up to the
+        # cap; refuse symlinks pointing outside the repo as a
+        # cheap defence.
+        convention_text = ""
+        convention_name = ""
+        for rel in self._CONVENTION_FILES:
+            candidate = (repo / rel).resolve()
+            try:
+                if not candidate.is_relative_to(repo.resolve()):
+                    continue
+            except (OSError, ValueError):
+                continue
+            if candidate.is_file():
+                try:
+                    convention_text = await asyncio.to_thread(
+                        candidate.read_text, encoding="utf-8", errors="replace"
+                    )
+                except OSError:
+                    continue
+                convention_name = rel
+                break
+
+        truncated = False
+        if len(convention_text) > self._CONVENTION_INLINE_CAP:
+            convention_text = convention_text[: self._CONVENTION_INLINE_CAP]
+            truncated = True
+
+        parts: list[str] = []
+        header = (
+            f"You are operating inside the project at {ws.repo_path} "
+            f"(workspace name: {ws.name})"
+        )
+        if branch:
+            header += f", currently on branch '{branch}'"
+        header += "."
+        parts.append(header)
+
+        parts.append(
+            "This is a real source-controlled repository. Use your "
+            "built-in file tools (Read / Bash / Edit / Grep) to browse "
+            "and modify it. Before making non-trivial changes:\n"
+            "  - Run `git status` and `git diff` to understand current state.\n"
+            "  - Look for tests near the file you are editing.\n"
+            "  - Do NOT run `git push`, force operations, or destructive "
+            "commands (`rm -rf`, `git reset --hard`) without an explicit "
+            "go-ahead from the user.\n"
+            "  - Prefer small, reviewable diffs."
+        )
+
+        if convention_name and convention_text:
+            parts.append(
+                f"=== Project convention file: {convention_name} "
+                f"(repo-root) ===\n{convention_text}\n"
+                + (
+                    f"\n_(truncated; first {self._CONVENTION_INLINE_CAP} chars only)_"
+                    if truncated
+                    else ""
+                )
+                + "\n=== End project convention ==="
+            )
+
+        if base_system:
+            parts.append(base_system)
+        return "\n\n".join(parts)
+
     async def _enrich_agent(self, agent: Agent) -> dict[str, Any]:
         """Convert an Agent to a JSON dict and decorate it with the
         bound workspace's name + path so the GUI can render the repo
@@ -927,24 +1228,17 @@ class Handlers:
             # Repo-aware path: if the agent is bound to a Workspace,
             # spawn the CLI subprocess with cwd=<repo_path> so the
             # model's built-in Read / Bash / Edit tools operate against
-            # the project, and prepend a system-prompt header so the
-            # model knows what it's looking at.
+            # the project, and prepend a system-prompt header that
+            # discovers the project's own conventions (CLAUDE.md /
+            # AGENTS.md / .cursorrules) so the model honours them.
             cwd: str | None = None
             system_prompt = agent.system or None
             if agent.workspace_id:
                 ws = await self.store.get_workspace(agent.workspace_id)
                 if ws is not None:
                     cwd = ws.repo_path
-                    repo_header = (
-                        f"You are operating inside the project at {ws.repo_path} "
-                        f"(workspace name: {ws.name}).  Use your built-in file "
-                        f"tools (Read / Bash / Edit / Grep) to browse and modify "
-                        f"the repository as needed."
-                    )
-                    system_prompt = (
-                        repo_header
-                        if not system_prompt
-                        else f"{repo_header}\n\n{system_prompt}"
+                    system_prompt = await self._build_repo_system_prompt(
+                        ws, base_system=system_prompt
                     )
 
             session = await provider.open_chat(card, system=system_prompt, cwd=cwd)
@@ -1460,6 +1754,9 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("workspaces.register", h.workspaces_register)
     server.register("workspaces.remove", h.workspaces_remove)
     server.register("workspaces.tree", h.workspaces_tree)
+    server.register("workspaces.clone", h.workspaces_clone)
+    server.register("workspaces.git_status", h.workspaces_git_status)
+    server.register("workspaces.switch_branch", h.workspaces_switch_branch)
     server.register("cards.list", h.cards_list)
     server.register("runs.list", h.runs_list)
     server.register("runs.dispatch", h.runs_dispatch)

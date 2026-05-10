@@ -257,8 +257,25 @@ class ChatPage(QtWidgets.QWidget):
             "border-radius:4px;background:#fff;font-size:11px;}"
             "QPushButton:hover{background:#eef0f3;}"
         )
+        add_repo_btn.setToolTip(
+            "Pick an existing local git repo on disk and register it as "
+            "a workspace this agent can use."
+        )
         add_repo_btn.clicked.connect(self._add_repo)  # type: ignore[arg-type]
         ws_row.addWidget(add_repo_btn)
+        clone_btn = QtWidgets.QPushButton("Clone from git…")
+        clone_btn.setStyleSheet(
+            "QPushButton{padding:5px 10px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        clone_btn.setToolTip(
+            "Clone a remote git URL into AgentOrchestra's data directory "
+            "and register it as a workspace.  One-click coding session "
+            "from a repo URL."
+        )
+        clone_btn.clicked.connect(self._clone_repo)  # type: ignore[arg-type]
+        ws_row.addWidget(clone_btn)
         layout.addLayout(ws_row)
         # Populate after construction so we don't block the UI.
         asyncio.ensure_future(self._reload_workspaces())
@@ -693,6 +710,77 @@ class ChatPage(QtWidgets.QWidget):
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Couldn't register repo", str(exc))
             return
+        await self._reload_workspaces(select_id=ws.get("id"))
+
+    def _clone_repo(self) -> None:
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Clone from git")
+        dlg.resize(520, 220)
+        form = QtWidgets.QFormLayout(dlg)
+
+        url_input = QtWidgets.QLineEdit()
+        url_input.setPlaceholderText("https://github.com/owner/repo.git")
+        form.addRow("Git URL:", url_input)
+
+        branch_input = QtWidgets.QLineEdit()
+        branch_input.setPlaceholderText("(default — leave blank for repo's default branch)")
+        form.addRow("Branch:", branch_input)
+
+        depth_input = QtWidgets.QLineEdit()
+        depth_input.setPlaceholderText("(optional — e.g. 1 for shallow)")
+        form.addRow("Depth:", depth_input)
+
+        info = QtWidgets.QLabel(
+            "Clones into AgentOrchestra's data directory.  This may "
+            "take a minute or two for large repos.  HTTPS URLs use your "
+            "git credential helper; SSH URLs use your SSH key."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color:#5b6068;font-size:11px;")
+        form.addRow(info)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Clone")
+        buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
+        buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
+        form.addRow(buttons)
+
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        url = url_input.text().strip()
+        if not url:
+            return
+        branch = branch_input.text().strip() or None
+        depth_str = depth_input.text().strip()
+        depth: int | None = None
+        if depth_str:
+            try:
+                depth = int(depth_str)
+            except ValueError:
+                QtWidgets.QMessageBox.warning(self, "Invalid depth", "Depth must be an integer.")
+                return
+        asyncio.ensure_future(self._do_clone(url, branch, depth))
+
+    async def _do_clone(self, url: str, branch: str | None, depth: int | None) -> None:
+        # Show a non-modal busy chip in the transcript.  Cloning a real
+        # repo is slow; the operator should see something happening.
+        self._append("System", f"Cloning {url} … (this may take a minute)")
+        try:
+            ws = await self.client.call(
+                "workspaces.clone",
+                {"url": url, "branch": branch, "depth": depth},
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Clone failed", str(exc))
+            self._append("Error", f"clone failed: {exc}")
+            return
+        self._append(
+            "System",
+            f"Cloned: {ws.get('name', '?')} at {ws.get('repo_path', '?')}",
+        )
         await self._reload_workspaces(select_id=ws.get("id"))
 
     def _save_last_reply(self) -> None:

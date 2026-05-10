@@ -176,10 +176,22 @@ class PalettePanel(QtWidgets.QWidget):
             "border-radius:4px;background:#fff;font-size:11px;}"
             "QPushButton:hover{background:#eef0f3;}"
         )
+        add_repo_btn.setToolTip("Pick an existing local repo on disk.")
         add_repo_btn.clicked.connect(  # type: ignore[arg-type]
             lambda: self._palette_add_repo(dlg, ws_combo)
         )
         ws_row.addWidget(add_repo_btn)
+        clone_btn = QtWidgets.QPushButton("Clone…")
+        clone_btn.setStyleSheet(
+            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        clone_btn.setToolTip("Clone a remote git URL into a managed workspace.")
+        clone_btn.clicked.connect(  # type: ignore[arg-type]
+            lambda: self._palette_clone_repo(dlg, ws_combo)
+        )
+        ws_row.addWidget(clone_btn)
         ws_wrap = QtWidgets.QWidget()
         ws_wrap.setLayout(ws_row)
         form.addRow("Repo:", ws_wrap)
@@ -256,6 +268,56 @@ class PalettePanel(QtWidgets.QWidget):
                 )
             except Exception as exc:
                 QtWidgets.QMessageBox.warning(parent, "Couldn't register repo", str(exc))
+                return
+            await self._populate_workspaces(combo, select_id=ws.get("id"))
+
+        asyncio.ensure_future(_go())
+
+    def _palette_clone_repo(
+        self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox
+    ) -> None:
+        # Inline mini-dialog: URL + branch.  Keeps the new-conversation
+        # flow self-contained — no need to bounce out to the Chat tab.
+        dlg = QtWidgets.QDialog(parent)
+        dlg.setWindowTitle("Clone from git")
+        dlg.resize(440, 180)
+        form = QtWidgets.QFormLayout(dlg)
+        url_input = QtWidgets.QLineEdit()
+        url_input.setPlaceholderText("https://github.com/owner/repo.git")
+        form.addRow("Git URL:", url_input)
+        branch_input = QtWidgets.QLineEdit()
+        branch_input.setPlaceholderText("(leave blank for default)")
+        form.addRow("Branch:", branch_input)
+        info = QtWidgets.QLabel(
+            "Clones into AgentOrchestra's data directory; large repos "
+            "may take a minute."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color:#5b6068;font-size:11px;")
+        form.addRow(info)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Clone")
+        buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
+        buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
+        form.addRow(buttons)
+
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        url = url_input.text().strip()
+        if not url:
+            return
+        branch = branch_input.text().strip() or None
+
+        async def _go() -> None:
+            try:
+                ws = await self.client.call(
+                    "workspaces.clone", {"url": url, "branch": branch}
+                )
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(parent, "Clone failed", str(exc))
                 return
             await self._populate_workspaces(combo, select_id=ws.get("id"))
 
