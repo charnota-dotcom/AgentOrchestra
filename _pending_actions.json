@@ -78,6 +78,25 @@
         "tests/unit/test_blueprints_page.py"
       ],
       "annotation_excerpt": "I've selected Provider claude-cli, but the Model"
+    },
+    {
+      "annotation_index": 9,
+      "version": "0.1.0+start-cmd-powershell-redirect-fix",
+      "status": "partial",
+      "description": "Operator follow-up: 'still the same'. Same root cause as annotation #7 — an orphan service from a prior session is still answering on :8765, the GUI's supervisor attaches to it instead of spawning fresh, and that orphan's in-memory RPC table predates blueprints.* (added in PR #27). The root-cause fix is the orphan-kill hardening in PR #31 (kill any python whose command line includes apps.service.main, regardless of port state). This attempt also fixes start.cmd's PowerShell probe which was failing with `'RedirectStandardOutput' and 'RedirectStandardError' are same` on modern PowerShell — that's why the operator's start.cmd ran [1/3] but never spawned a fresh service. Both fixes together let the operator actually relaunch and reap the orphan.",
+      "change_overview": [
+        "scripts/start.cmd — PowerShell `Start-Process` probes now use two distinct temp files (created via [IO.Path]::GetTempFileName(), cleaned up in `finally`). Modern PowerShell rejects two redirects pointing to the same path."
+      ],
+      "risk_level": "Low",
+      "risk_note": "Temp files leak to %TEMP% only if PowerShell crashes mid-call between create and finally — Windows cleans %TEMP% periodically anyway.",
+      "next_steps": [
+        "Merge this PR + PR #31 (orphan-kill hardening). Run scripts\\restart.cmd — it will now reap the orphan service. Reload Blueprints — the unknown-method error should clear.",
+        "If it still fails, run scripts\\doctor.cmd (PR #31 adds a /healthz section that lists registered methods and flags missing ones — paste that output)."
+      ],
+      "files_changed": [
+        "scripts/start.cmd"
+      ],
+      "annotation_excerpt": "still the same"
     }
   ]
 }

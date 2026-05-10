@@ -20,7 +20,12 @@ rem   * Each subprocess's exit code captured to a NAMED var
 rem     immediately after the call.
 rem   * The headless `-p` probe is wrapped in PowerShell with a
 rem     hard 20-second timeout so a hung CLI can't freeze the
-rem     script forever.
+rem     script forever.  PowerShell's `Start-Process` rejects
+rem     `-RedirectStandardOutput` and `-RedirectStandardError`
+rem     pointing to the same path (modern PS validates this), so
+rem     each call uses two distinct temp files cleaned up in a
+rem     `finally`.  Using `'NUL'` for both — the obvious choice —
+rem     trips InvalidOperationException on the operator's box.
 rem   * `claude` and `gemini` are npm-installed `.cmd` shims, so
 rem     calling them from a `.cmd` file MUST go through `call …` —
 rem     a bare invocation is a tail-call and control never returns
@@ -61,7 +66,7 @@ if "!CLAUDE_PRESENT!"=="0" echo           Install with:  npm install -g @anthrop
 
 if "!CLAUDE_PRESENT!"=="1" call claude --version
 if "!CLAUDE_PRESENT!"=="1" echo   probing 'claude -p ping' with a hard 20-second timeout...
-if "!CLAUDE_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p = Start-Process -FilePath 'claude' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput 'NUL' -RedirectStandardError 'NUL'; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 }"
+if "!CLAUDE_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "$o=[IO.Path]::GetTempFileName(); $e=[IO.Path]::GetTempFileName(); try { $p = Start-Process -FilePath 'claude' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput $o -RedirectStandardError $e; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 } finally { Remove-Item $o,$e -ErrorAction SilentlyContinue }"
 if "!CLAUDE_PRESENT!"=="1" set CLAUDE_PROBE_RC=!errorlevel!
 if "!CLAUDE_PRESENT!"=="0" set CLAUDE_PROBE_RC=-1
 
@@ -87,7 +92,7 @@ if "!GEMINI_PRESENT!"=="0" echo           Install with:  npm install -g @google/
 
 if "!GEMINI_PRESENT!"=="1" call gemini --version
 if "!GEMINI_PRESENT!"=="1" echo   probing 'gemini -p ping' with a hard 20-second timeout...
-if "!GEMINI_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p = Start-Process -FilePath 'gemini' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput 'NUL' -RedirectStandardError 'NUL'; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 }"
+if "!GEMINI_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "$o=[IO.Path]::GetTempFileName(); $e=[IO.Path]::GetTempFileName(); try { $p = Start-Process -FilePath 'gemini' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput $o -RedirectStandardError $e; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 } finally { Remove-Item $o,$e -ErrorAction SilentlyContinue }"
 if "!GEMINI_PRESENT!"=="1" set GEMINI_PROBE_RC=!errorlevel!
 if "!GEMINI_PRESENT!"=="0" set GEMINI_PROBE_RC=-1
 
