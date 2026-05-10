@@ -45,6 +45,8 @@ from apps.service.store.events import EventStore
 from apps.service.templates.engine import render
 from apps.service.types import (
     Agent,
+    Attachment,
+    AttachmentKind,
     Event,
     EventKind,
     EventSource,
@@ -80,6 +82,109 @@ def _render_transcript(agent: Agent) -> str:
     return "\n\n".join(parts)
 
 
+# Maximum total characters of referenced-attachment markdown the
+# orchestrator will fold into a single prompt.  Without a cap, an
+# agent referencing a few sheets-heavy agents can balloon the prompt
+# past any model's context window before the user's own message.
+_MAX_REF_ATTACHMENT_CHARS = 100_000
+
+
+def _render_references(
+    refs: list[Agent], ref_attachments: dict[str, list[Attachment]] | None = None
+) -> str:
+    """Format referenced agents' transcripts as a context preamble.
+
+    Each reference is wrapped in clearly-delimited markers so the
+    target model can tell where its context ends and its own
+    conversation begins.  Cross-provider safe: works the same whether
+    Claude is reading a Gemini transcript or vice versa, since both
+    just see plain text.
+
+    ``ref_attachments`` is an optional ``{agent_id: [Attachment]}``
+    map; spreadsheet attachments on a referenced agent get folded in
+    as inlined markdown tables so the receiving agent can reason
+    about the file contents.  Image attachments are noted by name
+    only — the receiving model can't actually see them via the text
+    preamble (they need to be re-attached if the operator wants the
+    new agent to view them).
+
+    Total inlined attachment markdown is capped at
+    ``_MAX_REF_ATTACHMENT_CHARS`` across all references combined; the
+    excess is replaced with a "(truncated …)" marker so the model
+    knows it's seeing a slice.
+    """
+    if not refs:
+        return ""
+    blocks: list[str] = []
+    remaining_budget = _MAX_REF_ATTACHMENT_CHARS
+    for ref in refs:
+        body = "\n".join(
+            f"{('User' if m.get('role') == 'user' else 'Assistant')}: {m.get('content', '')}"
+            for m in ref.transcript
+        )
+        atts = (ref_attachments or {}).get(ref.id, [])
+        att_block = ""
+        if atts:
+            sections: list[str] = []
+            for a in atts:
+                if a.kind == AttachmentKind.SPREADSHEET and a.rendered_text:
+                    inlined = f"[attachment: {a.original_name}]\n{a.rendered_text}"
+                    if len(inlined) > remaining_budget:
+                        if remaining_budget > 200:
+                            sections.append(
+                                inlined[: remaining_budget - 100]
+                                + f"\n_(truncated; combined ref-attachment cap "
+                                f"of {_MAX_REF_ATTACHMENT_CHARS} chars hit)_"
+                            )
+                            remaining_budget = 0
+                        else:
+                            sections.append(
+                                f"[attachment: {a.original_name} — omitted; "
+                                f"ref-attachment budget exhausted]"
+                            )
+                        # Stop folding further spreadsheets for this ref.
+                        continue
+                    sections.append(inlined)
+                    remaining_budget -= len(inlined)
+                else:
+                    sections.append(
+                        f"[attachment: {a.original_name} ({a.kind.value}, {a.bytes} bytes) — "
+                        f"not inlined; re-attach if needed]"
+                    )
+            att_block = "\n\nAttached files:\n" + "\n\n".join(sections)
+        blocks.append(
+            f"--- Reference: {ref.name}  "
+            f"({ref.provider} {ref.model}, {len(ref.transcript)} turns) ---\n"
+            f"{body}{att_block}\n"
+            f"--- End reference: {ref.name} ---"
+        )
+    return (
+        "=== Context: prior conversations the user wants you to read first ===\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n=== End context ===\n\n"
+        "(The references above are read-only context.  Continue the "
+        "conversation below using them as background.)"
+    )
+
+
+def _inline_spreadsheet_attachments(prompt: str, attachments: list[Attachment]) -> str:
+    """Append rendered-text views of spreadsheet attachments to the
+    prompt.  Images are deliberately *not* inlined here — their bytes
+    are passed through ``ChatSession.send(attachments=...)`` so the
+    CLI can hand the actual file to the model.
+    """
+    sheets = [a for a in attachments if a.kind == AttachmentKind.SPREADSHEET and a.rendered_text]
+    if not sheets:
+        return prompt
+    blocks = [f"[attachment: {a.original_name}]\n{a.rendered_text}" for a in sheets]
+    return (
+        prompt
+        + "\n\n=== Attached spreadsheets ===\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n=== End attachments ==="
+    )
+
+
 def _data_dir() -> Path:
     p = DEFAULT_DATA_DIR
     p.mkdir(parents=True, exist_ok=True)
@@ -98,11 +203,41 @@ class Handlers:
         manager: WorktreeManager,
         dispatcher: RunDispatcher,
         flow_executor: FlowExecutor | None = None,
+        data_dir: Path | None = None,
     ) -> None:
         self.store = store
         self.manager = manager
         self.dispatcher = dispatcher
         self.flow_executor = flow_executor or FlowExecutor(store)
+        self.data_dir = data_dir or _data_dir()
+        self.attachments_dir = self.data_dir / "attachments"
+        self.attachments_dir.mkdir(parents=True, exist_ok=True)
+        # Per-agent serialisation: two concurrent agents.send for the
+        # same agent_id used to fetch v1, both append, and the later
+        # writer would overwrite the earlier turn (lost-update).  Each
+        # send now takes the agent's own lock for the full
+        # fetch->mutate->LLM->store cycle.
+        self._agent_send_locks: dict[str, asyncio.Lock] = {}
+        self._agent_send_locks_guard = asyncio.Lock()
+
+    async def _lock_for_agent(self, agent_id: str) -> asyncio.Lock:
+        # Validate the agent exists before minting a lock so a malformed
+        # RPC can't leave a permanent dict entry behind for an id that
+        # never corresponded to a real row.
+        if not isinstance(agent_id, str) or not agent_id:
+            raise ValueError("agent_id required")
+        async with self._agent_send_locks_guard:
+            lock = self._agent_send_locks.get(agent_id)
+            if lock is None:
+                # Cheap existence check (agents.send / .delete will
+                # re-fetch the row anyway).  Skipping the disk hit for
+                # repeat callers since the dict entry already exists.
+                exists = await self.store.get_agent(agent_id)
+                if exists is None:
+                    raise ValueError(f"unknown agent: {agent_id}")
+                lock = asyncio.Lock()
+                self._agent_send_locks[agent_id] = lock
+            return lock
 
     async def workspaces_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return [w.model_dump(mode="json") for w in await self.store.list_workspaces()]
@@ -119,6 +254,273 @@ class Handlers:
     async def workspaces_remove(self, params: dict[str, Any]) -> dict[str, Any]:
         ok = await self.store.delete_workspace(params["workspace_id"])
         return {"removed": bool(ok)}
+
+    async def workspaces_clone(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Clone a remote git URL into a managed directory and register
+        it as a Workspace so a coding-session agent can be bound to it
+        in one click.
+
+        ``params``:
+          url:    git remote URL (https / ssh).  Must not start with -.
+          name:   optional display name; defaults to the repo name
+                  derived from the URL.
+          branch: optional branch to check out on clone.
+          depth:  optional shallow-clone depth for big repos.
+          dest:   optional explicit clone destination; defaults to
+                  ``<data_dir>/clones/<sanitized_repo_name>``.
+        """
+        from apps.service.attachments.render import sanitize_filename
+
+        url = (params.get("url") or "").strip()
+        if not url:
+            raise ValueError("url required")
+        # Derive a friendly directory name from the URL so the operator
+        # gets something readable in the clones/ folder.
+        derived = url.rstrip("/").rsplit("/", 1)[-1]
+        if derived.endswith(".git"):
+            derived = derived[: -len(".git")]
+        derived = sanitize_filename(derived) or "clone"
+        dest_str = params.get("dest")
+        if dest_str:
+            dest = Path(dest_str)
+        else:
+            dest = self.data_dir / "clones" / derived
+            # Append a numeric suffix if a clones/<name> already exists.
+            n = 2
+            while dest.exists():
+                dest = self.data_dir / "clones" / f"{derived}-{n}"
+                n += 1
+
+        ws = await self.manager.clone_workspace(
+            url,
+            dest_dir=dest,
+            name=(params.get("name") or derived),
+            branch=params.get("branch") or None,
+            depth=params.get("depth"),
+        )
+        return ws.model_dump(mode="json")
+
+    async def workspaces_git_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Live git state of a workspace.  The chat dialog reads this
+        on open + after each send so the operator sees what the agent
+        is actually working against.
+
+        Returns: branch, ahead, behind, modified (count), staged (count),
+        untracked (count), last_commit (sha+subject), is_git.
+        """
+        ws = await self.store.get_workspace(params["workspace_id"])
+        if not ws:
+            raise ValueError(f"unknown workspace: {params['workspace_id']}")
+        repo = Path(ws.repo_path)
+        if not (repo / ".git").exists() and not repo.is_dir():
+            return {"is_git": False, "repo_path": str(repo)}
+
+        async def _git(*args: str, timeout: float = 5.0) -> tuple[int, str, str]:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(repo),
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except TimeoutError:
+                proc.kill()
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(proc.communicate(), timeout=2.0)
+                return -1, "", "timed out"
+            return (
+                proc.returncode or 0,
+                stdout_b.decode("utf-8", errors="replace"),
+                stderr_b.decode("utf-8", errors="replace"),
+            )
+
+        # Fast probe: is it actually a working tree?
+        rc, _out, _err = await _git("rev-parse", "--is-inside-work-tree")
+        if rc != 0:
+            return {"is_git": False, "repo_path": str(repo)}
+
+        rc_b, branch_out, _ = await _git("rev-parse", "--abbrev-ref", "HEAD")
+        branch = branch_out.strip() if rc_b == 0 else "?"
+        # ahead/behind upstream — gracefully degrade if no upstream.
+        ahead = behind = 0
+        rc_ab, ab_out, _ = await _git("rev-list", "--left-right", "--count", "HEAD...@{u}")
+        if rc_ab == 0 and ab_out.strip():
+            try:
+                a_str, b_str = ab_out.strip().split()
+                ahead, behind = int(a_str), int(b_str)
+            except ValueError:
+                pass
+        # Status counts via porcelain v2 to keep the output stable.
+        rc_s, status_out, _ = await _git("status", "--porcelain=v1")
+        modified = staged = untracked = 0
+        if rc_s == 0:
+            for line in status_out.splitlines():
+                if not line:
+                    continue
+                code = line[:2]
+                if code == "??":
+                    untracked += 1
+                else:
+                    if code[0] != " ":
+                        staged += 1
+                    if code[1] != " ":
+                        modified += 1
+        # Last commit (subject only — short for the GUI banner).
+        last_sha = ""
+        last_subj = ""
+        rc_l, log_out, _ = await _git("log", "-1", "--format=%h %s", "--no-color")
+        if rc_l == 0 and log_out.strip():
+            parts = log_out.strip().split(maxsplit=1)
+            last_sha = parts[0]
+            last_subj = parts[1] if len(parts) > 1 else ""
+        return {
+            "is_git": True,
+            "repo_path": str(repo),
+            "branch": branch,
+            "ahead": ahead,
+            "behind": behind,
+            "modified": modified,
+            "staged": staged,
+            "untracked": untracked,
+            "last_commit_sha": last_sha,
+            "last_commit_subject": last_subj,
+        }
+
+    async def workspaces_switch_branch(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Switch (or create + switch to) a branch in a workspace.
+
+        ``params``:
+          workspace_id: id of the workspace.
+          branch:       branch name to switch to.
+          create:       if true, pass -c so the branch is created from HEAD.
+        """
+        ws = await self.store.get_workspace(params["workspace_id"])
+        if not ws:
+            raise ValueError(f"unknown workspace: {params['workspace_id']}")
+        branch = (params.get("branch") or "").strip()
+        if not branch:
+            raise ValueError("branch required")
+        # Reject obvious option-injection so the operator can't be
+        # tricked into passing `--upload-pack=…` etc.
+        if branch.startswith("-") or any(c in branch for c in ("\n", "\r", "\x00", " ")):
+            raise ValueError(f"invalid branch name: {branch!r}")
+        create = bool(params.get("create"))
+        repo = Path(ws.repo_path)
+        # git switch shape:
+        #   create:  `git switch -c <branch>`  (start-point defaults to HEAD)
+        #   plain:   `git switch -- <branch>`  (`--` end-of-options separator)
+        # We can't use `--` together with `-c` because `git switch -c <a> [<b>]`
+        # treats `<b>` as the start-point — `-c -- foo` would mean "create
+        # branch named `--` from start-point `foo`" which then errors with
+        # "invalid reference: foo".  Branch names have already been validated
+        # to not start with `-` so the create path is safe without `--`.
+        if create:
+            args = ["git", "-C", str(repo), "switch", "-c", branch]
+        else:
+            args = ["git", "-C", str(repo), "switch", "--", branch]
+
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+        except TimeoutError:
+            proc.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.communicate(), timeout=2.0)
+            raise ValueError("git switch timed out") from None
+        if proc.returncode != 0:
+            err = stderr_b.decode("utf-8", errors="replace").strip()
+            raise ValueError(f"git switch failed: {err[:300]}")
+        return {"workspace_id": ws.id, "branch": branch, "created": create}
+
+    async def workspaces_tree(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Return a flat, gitignore-respecting file listing of a
+        workspace's repo path so the GUI can show operators what
+        an agent bound to this workspace can actually see.
+
+        ``params``:
+          workspace_id: id of the workspace.
+          limit:        max files to return (default 500).
+          query:        optional substring filter.
+
+        Listing is hard-capped to ``limit`` files to keep large repos
+        responsive.  Honours ``.gitignore`` by shelling out to
+        ``git ls-files`` when the path is a git repo; falls back to a
+        bounded recursive walk otherwise.
+        """
+        ws = await self.store.get_workspace(params["workspace_id"])
+        if not ws:
+            raise ValueError(f"unknown workspace: {params['workspace_id']}")
+        limit = max(1, min(int(params.get("limit", 500) or 500), 5000))
+        query = (params.get("query") or "").strip().lower()
+        repo_path = Path(ws.repo_path)
+        if not repo_path.is_dir():
+            raise ValueError(f"workspace path does not exist: {ws.repo_path}")
+        is_git = (repo_path / ".git").exists()
+        files: list[str] = []
+        truncated = False
+        if is_git:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(repo_path),
+                "ls-files",
+                "-co",
+                "--exclude-standard",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_b, _stderr_b = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            except TimeoutError:
+                proc.kill()
+                with contextlib.suppress(TimeoutError, ProcessLookupError):
+                    await asyncio.wait_for(proc.communicate(), timeout=2.0)
+                raise ValueError("git ls-files timed out") from None
+            for line in stdout_b.decode("utf-8", errors="replace").splitlines():
+                if not line:
+                    continue
+                if query and query not in line.lower():
+                    continue
+                files.append(line)
+                if len(files) >= limit:
+                    truncated = True
+                    break
+        else:
+            # Plain directory: bounded walk, skip dotdirs, hard cap.
+            seen = 0
+            for sub in repo_path.rglob("*"):
+                if not sub.is_file():
+                    continue
+                # Skip anything under a dotdir (e.g. .git, .venv) so we
+                # don't enumerate gigabytes of vendored deps.
+                if any(p.startswith(".") for p in sub.relative_to(repo_path).parts[:-1]):
+                    continue
+                rel = str(sub.relative_to(repo_path))
+                if query and query not in rel.lower():
+                    seen += 1
+                    if seen > limit * 10:
+                        truncated = True
+                        break
+                    continue
+                files.append(rel)
+                if len(files) >= limit:
+                    truncated = True
+                    break
+        return {
+            "workspace_id": ws.id,
+            "repo_path": ws.repo_path,
+            "is_git": is_git,
+            "files": files,
+            "truncated": truncated,
+            "count": len(files),
+        }
 
     async def cards_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return [c.model_dump(mode="json") for c in await self.store.list_cards()]
@@ -329,7 +731,21 @@ class Handlers:
             transcribe_file,
         )
 
-        path = Path(params["audio_path"])
+        # The RPC server is loopback-only, but a malicious local process
+        # could still POST to it.  Resolve the path and confirm it points
+        # at a regular file with an audio-shaped extension before handing
+        # it to the transcriber.
+        allowed_exts = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}
+        raw = params.get("audio_path")
+        if not isinstance(raw, str) or not raw:
+            raise ValueError("audio_path required")
+        path = Path(raw).resolve(strict=False)
+        if not path.is_file():
+            raise ValueError(f"audio_path is not a regular file: {path}")
+        if path.suffix.lower() not in allowed_exts:
+            raise ValueError(
+                f"audio_path extension {path.suffix!r} not in allowed set {sorted(allowed_exts)}"
+            )
         text = await asyncio.to_thread(
             transcribe_file,
             path,
@@ -378,30 +794,60 @@ class Handlers:
             description=params.get("description", ""),
             nodes=params.get("nodes", []),
             edges=params.get("edges", []),
+            is_draft=bool(params.get("is_draft", False)),
         )
         await self.store.insert_flow(flow)
         return {"id": flow.id}
 
     async def flows_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        from apps.service.store.events import FlowVersionConflict
+
         flow = await self.store.get_flow(params["id"])
         if not flow:
             raise ValueError(f"unknown flow: {params['id']}")
+        # Optional optimistic-concurrency token.  GUI passes the version
+        # it last fetched; if another writer has bumped the row in the
+        # meantime, the update is rejected and the GUI should re-fetch.
+        expected_version = params.get("expected_version")
         flow.name = params.get("name", flow.name)
         flow.description = params.get("description", flow.description)
         flow.nodes = params.get("nodes", flow.nodes)
         flow.edges = params.get("edges", flow.edges)
+        if "is_draft" in params:
+            flow.is_draft = bool(params["is_draft"])
         flow.updated_at = utc_now()
-        await self.store.update_flow(flow)
-        return {"id": flow.id, "version": flow.version}
+        try:
+            await self.store.update_flow(flow, expected_version=expected_version)
+        except FlowVersionConflict as exc:
+            raise ValueError(
+                f"flow {flow.id} has been modified by another writer; reload before saving"
+            ) from exc
+        return {"id": flow.id, "version": flow.version + 1}
 
     async def flows_delete(self, params: dict[str, Any]) -> dict[str, Any]:
-        ok = await self.store.delete_flow(params["id"])
-        return {"deleted": bool(ok)}
+        # Cancel any in-flight runs of this flow before deleting the
+        # row, otherwise the supervisor task would carry on writing
+        # update_flow_run against zero rows and silently mask its own
+        # cancellation path.
+        flow_id = params["id"]
+        cancelled = 0
+        for run_id, task in list(self.flow_executor._active.items()):
+            run = await self.store.get_flow_run(run_id)
+            if run and run.flow_id == flow_id and not task.done():
+                task.cancel()
+                cancelled += 1
+        ok = await self.store.delete_flow(flow_id)
+        return {"deleted": bool(ok), "cancelled_runs": cancelled}
 
     async def flows_dispatch(self, params: dict[str, Any]) -> dict[str, Any]:
         flow = await self.store.get_flow(params["flow_id"])
         if not flow:
             raise ValueError(f"unknown flow: {params['flow_id']}")
+        if flow.is_draft:
+            raise ValueError(
+                "flow is in draft mode — flip the Draft toggle off "
+                "in the Canvas toolbar to promote it to Live first."
+            )
         run = await self.flow_executor.dispatch(flow)
         return {"run_id": run.id}
 
@@ -483,83 +929,336 @@ class Handlers:
     # Named agents — persistent conversations with follow-up linkage.
     # ------------------------------------------------------------------
 
+    # Project-convention files we look for at the repo root, in order
+    # of preference.  The first match wins; runner-up files are noted.
+    _CONVENTION_FILES = (
+        "CLAUDE.md",
+        "AGENTS.md",
+        "GEMINI.md",
+        ".cursorrules",
+        ".cursor/rules.md",
+    )
+
+    # Cap inlined convention text so a 500 KB CLAUDE.md doesn't dominate
+    # the prompt.  Honest truncation marker so the model knows.
+    _CONVENTION_INLINE_CAP = 8000
+
+    async def _build_repo_system_prompt(self, ws: Any, *, base_system: str | None) -> str:
+        """Compose the system prompt for a repo-bound coding session.
+
+        Folds together (in order):
+          - the operator's own ``base_system`` (if any),
+          - a header naming the workspace,
+          - the current branch,
+          - the contents of the first project-convention file we find
+            at the repo root (CLAUDE.md / AGENTS.md / GEMINI.md /
+            .cursorrules), capped to 8 KB.
+
+        Best-effort: any failure (missing git, IO error, etc.) is
+        swallowed and we fall back to the basic header.
+        """
+        repo = Path(ws.repo_path)
+        # Branch lookup — graceful when not a git repo.
+        branch = ""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(repo),
+                "rev-parse",
+                "--abbrev-ref",
+                "HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            out, _err = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+            if proc.returncode == 0:
+                branch = out.decode("utf-8", errors="replace").strip()
+        except Exception:
+            log.debug("branch lookup failed for %s", repo, exc_info=True)
+
+        # Find the first convention file that exists.  Read up to the
+        # cap; refuse symlinks pointing outside the repo as a
+        # cheap defence.
+        convention_text = ""
+        convention_name = ""
+        for rel in self._CONVENTION_FILES:
+            candidate = (repo / rel).resolve()
+            try:
+                if not candidate.is_relative_to(repo.resolve()):
+                    continue
+            except (OSError, ValueError):
+                continue
+            if candidate.is_file():
+                try:
+                    convention_text = await asyncio.to_thread(
+                        candidate.read_text, encoding="utf-8", errors="replace"
+                    )
+                except OSError:
+                    continue
+                convention_name = rel
+                break
+
+        truncated = False
+        if len(convention_text) > self._CONVENTION_INLINE_CAP:
+            convention_text = convention_text[: self._CONVENTION_INLINE_CAP]
+            truncated = True
+
+        parts: list[str] = []
+        header = (
+            f"You are operating inside the project at {ws.repo_path} (workspace name: {ws.name})"
+        )
+        if branch:
+            header += f", currently on branch '{branch}'"
+        header += "."
+        parts.append(header)
+
+        parts.append(
+            "This is a real source-controlled repository. Use your "
+            "built-in file tools (Read / Bash / Edit / Grep) to browse "
+            "and modify it. Before making non-trivial changes:\n"
+            "  - Run `git status` and `git diff` to understand current state.\n"
+            "  - Look for tests near the file you are editing.\n"
+            "  - Do NOT run `git push`, force operations, or destructive "
+            "commands (`rm -rf`, `git reset --hard`) without an explicit "
+            "go-ahead from the user.\n"
+            "  - Prefer small, reviewable diffs."
+        )
+
+        if convention_name and convention_text:
+            parts.append(
+                f"=== Project convention file: {convention_name} "
+                f"(repo-root) ===\n{convention_text}\n"
+                + (
+                    f"\n_(truncated; first {self._CONVENTION_INLINE_CAP} chars only)_"
+                    if truncated
+                    else ""
+                )
+                + "\n=== End project convention ==="
+            )
+
+        if base_system:
+            parts.append(base_system)
+        return "\n\n".join(parts)
+
+    async def _enrich_agent(self, agent: Agent) -> dict[str, Any]:
+        """Convert an Agent to a JSON dict and decorate it with the
+        bound workspace's name + path so the GUI can render the repo
+        chip without a second round-trip.
+        """
+        d = agent.model_dump(mode="json")
+        if agent.workspace_id:
+            ws = await self.store.get_workspace(agent.workspace_id)
+            if ws is not None:
+                d["workspace_name"] = ws.name
+                d["workspace_path"] = ws.repo_path
+        return d
+
+    async def _enrich_agents(self, agents: list[Agent]) -> list[dict[str, Any]]:
+        # Pull all workspaces once instead of N round-trips for N agents.
+        ws_rows = await self.store.list_workspaces()
+        by_id = {w.id: w for w in ws_rows}
+        out: list[dict[str, Any]] = []
+        for a in agents:
+            d = a.model_dump(mode="json")
+            if a.workspace_id and a.workspace_id in by_id:
+                d["workspace_name"] = by_id[a.workspace_id].name
+                d["workspace_path"] = by_id[a.workspace_id].repo_path
+            out.append(d)
+        return out
+
     async def agents_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
-        return [a.model_dump(mode="json") for a in await self.store.list_agents()]
+        return await self._enrich_agents(await self.store.list_agents())
 
     async def agents_get(self, params: dict[str, Any]) -> dict[str, Any]:
         agent = await self.store.get_agent(params["id"])
         if not agent:
             raise ValueError(f"unknown agent: {params['id']}")
-        return agent.model_dump(mode="json")
+        return await self._enrich_agent(agent)
 
     async def agents_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        refs = params.get("reference_agent_ids") or []
+        if not isinstance(refs, list):
+            refs = []
+        workspace_id = params.get("workspace_id")
+        # Validate the workspace up-front so the GUI gets a clear error
+        # instead of a per-send failure later.
+        if workspace_id:
+            ws = await self.store.get_workspace(workspace_id)
+            if not ws:
+                raise ValueError(f"unknown workspace: {workspace_id}")
         agent = Agent(
             name=(params.get("name") or "Unnamed agent").strip(),
             provider=params["provider"],
             model=params["model"],
             system=params.get("system", ""),
+            reference_agent_ids=[str(r) for r in refs if r],
+            workspace_id=workspace_id,
         )
         await self.store.insert_agent(agent)
-        return agent.model_dump(mode="json")
+        return await self._enrich_agent(agent)
+
+    async def agents_set_workspace(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Bind / unbind an agent to a Workspace (project repo).
+
+        ``params``:
+          agent_id:     id of the agent to update.
+          workspace_id: id of the workspace, or null to detach.
+        """
+        agent = await self.store.get_agent(params["agent_id"])
+        if not agent:
+            raise ValueError(f"unknown agent: {params['agent_id']}")
+        ws_id = params.get("workspace_id")
+        if ws_id:
+            ws = await self.store.get_workspace(ws_id)
+            if not ws:
+                raise ValueError(f"unknown workspace: {ws_id}")
+        agent.workspace_id = ws_id or None
+        await self.store.update_agent(agent)
+        return await self._enrich_agent(agent)
+
+    async def agents_set_references(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Replace an existing agent's reference_agent_ids list.
+
+        ``params``:
+          agent_id: id of the agent to update.
+          reference_agent_ids: list of agent ids to inline as context
+            on every subsequent send.  Empty list = no context.
+        """
+        agent = await self.store.get_agent(params["agent_id"])
+        if not agent:
+            raise ValueError(f"unknown agent: {params['agent_id']}")
+        refs = params.get("reference_agent_ids") or []
+        if not isinstance(refs, list):
+            refs = []
+        agent.reference_agent_ids = [str(r) for r in refs if r and r != agent.id]
+        await self.store.update_agent(agent)
+        return await self._enrich_agent(agent)
 
     async def agents_send(self, params: dict[str, Any]) -> dict[str, Any]:
         """Append the user's message to the agent's transcript and
         get a reply.  Multi-turn — every turn after the first builds
         on the prior transcript.
+
+        Optional ``attachment_ids`` selects previously-uploaded files
+        to attach to this turn; spreadsheets get inlined as markdown
+        tables and images get passed through to the CLI as path refs
+        (handled inside each provider).
         """
         from apps.service.providers.registry import get_provider
 
-        agent = await self.store.get_agent(params["agent_id"])
-        if not agent:
-            raise ValueError(f"unknown agent: {params['agent_id']}")
+        agent_id = params["agent_id"]
         message = params["message"]
-        agent.transcript.append({"role": "user", "content": message})
+        attachment_ids = list(params.get("attachment_ids") or [])
+        # Serialise sends per agent — without this lock two concurrent
+        # turns lose one user/assistant pair (last writer wins).
+        async with await self._lock_for_agent(agent_id):
+            agent = await self.store.get_agent(agent_id)
+            if not agent:
+                raise ValueError(f"unknown agent: {agent_id}")
+            new_turn_index = len(agent.transcript)
+            agent.transcript.append({"role": "user", "content": message})
 
-        # Fold transcript + system into a single prompt for the CLI
-        # adapter (which doesn't accept structured messages in
-        # headless mode).  Fresh providers keep their own session
-        # state per call; persisting it in our store is the
-        # source-of-truth.
-        prompt = _render_transcript(agent)
+            # Resolve any attachments the operator picked for this turn.
+            attachments: list[Attachment] = []
+            if attachment_ids:
+                attachments = await self.store.get_attachments_by_ids(attachment_ids)
+                # Reject foreign attachments — every id must belong to
+                # this agent so we can't be tricked into reading another
+                # agent's files.
+                for a in attachments:
+                    if a.agent_id != agent_id:
+                        raise ValueError(f"attachment {a.id} belongs to a different agent")
 
-        provider = get_provider(agent.provider)
-        # Use an ephemeral card to reuse the existing provider auth.
-        from apps.service.types import (
-            BlastRadiusPolicy,
-            CardMode,
-            CostPolicy,
-            PersonalityCard,
-            SandboxTier,
-        )
+            # Fold transcript + system into a single prompt for the CLI
+            # adapter (which doesn't accept structured messages in
+            # headless mode).  Fresh providers keep their own session
+            # state per call; persisting it in our store is the
+            # source-of-truth.
+            # Pull every referenced agent the operator wired up and
+            # prepend their transcripts as a context preamble.  Cross-
+            # provider safe: Gemini reading a Claude transcript or vice
+            # versa just sees plain text, so no special-casing.
+            refs: list[Agent] = []
+            ref_attachments: dict[str, list[Attachment]] = {}
+            for ref_id in agent.reference_agent_ids or []:
+                ref = await self.store.get_agent(ref_id)
+                if ref is not None:
+                    refs.append(ref)
+                    ref_attachments[ref.id] = await self.store.list_attachments(ref.id)
+            reference_block = _render_references(refs, ref_attachments)
+            prompt = _render_transcript(agent)
+            if reference_block:
+                prompt = reference_block + "\n\n" + prompt
 
-        card = PersonalityCard(
-            name=f"(agent {agent.name})",
-            archetype="agent",
-            description="ephemeral card for a named agent",
-            template_id="agent",
-            provider=agent.provider,
-            model=agent.model,
-            mode=CardMode.CHAT,
-            cost=CostPolicy(),
-            blast_radius=BlastRadiusPolicy(),
-            sandbox_tier=SandboxTier.DEVCONTAINER,
-        )
-        session = await provider.open_chat(card, system=agent.system or None)
-        chunks: list[str] = []
-        try:
-            async for ev in session.send(prompt):
-                if ev.kind == "text_delta":
-                    chunks.append(ev.text)
-                elif ev.kind == "error":
-                    raise RuntimeError(ev.text or "provider error")
-                elif ev.kind == "finish":
-                    break
-        finally:
-            await session.close()
-        reply = "".join(chunks)
-        agent.transcript.append({"role": "assistant", "content": reply})
-        await self.store.update_agent(agent)
-        return {"reply": reply, "agent": agent.model_dump(mode="json")}
+            provider = get_provider(agent.provider)
+            # Use an ephemeral card to reuse the existing provider auth.
+            from apps.service.types import (
+                BlastRadiusPolicy,
+                CardMode,
+                CostPolicy,
+                PersonalityCard,
+                SandboxTier,
+            )
+
+            card = PersonalityCard(
+                name=f"(agent {agent.name})",
+                archetype="agent",
+                description="ephemeral card for a named agent",
+                template_id="agent",
+                provider=agent.provider,
+                model=agent.model,
+                mode=CardMode.CHAT,
+                cost=CostPolicy(),
+                blast_radius=BlastRadiusPolicy(),
+                sandbox_tier=SandboxTier.DEVCONTAINER,
+            )
+
+            # Repo-aware path: if the agent is bound to a Workspace,
+            # spawn the CLI subprocess with cwd=<repo_path> so the
+            # model's built-in Read / Bash / Edit tools operate against
+            # the project, and prepend a system-prompt header that
+            # discovers the project's own conventions (CLAUDE.md /
+            # AGENTS.md / .cursorrules) so the model honours them.
+            cwd: str | None = None
+            system_prompt = agent.system or None
+            if agent.workspace_id:
+                ws = await self.store.get_workspace(agent.workspace_id)
+                if ws is not None:
+                    cwd = ws.repo_path
+                    system_prompt = await self._build_repo_system_prompt(
+                        ws, base_system=system_prompt
+                    )
+
+            session = await provider.open_chat(card, system=system_prompt, cwd=cwd)
+            chunks: list[str] = []
+            # Fold spreadsheet attachments into the prompt body (the CLI
+            # adapter has no path concept for tabular data); images
+            # remain as Attachment objects passed via send(...).
+            prompt_with_sheets = _inline_spreadsheet_attachments(prompt, attachments)
+            image_attachments = [a for a in attachments if a.kind == AttachmentKind.IMAGE]
+            try:
+                async for ev in session.send(prompt_with_sheets, attachments=image_attachments):
+                    if ev.kind == "text_delta":
+                        chunks.append(ev.text)
+                    elif ev.kind == "error":
+                        raise RuntimeError(ev.text or "provider error")
+                    elif ev.kind == "finish":
+                        break
+            finally:
+                await session.close()
+            reply = "".join(chunks)
+            agent.transcript.append({"role": "assistant", "content": reply})
+            await self.store.update_agent(agent)
+            # Bind each attachment to the user-turn we just appended so
+            # the GUI can show "this turn had X attached".
+            for a in attachments:
+                await self.store.update_attachment_turn(a.id, new_turn_index, agent_id=agent_id)
+            # Record the send for the in-app message-tally counter so the
+            # Limits tab can show "X / cap" against the published plan
+            # caps without having to ask the CLI.
+            await self.store.record_provider_message(agent.provider, agent.model)
+            return {"reply": reply, "agent": await self._enrich_agent(agent)}
 
     async def agents_spawn_followup(self, params: dict[str, Any]) -> dict[str, Any]:
         """Spawn a new agent that builds on a parent's transcript.
@@ -606,13 +1305,18 @@ class Handlers:
             system=parent.system,
             parent_id=parent.id,
             parent_name=parent.name,
+            parent_preset=params.get("preset", "custom"),
             transcript=seeded_transcript,
         )
         await self.store.insert_agent(agent)
-        return {"agent": agent.model_dump(mode="json")}
+        return {"agent": await self._enrich_agent(agent)}
 
     async def agents_delete(self, params: dict[str, Any]) -> dict[str, Any]:
-        ok = await self.store.delete_agent(params["id"])
+        agent_id = params["id"]
+        ok = await self.store.delete_agent(agent_id)
+        # Drop the per-agent send lock so the dict doesn't grow forever.
+        async with self._agent_send_locks_guard:
+            self._agent_send_locks.pop(agent_id, None)
         return {"deleted": bool(ok)}
 
     async def agents_followup_presets(self, params: dict[str, Any]) -> list[dict[str, str]]:
@@ -620,6 +1324,380 @@ class Handlers:
             {"key": key, "label": label, "instruction": body}
             for key, (label, body) in FOLLOWUP_PRESETS.items()
         ]
+
+    # ------------------------------------------------------------------
+    # Attachments — file uploads bound to an Agent
+    # ------------------------------------------------------------------
+
+    # Hard upload size cap.  25 MB covers normal screenshots and
+    # spreadsheets without giving an operator (or a compromised local
+    # process) a way to fill the disk in a single RPC.
+    MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
+    async def attachments_upload(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Persist an uploaded file, render it (markdown table for
+        spreadsheets, optional resize for images) and index a row.
+
+        Params:
+            agent_id:      target agent (must already exist)
+            original_name: filename the user chose
+            content_b64:   base64-encoded bytes
+        """
+        import base64
+
+        from apps.service.attachments import (
+            AttachmentRenderError,
+            classify_kind,
+            render_attachment,
+            sanitize_filename,
+        )
+
+        agent_id = params["agent_id"]
+        agent = await self.store.get_agent(agent_id)
+        if not agent:
+            raise ValueError(f"unknown agent: {agent_id}")
+
+        original_name = str(params.get("original_name") or "upload")
+        b64 = params.get("content_b64")
+        if not isinstance(b64, str) or not b64:
+            raise ValueError("content_b64 missing")
+        # Pre-check the encoded length so we reject oversized uploads
+        # before allocating the decoded bytes.  base64 expands by ~4/3.
+        encoded_cap = (self.MAX_ATTACHMENT_BYTES * 4 // 3) + 8
+        if len(b64) > encoded_cap:
+            raise ValueError(
+                f"attachment too large; max {self.MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB"
+            )
+        try:
+            raw = base64.b64decode(b64, validate=True)
+        except ValueError as exc:
+            raise ValueError(f"content_b64 not valid base64: {exc}") from exc
+        if not raw:
+            raise ValueError("attachment is empty")
+        if len(raw) > self.MAX_ATTACHMENT_BYTES:
+            raise ValueError(
+                f"attachment too large ({len(raw)} bytes); max "
+                f"{self.MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB"
+            )
+
+        # Decide kind from extension; reject unknown types up front so
+        # the operator gets a useful error.
+        kind = classify_kind(Path(original_name))
+        if not kind:
+            raise ValueError(
+                f"unsupported file type {Path(original_name).suffix!r}; "
+                "supported: images (.png/.jpg/.gif/.webp) and spreadsheets (.xlsx/.xls/.csv)"
+            )
+
+        attachment_id = long_id()
+        # Agent dir is under our attachments root.  agent_id is a
+        # service-minted long_id (alphanumeric) so it can't traverse,
+        # but resolve+is_relative_to is cheap belt-and-braces.
+        agent_dir = self.attachments_dir / agent_id
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        if not agent_dir.resolve().is_relative_to(self.attachments_dir.resolve()):
+            raise ValueError("agent_dir escaped attachments root")
+        safe_name = sanitize_filename(original_name)
+        # Refuse paths containing whitespace or `@` so an `@<path>` token
+        # injected into a CLI prompt can't be split or misparsed by the
+        # tokenizer (claude-cli/gemini-cli read the prompt as text).
+        # safe_name should already be free of these but assert for the
+        # boundary.
+        if any(c in safe_name for c in (" ", "\n", "\t", "\r", "@")):
+            raise ValueError(f"sanitised filename still has unsafe chars: {safe_name!r}")
+        stored_path = agent_dir / f"{attachment_id}__{safe_name}"
+        stored_str = str(stored_path)
+        if any(c in stored_str for c in (" ", "\n", "\t", "\r")):
+            # Operator's data_dir contains whitespace.  Refuse the upload
+            # rather than risk CLI prompt-token splitting on our path.
+            raise ValueError(
+                "data directory path contains whitespace which would break "
+                "CLI argument injection; move the data_dir to a path without spaces"
+            )
+
+        # Atomic-rename pattern: write the file via a sibling .part path
+        # we own, then rename into place.  Avoids the temp-file leak on
+        # crash that the previous tempfile dance had.
+        part_path = stored_path.with_suffix(stored_path.suffix + ".part")
+        part_path.write_bytes(raw)
+        render_warning: str | None = None
+        try:
+            try:
+                result = render_attachment(part_path, dest=stored_path, kind=kind)
+                # render_attachment writes to dest; drop the .part
+                if part_path.exists():
+                    part_path.unlink(missing_ok=True)
+            except AttachmentRenderError as exc:
+                # Render failed; preserve the raw bytes and flag a warning.
+                part_path.replace(stored_path)
+                render_warning = str(exc)
+                from apps.service.attachments.render import RenderResult
+
+                result = RenderResult(
+                    rendered_text=None,
+                    mime_type="application/octet-stream",
+                    bytes_written=len(raw),
+                )
+        except Exception:
+            part_path.unlink(missing_ok=True)
+            stored_path.unlink(missing_ok=True)
+            raise
+
+        attachment = Attachment(
+            id=attachment_id,
+            agent_id=agent_id,
+            kind=AttachmentKind(kind),
+            original_name=original_name,
+            stored_path=str(stored_path),
+            mime_type=result.mime_type,
+            bytes=result.bytes_written,
+            rendered_text=result.rendered_text,
+        )
+        try:
+            await self.store.insert_attachment(attachment)
+        except Exception:
+            # DB row failed; don't leave the bytes on disk as orphans.
+            stored_path.unlink(missing_ok=True)
+            raise
+        out = attachment.model_dump(mode="json")
+        if render_warning:
+            out["warning"] = render_warning
+        return out
+
+    async def attachments_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        # Authz: only the owning agent's caller can enumerate.  Without
+        # this any local process could browse another agent's files.
+        agent_id = params["agent_id"]
+        agent = await self.store.get_agent(agent_id)
+        if not agent:
+            raise ValueError(f"unknown agent: {agent_id}")
+        rows = await self.store.list_attachments(agent_id)
+        return [a.model_dump(mode="json") for a in rows]
+
+    async def attachments_usage(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Per-agent attachment storage tally for the Limits tab.
+
+        Returns total file count + total bytes broken out per agent and
+        a grand total.  Reads from the DB rows (stored_path bytes) so
+        we don't have to walk the filesystem.
+        """
+        agents = await self.store.list_agents()
+        per_agent: list[dict[str, Any]] = []
+        total_bytes = 0
+        total_files = 0
+        for a in agents:
+            atts = await self.store.list_attachments(a.id)
+            if not atts:
+                continue
+            agent_bytes = sum(att.bytes for att in atts)
+            total_bytes += agent_bytes
+            total_files += len(atts)
+            per_agent.append(
+                {
+                    "agent_id": a.id,
+                    "agent_name": a.name,
+                    "files": len(atts),
+                    "bytes": agent_bytes,
+                }
+            )
+        per_agent.sort(key=lambda r: r["bytes"], reverse=True)
+        return {
+            "agents": per_agent,
+            "total_files": total_files,
+            "total_bytes": total_bytes,
+        }
+
+    async def attachments_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        # Authz: require the caller to name the owning agent and confirm
+        # the attachment belongs to it.  Stops cross-agent wipes.
+        attachment_id = params["id"]
+        agent_id = params.get("agent_id")
+        if not agent_id:
+            raise ValueError("agent_id required")
+        existing = await self.store.get_attachment(attachment_id)
+        if existing is None:
+            return {"deleted": False}
+        if existing.agent_id != agent_id:
+            raise ValueError(f"attachment {attachment_id} does not belong to agent {agent_id}")
+        # Serialise with sends so we don't unlink mid-prompt.
+        async with await self._lock_for_agent(agent_id):
+            attachment = await self.store.delete_attachment(attachment_id)
+            if attachment is None:
+                return {"deleted": False}
+            # Boundary check: refuse to unlink anything outside our
+            # attachments tree even if the row's stored_path was
+            # tampered with.
+            try:
+                target = Path(attachment.stored_path).resolve()
+                root = self.attachments_dir.resolve()
+                if target.is_relative_to(root):
+                    target.unlink(missing_ok=True)
+                else:
+                    log.warning(
+                        "refused to unlink %s (outside attachments root)",
+                        attachment.stored_path,
+                    )
+            except OSError:
+                log.debug("attachment file already gone: %s", attachment.stored_path)
+        return {"deleted": True}
+
+    async def limits_check(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Probe every locally-installed CLI for whatever subscription
+        / usage info it exposes.  Returns a structured dict the GUI's
+        Limits tab renders as one card per provider.
+
+        Per-message remaining-quota numbers are not reliably available
+        headlessly for either Claude Code or Gemini CLI — both gate
+        that behind their interactive `/status` flow.  We surface
+        whatever each binary returns from its public status commands
+        plus links to the official dashboards so the operator can
+        always drill in.
+        """
+        import shutil
+
+        async def _run(args: list[str], timeout: float = 15.0) -> dict[str, Any]:
+            binary = shutil.which(args[0])
+            if not binary:
+                return {"ok": False, "stdout": "", "stderr": "not found on PATH", "exit": -1}
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    binary,
+                    *args[1:],
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                except TimeoutError:
+                    proc.kill()
+                    # Reap the child so we don't leave a zombie behind.
+                    # communicate() also closes the pipes for us.
+                    try:
+                        await asyncio.wait_for(proc.communicate(), timeout=2.0)
+                    except (TimeoutError, ProcessLookupError):
+                        pass
+                    return {
+                        "ok": False,
+                        "stdout": "",
+                        "stderr": f"timed out after {timeout}s",
+                        "exit": -2,
+                    }
+            except Exception as exc:
+                return {"ok": False, "stdout": "", "stderr": str(exc), "exit": -3}
+            return {
+                "ok": (proc.returncode or 0) == 0,
+                "stdout": stdout_b.decode("utf-8", errors="replace").strip(),
+                "stderr": stderr_b.decode("utf-8", errors="replace").strip(),
+                "exit": proc.returncode or 0,
+            }
+
+        # Claude Code: try `--version` (always works) then optionally
+        # `status` (newer versions).  We don't try the interactive
+        # `/status` slash command headlessly because it would never
+        # return.
+        claude_version = await _run(["claude", "--version"])
+        claude_status = (
+            await _run(["claude", "status"], timeout=8.0)
+            if claude_version["ok"]
+            else {
+                "ok": False,
+                "stdout": "",
+                "stderr": "claude not on PATH",
+                "exit": -1,
+            }
+        )
+        # Gemini CLI: same pattern.
+        gemini_version = await _run(["gemini", "--version"])
+        gemini_status = (
+            await _run(["gemini", "status"], timeout=8.0)
+            if gemini_version["ok"]
+            else {
+                "ok": False,
+                "stdout": "",
+                "stderr": "gemini not on PATH",
+                "exit": -1,
+            }
+        )
+
+        from apps.service.limits import (
+            DATA_AS_OF,
+            claude_plans,
+            context_windows,
+            gemini_plans,
+        )
+
+        return {
+            "data_as_of": DATA_AS_OF,
+            "context_windows": context_windows(),
+            "providers": [
+                {
+                    "id": "claude-cli",
+                    "label": "Claude Code (Pro / Max plan)",
+                    "version": claude_version,
+                    "status": claude_status,
+                    "plans": claude_plans(),
+                    "dashboards": [
+                        {
+                            "label": "Pro / Max usage dashboard",
+                            "url": "https://claude.ai/settings/usage",
+                        },
+                        {"label": "Subscription page", "url": "https://claude.ai/settings"},
+                    ],
+                    "note": (
+                        "Per-message remaining-count isn't returned "
+                        "headlessly.  Caps below are the published plan "
+                        "limits; the dashboards above show live usage."
+                    ),
+                },
+                {
+                    "id": "gemini-cli",
+                    "label": "Gemini CLI",
+                    "version": gemini_version,
+                    "status": gemini_status,
+                    "plans": gemini_plans(),
+                    "dashboards": [
+                        {"label": "Gemini app + plan", "url": "https://gemini.google.com/"},
+                        {
+                            "label": "AI Studio (API keys)",
+                            "url": "https://aistudio.google.com/app/apikey",
+                        },
+                    ],
+                    "note": (
+                        "Headless quota readout isn't documented.  Caps "
+                        "below are the published plan limits; the "
+                        "dashboards above show live usage."
+                    ),
+                },
+            ],
+        }
+
+    async def limits_usage(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Local message-send tally per provider.
+
+        Returns rolling counts for the three windows operators care
+        about: 5 hours (Claude Pro/Max session window), 24 hours
+        (Gemini daily) and 7 days (Claude weekly).  Counts come from
+        the ``provider_messages`` table populated by every successful
+        agents.send.  Independent of any CLI status command — this
+        is what *we* observed.
+        """
+        from datetime import timedelta
+
+        from apps.service.types import utc_now
+
+        now = utc_now()
+        windows = {
+            "5h": (now - timedelta(hours=5)).isoformat(),
+            "24h": (now - timedelta(hours=24)).isoformat(),
+            "7d": (now - timedelta(days=7)).isoformat(),
+        }
+        out: dict[str, dict[str, int]] = {}
+        for provider in ("claude-cli", "gemini-cli"):
+            counts: dict[str, int] = {}
+            for label, since_iso in windows.items():
+                counts[label] = await self.store.count_provider_messages(provider, since_iso)
+            out[provider] = counts
+        return {"providers": out, "checked_at": now.isoformat()}
 
     async def hooks_status(self, params: dict[str, Any]) -> dict[str, Any]:
         return hook_status()
@@ -656,6 +1734,10 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("workspaces.list", h.workspaces_list)
     server.register("workspaces.register", h.workspaces_register)
     server.register("workspaces.remove", h.workspaces_remove)
+    server.register("workspaces.tree", h.workspaces_tree)
+    server.register("workspaces.clone", h.workspaces_clone)
+    server.register("workspaces.git_status", h.workspaces_git_status)
+    server.register("workspaces.switch_branch", h.workspaces_switch_branch)
     server.register("cards.list", h.cards_list)
     server.register("runs.list", h.runs_list)
     server.register("runs.dispatch", h.runs_dispatch)
@@ -685,10 +1767,18 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("agents.create", h.agents_create)
     server.register("agents.send", h.agents_send)
     server.register("agents.spawn_followup", h.agents_spawn_followup)
+    server.register("agents.set_references", h.agents_set_references)
+    server.register("agents.set_workspace", h.agents_set_workspace)
     server.register("agents.delete", h.agents_delete)
     server.register("agents.followup_presets", h.agents_followup_presets)
+    server.register("attachments.upload", h.attachments_upload)
+    server.register("attachments.list", h.attachments_list)
+    server.register("attachments.delete", h.attachments_delete)
+    server.register("attachments.usage", h.attachments_usage)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
+    server.register("limits.check", h.limits_check)
+    server.register("limits.usage", h.limits_usage)
     server.register("hooks.status", h.hooks_status)
     server.register("hooks.install", h.hooks_install)
     server.register("hooks.uninstall", h.hooks_uninstall)
@@ -724,7 +1814,7 @@ async def serve(args: argparse.Namespace) -> int:
 
     manager = WorktreeManager(store)
     dispatcher = RunDispatcher(store, manager, bus)
-    handlers = Handlers(store, manager, dispatcher)
+    handlers = Handlers(store, manager, dispatcher, data_dir=data_dir)
 
     watcher = JSONLWatcher(store)
     await watcher.start()

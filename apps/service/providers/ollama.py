@@ -44,7 +44,10 @@ class OllamaChatSession(ChatSession):
             timeout=httpx.Timeout(120.0, connect=5.0),
         )
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
+    async def send(self, message: str, *, attachments: Any = None) -> AsyncIterator[StreamEvent]:
+        # Attachments aren't wired through Ollama in V1; accept kwarg
+        # for protocol uniformity and ignore.
+        del attachments
         self._history.append({"role": "user", "content": message})
         body = {
             "model": self.card.model,
@@ -108,7 +111,14 @@ class OllamaChatSession(ChatSession):
 class OllamaProvider:
     name: str = "ollama"
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+    async def open_chat(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
+        del cwd  # HTTP session has no cwd concept
         if card.provider != "ollama":
             raise ProviderError(f"card.provider={card.provider!r} is not ollama")
         return OllamaChatSession(card, system=system)

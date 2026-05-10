@@ -29,10 +29,19 @@ _EDGE_PEN_SELECTED = QtGui.QColor("#1f6feb")
 
 
 class Edge(QtWidgets.QGraphicsPathItem):
-    def __init__(self, source: Port, target: Port) -> None:
+    def __init__(
+        self,
+        source: Port,
+        target: Port,
+        *,
+        label: str = "",
+        directional: bool = False,
+    ) -> None:
         super().__init__()
         self.source: Port | None = source
         self.target: Port | None = target
+        self.label = label
+        self.directional = directional
         self.setFlag(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
         self.setAcceptHoverEvents(True)
         self.setZValue(0.5)
@@ -118,6 +127,96 @@ class Edge(QtWidgets.QGraphicsPathItem):
         pen = QtGui.QPen(colour, width)
         pen.setCosmetic(True)
         self.setPen(pen)
+
+    def paint(
+        self,
+        painter: QtGui.QPainter,
+        option: QtWidgets.QStyleOptionGraphicsItem,
+        widget: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().paint(painter, option, widget)
+        if self.source is None or self.target is None:
+            return
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        # Arrowhead at the target end so directional edges read
+        # as "from → to".  Only draw if we asked for it; flow-edge
+        # connections leave directional=False to keep the existing
+        # look.
+        if self.directional:
+            self._draw_arrowhead(painter)
+        # Label at the path midpoint, centred over the curve so it
+        # doesn't clip into either node.
+        if self.label:
+            self._draw_label(painter)
+
+    def _draw_arrowhead(self, painter: QtGui.QPainter) -> None:
+        if self.source is None or self.target is None:
+            return
+        p1 = self.source.scene_position()
+        p2 = self.target.scene_position()
+        # Approximate the tangent at the target by sampling the bezier
+        # close to its end — gives a more accurate arrowhead angle than
+        # using p1->p2 directly when the curve is sharply offset.
+        path = self.path()
+        if path.length() <= 0:
+            return
+        angle_pos = path.percentAtLength(max(0.0, path.length() - 1.0))
+        anchor = path.pointAtPercent(min(1.0, angle_pos + 0.001))
+        end = path.pointAtPercent(1.0)
+        import math
+
+        dx = end.x() - anchor.x()
+        dy = end.y() - anchor.y()
+        if dx == 0 and dy == 0:
+            return
+        angle = math.atan2(dy, dx)
+        size = 9.0
+        spread = math.radians(28)
+        a1 = angle + math.pi - spread
+        a2 = angle + math.pi + spread
+        head = QtGui.QPolygonF(
+            [
+                end,
+                QtCore.QPointF(end.x() + math.cos(a1) * size, end.y() + math.sin(a1) * size),
+                QtCore.QPointF(end.x() + math.cos(a2) * size, end.y() + math.sin(a2) * size),
+            ]
+        )
+        painter.setBrush(self.pen().color())
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.drawPolygon(head)
+        # Suppress unused-variable warning in tools that miss the use.
+        _ = p1
+        _ = p2
+
+    def _draw_label(self, painter: QtGui.QPainter) -> None:
+        path = self.path()
+        if path.length() <= 0:
+            return
+        mid = path.pointAtPercent(0.5)
+        # Background pill so the text is readable over the
+        # gridlines and any curve underneath.
+        font = painter.font()
+        font.setPointSize(8)
+        font.setBold(True)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        text_w = metrics.horizontalAdvance(self.label)
+        text_h = metrics.height()
+        pad_x = 6
+        pad_y = 2
+        rect = QtCore.QRectF(
+            mid.x() - text_w / 2 - pad_x,
+            mid.y() - text_h / 2 - pad_y,
+            text_w + 2 * pad_x,
+            text_h + 2 * pad_y,
+        )
+        painter.setBrush(QtGui.QColor("#fff"))
+        pen = QtGui.QPen(self.pen().color(), 1)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawRoundedRect(rect, 8, 8)
+        painter.setPen(QtGui.QColor("#0f1115"))
+        painter.drawText(rect, int(QtCore.Qt.AlignmentFlag.AlignCenter), self.label)
 
 
 class DraftEdge(QtWidgets.QGraphicsPathItem):

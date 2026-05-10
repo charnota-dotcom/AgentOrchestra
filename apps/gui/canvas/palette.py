@@ -84,7 +84,291 @@ class PalettePanel(QtWidgets.QWidget):
         self.cards_list.setStyleSheet(self._list_stylesheet())
         layout.addWidget(self.cards_list, stretch=1)
 
-        QtCore.QTimer.singleShot(0, lambda: asyncio.ensure_future(self.reload_cards()))
+        # Persistent named conversations (Agents tab).  Drag onto the
+        # canvas to anchor a conversation as a node; double-click the
+        # node to open a chat dialog scoped to that one agent.
+        conv_header = QtWidgets.QHBoxLayout()
+        conv_header.setContentsMargins(0, 0, 0, 0)
+        conv_header.addWidget(self._section_header("Conversations"), stretch=1)
+        new_conv_btn = QtWidgets.QPushButton("+ New")
+        new_conv_btn.setStyleSheet(
+            "QPushButton{padding:2px 8px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#f6f8fa;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        new_conv_btn.setToolTip("Create a new named conversation without leaving the canvas.")
+        new_conv_btn.clicked.connect(self._new_conversation_dialog)  # type: ignore[arg-type]
+        conv_header.addWidget(new_conv_btn)
+        layout.addLayout(conv_header)
+
+        self.agents_list = _DragList()
+        self.agents_list.setStyleSheet(self._list_stylesheet())
+        layout.addWidget(self.agents_list, stretch=1)
+
+        QtCore.QTimer.singleShot(0, lambda: asyncio.ensure_future(self._reload_all()))
+
+    async def _reload_all(self) -> None:
+        await asyncio.gather(self.reload_cards(), self.reload_agents())
+
+    # New-conversation dialog so the operator can mint an agent
+    # directly from the canvas, picking provider + model + type
+    # (Coding / General) without leaving the page.  On success the
+    # palette refreshes and the new entry is draggable.
+    _AGENT_PRESETS: list[tuple[str, str, str, str]] = [
+        # (label, provider, model, default system prompt)
+        ("Claude Sonnet 4.6  (Coding / Claude Code)", "claude-cli", "claude-sonnet-4-6", ""),
+        ("Claude Opus 4.7  (Coding / Claude Code)", "claude-cli", "claude-opus-4-7", ""),
+        (
+            "Claude Sonnet 4.6  (General Chat)",
+            "claude-cli",
+            "claude-sonnet-4-6",
+            "You are a friendly general-purpose assistant.  Help with "
+            "writing, research, brainstorming, planning, and everyday "
+            "questions.  Don't assume the user is asking about code.",
+        ),
+        (
+            "Claude Opus 4.7  (General Chat)",
+            "claude-cli",
+            "claude-opus-4-7",
+            "You are a friendly general-purpose assistant.  Help with "
+            "writing, research, brainstorming, planning, and everyday "
+            "questions.  Don't assume the user is asking about code.",
+        ),
+        ("Gemini 2.5 Pro  (Coding / Gemini CLI)", "gemini-cli", "gemini-2.5-pro", ""),
+        (
+            "Gemini 2.5 Pro  (General Chat)",
+            "gemini-cli",
+            "gemini-2.5-pro",
+            "You are a friendly general-purpose assistant.  Help with "
+            "writing, research, brainstorming, planning, and everyday "
+            "questions.  Don't assume the user is asking about code.",
+        ),
+    ]
+
+    def _new_conversation_dialog(self) -> None:
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("New conversation")
+        dlg.resize(460, 360)
+        form = QtWidgets.QFormLayout(dlg)
+
+        name_input = QtWidgets.QLineEdit()
+        name_input.setPlaceholderText("e.g. Agent Smith")
+        form.addRow("Name:", name_input)
+
+        model_combo = QtWidgets.QComboBox()
+        for label, _p, _m, _s in self._AGENT_PRESETS:
+            model_combo.addItem(label)
+        form.addRow("Model + type:", model_combo)
+
+        # Repo picker — bind the new agent to a Workspace so the CLI
+        # runs inside that directory and can use its file tools.
+        ws_combo = QtWidgets.QComboBox()
+        ws_combo.addItem("(no repo — chat only)", "")
+        ws_combo.setToolTip(
+            "Pick a repo to give the agent file-tool access to.  "
+            "Use the Add… button to register a new path."
+        )
+        ws_row = QtWidgets.QHBoxLayout()
+        ws_row.addWidget(ws_combo, stretch=1)
+        add_repo_btn = QtWidgets.QPushButton("Add…")
+        add_repo_btn.setStyleSheet(
+            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        add_repo_btn.setToolTip("Pick an existing local repo on disk.")
+        add_repo_btn.clicked.connect(  # type: ignore[arg-type]
+            lambda: self._palette_add_repo(dlg, ws_combo)
+        )
+        ws_row.addWidget(add_repo_btn)
+        clone_btn = QtWidgets.QPushButton("Clone…")
+        clone_btn.setStyleSheet(
+            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        clone_btn.setToolTip("Clone a remote git URL into a managed workspace.")
+        clone_btn.clicked.connect(  # type: ignore[arg-type]
+            lambda: self._palette_clone_repo(dlg, ws_combo)
+        )
+        ws_row.addWidget(clone_btn)
+        ws_wrap = QtWidgets.QWidget()
+        ws_wrap.setLayout(ws_row)
+        form.addRow("Repo:", ws_wrap)
+        # Populate asynchronously so the dialog appears immediately.
+        asyncio.ensure_future(self._populate_workspaces(ws_combo))
+
+        first_msg = QtWidgets.QPlainTextEdit()
+        first_msg.setPlaceholderText("Optional: a first message to send right after creation.")
+        first_msg.setMinimumHeight(80)
+        form.addRow("First message:", first_msg)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
+        buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
+        form.addRow(buttons)
+
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        idx = model_combo.currentIndex()
+        _label, provider, model, system = self._AGENT_PRESETS[idx]
+        ws_id = ws_combo.currentData() or ""
+        asyncio.ensure_future(
+            self._do_create(
+                (name_input.text() or "Unnamed conversation").strip(),
+                provider,
+                model,
+                system,
+                first_msg.toPlainText().strip(),
+                ws_id,
+            )
+        )
+
+    async def _populate_workspaces(
+        self, combo: QtWidgets.QComboBox, *, select_id: str | None = None
+    ) -> None:
+        try:
+            rows = await self.client.call("workspaces.list", {})
+        except Exception:
+            return
+        prev = select_id or (combo.currentData() or "")
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("(no repo — chat only)", "")
+        for w in rows:
+            label = f"{w.get('name', '?')} — {w.get('repo_path', '?')}"
+            combo.addItem(label, w.get("id", ""))
+        for i in range(combo.count()):
+            if combo.itemData(i) == prev:
+                combo.setCurrentIndex(i)
+                break
+        combo.blockSignals(False)
+
+    def _palette_add_repo(self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox) -> None:
+        from pathlib import Path
+
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            parent,
+            "Pick the project repo to give the agent access to",
+            str(Path.home()),
+        )
+        if not path:
+            return
+
+        async def _go() -> None:
+            try:
+                ws = await self.client.call(
+                    "workspaces.register",
+                    {"path": path, "name": Path(path).name},
+                )
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(parent, "Couldn't register repo", str(exc))
+                return
+            await self._populate_workspaces(combo, select_id=ws.get("id"))
+
+        asyncio.ensure_future(_go())
+
+    def _palette_clone_repo(self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox) -> None:
+        # Inline mini-dialog: URL + branch.  Keeps the new-conversation
+        # flow self-contained — no need to bounce out to the Chat tab.
+        dlg = QtWidgets.QDialog(parent)
+        dlg.setWindowTitle("Clone from git")
+        dlg.resize(440, 180)
+        form = QtWidgets.QFormLayout(dlg)
+        url_input = QtWidgets.QLineEdit()
+        url_input.setPlaceholderText("https://github.com/owner/repo.git")
+        form.addRow("Git URL:", url_input)
+        branch_input = QtWidgets.QLineEdit()
+        branch_input.setPlaceholderText("(leave blank for default)")
+        form.addRow("Branch:", branch_input)
+        info = QtWidgets.QLabel(
+            "Clones into AgentOrchestra's data directory; large repos may take a minute."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color:#5b6068;font-size:11px;")
+        form.addRow(info)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Clone")
+        buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
+        buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
+        form.addRow(buttons)
+
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        url = url_input.text().strip()
+        if not url:
+            return
+        branch = branch_input.text().strip() or None
+
+        async def _go() -> None:
+            try:
+                ws = await self.client.call("workspaces.clone", {"url": url, "branch": branch})
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(parent, "Clone failed", str(exc))
+                return
+            await self._populate_workspaces(combo, select_id=ws.get("id"))
+
+        asyncio.ensure_future(_go())
+
+    async def _do_create(
+        self,
+        name: str,
+        provider: str,
+        model: str,
+        system: str,
+        first_message: str,
+        workspace_id: str = "",
+    ) -> None:
+        try:
+            agent = await self.client.call(
+                "agents.create",
+                {
+                    "name": name,
+                    "provider": provider,
+                    "model": model,
+                    "system": system,
+                    "workspace_id": workspace_id or None,
+                },
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Create failed", str(exc))
+            return
+        if first_message:
+            try:
+                await self.client.call(
+                    "agents.send",
+                    {"agent_id": agent["id"], "message": first_message},
+                )
+            except Exception as exc:
+                # The agent exists; just the first send failed.  Show
+                # the error but keep the agent in the list.
+                QtWidgets.QMessageBox.warning(self, "First message failed", str(exc))
+        await self.reload_agents()
+
+    async def reload_agents(self) -> None:
+        try:
+            agents = await self.client.call("agents.list", {})
+        except Exception:
+            agents = []
+        self.agents_list.clear()
+        for a in agents:
+            label_lines = [a.get("name", "?")]
+            sub = f"{a.get('model', '?')} · {len(a.get('transcript') or [])} turns"
+            if a.get("parent_name"):
+                sub += f"  ↩ {a.get('parent_preset') or 'follow-up'} of {a['parent_name']}"
+            label_lines.append(sub)
+            item = QtWidgets.QListWidgetItem("\n".join(label_lines))
+            item.setData(
+                QtCore.Qt.ItemDataRole.UserRole,
+                {"kind": "conversation", "agent": a},
+            )
+            self.agents_list.addItem(item)
 
     @staticmethod
     def _section_header(text: str) -> QtWidgets.QLabel:

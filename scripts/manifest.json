@@ -6,12 +6,32 @@
   "platform": "windows",
   "commands": [
     {
+      "id": "start",
+      "step": 0,
+      "label": "Verify CLIs + start AgentOrchestra",
+      "file": "start.cmd",
+      "summary": "Pre-flight check: probe `claude -p \"…\"` and `gemini -p \"…\"` headlessly to confirm both subscription CLIs are signed in and replying.  If at least one is OK, launch the GUI.  If both fail, abort and tell you how to fix it.",
+      "when_to_run": "First-of-day launch when you want belt-and-braces confidence the chat tab won't fail with a Not-logged-in 500 the moment you open it.  Otherwise the plain Restart button is faster.",
+      "writes": [],
+      "needs_internet": true
+    },
+    {
+      "id": "restart",
+      "step": 0,
+      "label": "Restart AgentOrchestra",
+      "file": "restart.cmd",
+      "summary": "Stop everything, free port 8765, then launch a fresh GUI in one click.  Equivalent to clicking Stop then Launch but does both atomically.",
+      "when_to_run": "Pin this at the top — it's the everyday button.  Use after update.cmd, after merging a PR that changed service code, or any time the running service is acting up.",
+      "writes": [],
+      "needs_internet": false
+    },
+    {
       "id": "ops",
       "step": 0,
       "label": "Operator Panel",
       "file": "ops.cmd",
-      "summary": "Tiny GUI window with one button per command in this folder + a live output pane.  Reads this manifest, so any command added here shows up automatically.",
-      "when_to_run": "Make this your everyday desktop shortcut.  All the steps below are reachable from inside this panel.",
+      "summary": "This window itself.  Listed for completeness — reads this manifest, so any command added here shows up automatically.",
+      "when_to_run": "Make this your everyday desktop shortcut.  Every numbered step below is reachable from inside it.",
       "writes": [],
       "needs_internet": false
     },
@@ -46,6 +66,16 @@
       "needs_internet": true
     },
     {
+      "id": "limits",
+      "step": 0,
+      "label": "Subscription / usage limits",
+      "file": "limits.cmd",
+      "summary": "Print whatever usage info the local CLIs expose: `claude --version`, `claude status`, `gemini --version`, `gemini status`, plus links to the Pro/Max + Gemini dashboards.  Per-message remaining-quota numbers aren't accessible headlessly — the interactive `/status` flow or the dashboards are the source of truth.",
+      "when_to_run": "When you're worried about hitting a cap, before kicking off a big batch run, or just to see what tier you're on.",
+      "writes": [],
+      "needs_internet": true
+    },
+    {
       "id": "launch",
       "step": 4,
       "label": "Step 4 — Start AgentOrchestra",
@@ -60,8 +90,8 @@
       "step": 5,
       "label": "Step 5 — Stop AgentOrchestra",
       "file": "stop.cmd",
-      "summary": "Close the GUI window and any background service it supervised.",
-      "when_to_run": "When you close the laptop or want to free port 8765.",
+      "summary": "Close the GUI window and any background service (including the headless one the GUI auto-spawned).",
+      "when_to_run": "When you close the laptop or want to free port 8765.  For a stop-then-relaunch use the Restart button at the top instead.",
       "writes": [],
       "needs_internet": false
     },
@@ -71,7 +101,7 @@
       "label": "Step 6 — Pull latest + refresh deps",
       "file": "update.cmd",
       "summary": "git pull --ff-only origin main, then pip install -e .[gui] --upgrade.",
-      "when_to_run": "After GitHub Desktop's Pull origin, when you've changed branch, or before reporting a bug.",
+      "when_to_run": "After GitHub Desktop's Pull origin, when you've changed branch, or before reporting a bug.  Follow with the Restart button so the new code takes effect.",
       "writes": [".venv/", "<repo>/"],
       "needs_internet": true
     },

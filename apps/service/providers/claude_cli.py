@@ -22,10 +22,11 @@ import json
 import logging
 import shutil
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from apps.service.providers.protocol import ChatSession, StreamEvent
-from apps.service.types import PersonalityCard, ProviderError, utc_now
+from apps.service.types import Attachment, PersonalityCard, ProviderError, utc_now
 
 log = logging.getLogger(__name__)
 
@@ -68,9 +69,15 @@ class ClaudeCLIChatSession(ChatSession):
 
     name = "claude-cli"
 
-    def __init__(self, card: PersonalityCard, system: str | None = None) -> None:
+    def __init__(
+        self,
+        card: PersonalityCard,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> None:
         self.card = card
         self.system = system or ""
+        self.cwd = cwd  # if set, CLI is spawned with this as its working dir
         self._history: list[dict[str, str]] = []
         self._binary = _claude_binary()
         if not self._binary:
@@ -79,8 +86,43 @@ class ClaudeCLIChatSession(ChatSession):
                 "(https://docs.claude.com/en/docs/claude-code)"
             )
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
-        self._history.append({"role": "user", "content": message})
+    async def send(
+        self,
+        message: str,
+        *,
+        attachments: list[Attachment] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        # Image attachments: prepend `@<absolute_path>` references the
+        # CLI understands so the model "sees" the file.  Non-image
+        # attachments are dropped here — the orchestrator inlines
+        # spreadsheet text into the prompt before calling us.
+        # Path safety: the prompt is one big string, so paths with
+        # whitespace / newlines / extra `@` would break the CLI's
+        # tokenizer or smuggle in arbitrary file references.  Refuse
+        # them here even though attachments_upload also rejects them
+        # — defence in depth for any code path that constructs a
+        # session directly.
+        att_prefix = ""
+        if attachments:
+            paths: list[str] = []
+            for a in attachments:
+                p = a.stored_path
+                if any(c in p for c in (" ", "\t", "\n", "\r")):
+                    yield StreamEvent(
+                        kind="error",
+                        text=f"attachment path contains whitespace, refused: {p}",
+                    )
+                    return
+                if "@" in Path(p).name:
+                    yield StreamEvent(
+                        kind="error",
+                        text=f"attachment filename contains '@', refused: {p}",
+                    )
+                    return
+                paths.append(p)
+            att_prefix = " ".join(f"@{p}" for p in paths)
+        full_message = f"{att_prefix} {message}".strip() if att_prefix else message
+        self._history.append({"role": "user", "content": full_message})
         prompt = self._render_prompt()
         args = [
             self._binary,
@@ -98,6 +140,7 @@ class ClaudeCLIChatSession(ChatSession):
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=self.cwd,  # repo-aware agents run inside their workspace
             )
         except FileNotFoundError:
             yield StreamEvent(kind="error", text="`claude` binary not found")
@@ -185,10 +228,16 @@ class ClaudeCLIChatSession(ChatSession):
 class ClaudeCLIProvider:
     name: str = "claude-cli"
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+    async def open_chat(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
         if card.provider != "claude-cli":
             raise ProviderError(f"card.provider={card.provider!r} is not claude-cli")
-        return ClaudeCLIChatSession(card, system=system)
+        return ClaudeCLIChatSession(card, system=system, cwd=cwd)
 
     async def run_with_tools(
         self,

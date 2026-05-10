@@ -155,6 +155,75 @@ class WorktreeManager:
         )
         return ws
 
+    async def clone_workspace(
+        self,
+        url: str,
+        *,
+        dest_dir: Path,
+        name: str | None = None,
+        branch: str | None = None,
+        depth: int | None = None,
+    ) -> Workspace:
+        """Clone a remote git URL into ``dest_dir`` and register it as a
+        Workspace.
+
+        ``url`` must not start with a hyphen (otherwise git would parse
+        it as an option and we'd be a confused-deputy for whatever flag
+        a malicious URL injected).  ``dest_dir`` must not already exist
+        — we refuse to clone over arbitrary filesystem state.
+
+        Optional ``branch`` checks out a branch on clone (--branch).
+        Optional ``depth`` requests a shallow clone for big repos.
+        """
+        # Operator-supplied input goes straight into argv; reject the
+        # obvious option-injection vector and zero-byte / control chars.
+        if not url or url.startswith("-"):
+            raise WorktreeError(f"invalid git URL: {url!r}")
+        if any(c in url for c in ("\n", "\r", "\x00")):
+            raise WorktreeError("git URL contains control characters")
+        if branch is not None and (
+            not branch
+            or branch.startswith("-")
+            or any(c in branch for c in ("\n", "\r", "\x00", " "))
+        ):
+            raise WorktreeError(f"invalid branch name: {branch!r}")
+        if dest_dir.exists():
+            raise WorktreeError(f"clone destination already exists: {dest_dir}")
+        dest_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        args = ["git", "clone", "--quiet"]
+        if depth is not None and depth > 0:
+            args.extend(["--depth", str(int(depth))])
+        if branch is not None:
+            args.extend(["--branch", branch])
+        # `--` so a URL beginning with `-` (already rejected above) or
+        # a path that looks like an option isn't reinterpreted by git.
+        args.extend(["--", url, str(dest_dir)])
+
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
+        except TimeoutError:
+            proc.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.communicate(), timeout=2.0)
+            raise WorktreeError("git clone timed out after 5 minutes") from None
+        if proc.returncode != 0:
+            err = stderr.decode("utf-8", errors="replace").strip()
+            # Best-effort cleanup so a half-finished clone doesn't trap
+            # the operator from retrying with a different URL.
+            with contextlib.suppress(Exception):
+                import shutil as _sh
+
+                _sh.rmtree(dest_dir, ignore_errors=True)
+            raise WorktreeError(f"git clone failed: {err[:500]}")
+
+        return await self.register_workspace(dest_dir, name=name)
+
     # ----- Locks ------------------------------------------------------
 
     def _get_workspace_lock(self, ws: Workspace) -> _WorkspaceLock:

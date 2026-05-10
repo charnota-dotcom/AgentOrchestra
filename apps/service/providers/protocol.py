@@ -19,7 +19,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from apps.service.types import PersonalityCard
+from apps.service.types import Attachment, PersonalityCard
 
 if TYPE_CHECKING:
     from apps.service.dispatch.tools import ToolExecutor
@@ -55,8 +55,19 @@ class StreamEvent:
 class ChatSession(Protocol):
     """A multi-turn conversation with one provider/model."""
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
-        """Send a user message and stream back events."""
+    async def send(
+        self,
+        message: str,
+        *,
+        attachments: list[Attachment] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Send a user message and stream back events.
+
+        ``attachments`` are typed file references (typically images);
+        the adapter is responsible for handing the underlying file to
+        its CLI / API in whatever shape the vendor expects.  Providers
+        that don't support attachments may ignore the kwarg.
+        """
         ...
 
     async def close(self) -> None: ...
@@ -66,8 +77,18 @@ class LLMProvider(Protocol):
     name: Literal["anthropic", "google", "openai", "ollama"]
 
     async def open_chat(
-        self, card: PersonalityCard, *, system: str | None = None
-    ) -> ChatSession: ...
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
+        """Open a chat session.
+
+        ``cwd`` is the working directory to spawn any subprocess
+        provider in (CLI providers).  API providers ignore it.
+        """
+        ...
 
     async def run_with_tools(
         self,

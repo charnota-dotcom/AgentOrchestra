@@ -72,6 +72,20 @@ def main() -> int:
     window = MainWindow(client=client)
     window.show()
 
+    # Close the underlying httpx.AsyncClient cleanly on quit so we don't
+    # leak the connection pool / TLS sockets after the GUI exits.
+    # aboutToQuit fires before the loop stops; we drive the loop
+    # ourselves to completion of the close coroutine instead of
+    # ensure_future (which would never get awaited because the loop is
+    # about to halt).
+    def _shutdown_client() -> None:
+        try:
+            loop.run_until_complete(client.aclose())
+        except Exception:
+            log.exception("RpcClient aclose failed")
+
+    app.aboutToQuit.connect(_shutdown_client)
+
     with loop:
         return loop.run_forever()
 

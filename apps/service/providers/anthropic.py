@@ -72,7 +72,11 @@ class AnthropicChatSession(ChatSession):
             else self._sdk
         )
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
+    async def send(self, message: str, *, attachments: Any = None) -> AsyncIterator[StreamEvent]:
+        # Attachments aren't wired through the API path yet (V1 covers
+        # the CLI providers).  Accept the kwarg so the protocol stays
+        # uniform, but quietly ignore it.
+        del attachments
         self._history.append({"role": "user", "content": message})
         kwargs = {
             "model": self.card.model,
@@ -131,7 +135,15 @@ class AnthropicProvider:
     def __init__(self) -> None:
         self._sdk = _import_sdk()
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+    async def open_chat(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
+        # cwd is a CLI-provider concept; the API session ignores it.
+        del cwd
         if card.provider != "anthropic":
             raise ProviderError(f"card.provider={card.provider!r} is not anthropic")
         return AnthropicChatSession(card, system=system)

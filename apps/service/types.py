@@ -516,6 +516,31 @@ class ProviderError(Exception):
     pass
 
 
+class AttachmentKind(StrEnum):
+    IMAGE = "image"
+    SPREADSHEET = "spreadsheet"
+
+
+class Attachment(BaseModel):
+    """A file the operator dropped into a chat or agent dialog.
+
+    Stored on disk; the row indexes the location plus a cached
+    rendered-text view (for spreadsheets — markdown table).  Images
+    pass straight through to the CLI as a path reference.
+    """
+
+    id: str = Field(default_factory=long_id)
+    agent_id: str
+    turn_index: int = -1  # -1 = not yet attached to a turn (just uploaded)
+    kind: AttachmentKind
+    original_name: str
+    stored_path: str
+    mime_type: str
+    bytes: int
+    rendered_text: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -547,8 +572,24 @@ class Agent(BaseModel):
     provider: str
     model: str
     system: str = ""
+    # When bound to a Workspace, the CLI subprocess is spawned with
+    # cwd = workspace.repo_path so the model's built-in Read / Bash /
+    # Edit / Grep tools can browse the project.  None = chat-only
+    # agent with no repo access.
+    workspace_id: str | None = None
     parent_id: str | None = None
     parent_name: str | None = None  # denormalised for cheap display
+    # Which preset created this child (summarise / annotate / deep_dive
+    # / critique / verify / custom).  Becomes the directional-edge
+    # label on the canvas so the inter-agent relationship is visible.
+    # None for top-level agents.
+    parent_preset: str | None = None
+    # Agent ids whose full transcripts are inlined as a context
+    # preamble on every send.  Lets a fresh agent (potentially a
+    # different provider / model) read prior conversations without
+    # having to be a literal child via spawn_followup.  Sticky on
+    # the agent so the context is consistent across turns.
+    reference_agent_ids: list[str] = Field(default_factory=list)
     transcript: list[dict[str, str]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -575,6 +616,10 @@ class Flow(BaseModel):
     description: str = ""
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
+    # Draft flows are scratchpad canvases — operator can edit, drop
+    # nodes, simulate visually, but ``flows.dispatch`` refuses to
+    # run them.  Promoting to Live = setting this to False.
+    is_draft: bool = False
     version: int = 1
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

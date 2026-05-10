@@ -150,12 +150,15 @@ class DockerSandbox:
         return out
 
     async def write_file(self, rel: str, content: bytes) -> None:
-        # Use sh -c "mkdir -p $(dirname X) && cat > X" with stdin = content.
+        # Pass the destination as a positional arg ($1) so a malicious
+        # `rel` cannot break out of the quoted string and inject commands.
         target = f"{WORKDIR}/{rel}"
         code, _, err = await self._exec(
             "sh",
             "-c",
-            f'mkdir -p "$(dirname \\"{target}\\")" && cat > "{target}"',
+            'mkdir -p "$(dirname "$1")" && cat > "$1"',
+            "sh",
+            target,
             stdin_data=content,
         )
         if code != 0:
@@ -165,7 +168,9 @@ class DockerSandbox:
         code, out, _err = await self._exec(
             "sh",
             "-c",
-            f'find "{WORKDIR}" -type f -printf "%P\\n" 2>/dev/null',
+            'find "$1" -type f -printf "%P\\n" 2>/dev/null',
+            "sh",
+            WORKDIR,
         )
         if code != 0:
             return []

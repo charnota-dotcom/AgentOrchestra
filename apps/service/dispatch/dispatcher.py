@@ -78,6 +78,10 @@ class RunDispatcher:
         # Plan-approval gates: one event per Run that's waiting for the
         # human to nod off the plan before executing.
         self._plan_gates: dict[str, asyncio.Event] = {}
+        # Set of run IDs we've already emitted a soft-cap warning for.
+        # Cleared when a run is cleaned up so the dispatcher singleton
+        # doesn't accumulate per-run state forever.
+        self._soft_cap_warned: set[str] = set()
 
     # ------------------------------------------------------------------
     # Entry points
@@ -137,6 +141,8 @@ class RunDispatcher:
 
         def _cleanup(_t: asyncio.Task) -> None:
             self._tasks.pop(run.id, None)
+            self._soft_cap_warned.discard(run.id)
+            self._plan_gates.pop(run.id, None)
 
         task.add_done_callback(_cleanup)
         return run
@@ -297,7 +303,11 @@ class RunDispatcher:
             try:
                 await self.manager.reject(run.branch_id, reason)
             except Exception:
-                log.exception("worktree reject failed")
+                log.exception(
+                    "worktree reject failed for run %s branch %s",
+                    run.id,
+                    run.branch_id,
+                )
         await self._transition_run(run, RunState.REJECTED)
         await self.store.append_event(
             Event(
@@ -529,12 +539,8 @@ class RunDispatcher:
                                 f"hard cost cap exceeded: "
                                 f"${running:.4f} > ${card.cost.hard_cap_usd:.2f}"
                             )
-                        if running > card.cost.soft_cap_usd and not getattr(
-                            self,
-                            "_warned_" + run.id,
-                            False,
-                        ):
-                            setattr(self, "_warned_" + run.id, True)
+                        if running > card.cost.soft_cap_usd and run.id not in self._soft_cap_warned:
+                            self._soft_cap_warned.add(run.id)
                             await self.store.append_event(
                                 Event(
                                     source=EventSource.SYSTEM,
@@ -711,7 +717,11 @@ class RunDispatcher:
                 try:
                     await self.manager.abandon(branch.id, "cancelled")
                 except Exception:
-                    pass
+                    log.exception(
+                        "worktree abandon failed during cancel for run %s branch %s",
+                        run.id,
+                        branch.id,
+                    )
             raise
         except Exception as exc:
             log.exception("agentic run %s failed", run.id)
@@ -720,7 +730,11 @@ class RunDispatcher:
                 try:
                     await self.manager.abandon(branch.id, f"failed: {exc}")
                 except Exception:
-                    pass
+                    log.exception(
+                        "worktree abandon failed during failure for run %s branch %s",
+                        run.id,
+                        branch.id,
+                    )
 
     async def _open_mcp_tools(self, card: PersonalityCard):
         """Resolve any MCP server names in card.tool_allowlist against

@@ -22,12 +22,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from apps.service.providers.protocol import ChatSession, StreamEvent
-from apps.service.types import PersonalityCard, ProviderError, utc_now
+from apps.service.types import Attachment, PersonalityCard, ProviderError, utc_now
 
 log = logging.getLogger(__name__)
 
@@ -73,9 +75,15 @@ class GeminiCLIChatSession(ChatSession):
 
     name = "gemini-cli"
 
-    def __init__(self, card: PersonalityCard, system: str | None = None) -> None:
+    def __init__(
+        self,
+        card: PersonalityCard,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> None:
         self.card = card
         self.system = system or ""
+        self.cwd = cwd  # repo-aware agents spawn the CLI inside their workspace
         self._history: list[dict[str, str]] = []
         self._binary = _gemini_binary()
         if not self._binary:
@@ -84,19 +92,62 @@ class GeminiCLIChatSession(ChatSession):
                 "(https://github.com/google-gemini/gemini-cli)"
             )
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
-        self._history.append({"role": "user", "content": message})
+    async def send(
+        self,
+        message: str,
+        *,
+        attachments: list[Attachment] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        # Image attachments: reference each path inline with the @-syntax
+        # the CLI accepts, plus pass --include-files so the bytes are
+        # available to the model.  Spreadsheets are inlined upstream
+        # (rendered_text in the prompt body), not via this path.
+        # Path safety mirror of claude_cli: refuse paths whose tokens
+        # would break the CLI's prompt parser or smuggle in extra files.
+        att_prefix = ""
+        include_args: list[str] = []
+        if attachments:
+            paths: list[str] = []
+            for a in attachments:
+                p = a.stored_path
+                if any(c in p for c in (" ", "\t", "\n", "\r")):
+                    yield StreamEvent(
+                        kind="error",
+                        text=f"attachment path contains whitespace, refused: {p}",
+                    )
+                    return
+                if "@" in Path(p).name:
+                    yield StreamEvent(
+                        kind="error",
+                        text=f"attachment filename contains '@', refused: {p}",
+                    )
+                    return
+                paths.append(p)
+            att_prefix = " ".join(f"@{p}" for p in paths)
+            for p in paths:
+                include_args.extend(["--include-files", p])
+        full_message = f"{att_prefix} {message}".strip() if att_prefix else message
+        self._history.append({"role": "user", "content": full_message})
         prompt = self._render_prompt()
-        args: list[str] = [self._binary, "-p", prompt]
+        args: list[str] = [self._binary, "-p", prompt, *include_args]
         model = _resolve_model(self.card.model)
         if model:
             args.extend(["--model", model])
+
+        # The Gemini CLI refuses to run in an "untrusted" working
+        # directory in headless mode; instead of asking the operator
+        # to trust each repo manually we set the documented escape
+        # hatch in the subprocess env.  See
+        # https://geminicli.com/docs/cli/trusted-folders/#headless-and-automated-environments
+        env = {**os.environ, "GEMINI_CLI_TRUST_WORKSPACE": "true"}
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
+                cwd=self.cwd,
             )
         except FileNotFoundError:
             yield StreamEvent(kind="error", text="`gemini` binary not found")
@@ -192,10 +243,16 @@ def _is_noise_line(line: str) -> bool:
 class GeminiCLIProvider:
     name: str = "gemini-cli"
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+    async def open_chat(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
         if card.provider != "gemini-cli":
             raise ProviderError(f"card.provider={card.provider!r} is not gemini-cli")
-        return GeminiCLIChatSession(card, system=system)
+        return GeminiCLIChatSession(card, system=system, cwd=cwd)
 
     async def run_with_tools(
         self,

@@ -6,15 +6,20 @@ or type any of it.
 
 | # | Script | What it does | When to run |
 |---|--------|--------------|-------------|
-|   | **`ops.cmd`** | Opens the Operator Panel — a tiny GUI with one button per command in this folder, plus a live output pane. Reads `manifest.json`, so any command added there shows up automatically. | Every day. The single "I want to do an operation" entry point — every step below is reachable from inside it. |
+| ★ | **`start.cmd`** | Pre-flight: probes `claude -p "…"` and `gemini -p "…"` headlessly, prints a green / red verdict per provider, then launches the GUI if at least one is OK. Aborts with a clear fix-it message if both fail. | First-of-day launch when you want belt-and-braces confidence the chat tab won't 500 with "Not logged in". |
+| ★ | **`restart.cmd`** | Stop + launch in one click. Frees port 8765, waits a tick, opens a fresh GUI. | The everyday "I changed something and want it picked up" button. |
+| ★ | **`ops.cmd`** | Opens the Operator Panel — a tiny GUI with one button per command in this folder, plus a live output pane. Reads `manifest.json`, so any command added there shows up automatically. | Make this your desktop shortcut. Every numbered step below is reachable from inside it. |
 | 1 | **`setup.cmd`** | First-time install: creates `.venv`, installs the project + `[gui]` extras, optionally installs `pyside6_annotator` if it lives at `..\Annotator\pyside6_annotator_pkg`. | Once, after cloning. Re-run any time `.venv` goes missing. |
 | 2 | **`test-claude.cmd`** | Smoke-test the local `claude` CLI: PATH check + `claude -p "..."` headless call. Surfaces "Not logged in" if your Max-plan auth lapsed. | Right after Step 1, or when Claude cards stop replying. |
 | 3 | **`test-gemini.cmd`** | Smoke-test the local `gemini` CLI: PATH check + `gemini -p "..."` headless call. | Right after Step 2. Skip if you only use Claude. |
+| ★ | **`limits.cmd`** | Print whatever usage / subscription info the local CLIs expose plus links to the Pro/Max and Gemini dashboards. | Before a big batch run, or whenever you're worried about hitting a cap. |
 | 4 | **`launch.cmd`** | Opens the main AgentOrchestra GUI. The service is auto-spawned in the background; no separate window. | Every session — also reachable from the Ops Panel. |
-| 5 | **`stop.cmd`** | Closes the GUI window and any background service it supervised. Matches by window title — leaves unrelated Python processes alone. | When you close the laptop or want to free port 8765. |
-| 6 | **`update.cmd`** | `git pull --ff-only origin main` + `pip install -e .[gui] --upgrade`. | After GitHub Desktop's "Pull origin", or before reporting a bug. |
+| 5 | **`stop.cmd`** | Closes the GUI window and any background service (including the headless supervisor child). Three-pass kill: window-title match, then port-listening match. | When you close the laptop. For a stop-then-relaunch use the Restart button (★) instead. |
+| 6 | **`update.cmd`** | `git pull --ff-only origin main` + `pip install -e .[gui] --upgrade`. | After GitHub Desktop's "Pull origin". Follow with `restart.cmd`. |
 | 7 | **`doctor.cmd`** | One-page health report: Python version, `.venv` status, `claude` / `gemini` on PATH, port 8765, local data dir, annotator import, AgentOrchestra version. | When something's wrong. Copy/paste the output into a bug report. |
 | 8 | **`reset.cmd`** | Wipes local state (SQLite store, first-run sentinel, annotation logs). Does **not** touch your repo, git history, or CLI auth. Confirms before deleting. | Last resort, when the local DB is wedged and you want a clean slate. |
+
+The two **★** rows at the top are pinned utilities — always available, not part of the linear setup flow. In the Operator Panel they get a green star badge instead of a numbered blue badge.
 
 The Operator Panel (`ops.cmd`) is the simplest entry point: every
 other script becomes a button there with its own summary, "when to
