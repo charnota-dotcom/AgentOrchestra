@@ -6,6 +6,7 @@ or type any of it.
 
 | # | Script | What it does | When to run |
 |---|--------|--------------|-------------|
+| ★ | **`start.cmd`** | Pre-flight: probes `claude -p "…"` and `gemini -p "…"` headlessly, prints a green / red verdict per provider, then launches the GUI if at least one is OK. Aborts with a clear fix-it message if both fail. | First-of-day launch when you want belt-and-braces confidence the chat tab won't 500 with "Not logged in". |
 | ★ | **`restart.cmd`** | Stop + launch in one click. Frees port 8765, waits a tick, opens a fresh GUI. | The everyday "I changed something and want it picked up" button. |
 | ★ | **`ops.cmd`** | Opens the Operator Panel — a tiny GUI with one button per command in this folder, plus a live output pane. Reads `manifest.json`, so any command added there shows up automatically. | Make this your desktop shortcut. Every numbered step below is reachable from inside it. |
 | 1 | **`setup.cmd`** | First-time install: creates `.venv`, installs the project + `[gui]` extras, optionally installs `pyside6_annotator` if it lives at `..\Annotator\pyside6_annotator_pkg`. | Once, after cloning. Re-run any time `.venv` goes missing. |

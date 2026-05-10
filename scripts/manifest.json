@@ -6,6 +6,16 @@
   "platform": "windows",
   "commands": [
     {
+      "id": "start",
+      "step": 0,
+      "label": "Verify CLIs + start AgentOrchestra",
+      "file": "start.cmd",
+      "summary": "Pre-flight check: probe `claude -p \"…\"` and `gemini -p \"…\"` headlessly to confirm both subscription CLIs are signed in and replying.  If at least one is OK, launch the GUI.  If both fail, abort and tell you how to fix it.",
+      "when_to_run": "First-of-day launch when you want belt-and-braces confidence the chat tab won't fail with a Not-logged-in 500 the moment you open it.  Otherwise the plain Restart button is faster.",
+      "writes": [],
+      "needs_internet": true
+    },
+    {
       "id": "restart",
       "step": 0,
       "label": "Restart AgentOrchestra",
