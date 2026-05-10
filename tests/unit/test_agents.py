@@ -6,13 +6,14 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from apps.service.agents import FOLLOWUP_PRESETS, followup_instruction
 from apps.service.store.events import EventStore
 from apps.service.types import Agent
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def store(tmp_path: Path) -> AsyncIterator[EventStore]:
     s = EventStore(tmp_path / "a.sqlite")
     await s.open()

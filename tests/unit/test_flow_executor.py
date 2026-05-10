@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from apps.service.flows.executor import FlowExecutor, FlowValidationError
 from apps.service.providers import registry as provider_registry
@@ -71,7 +72,7 @@ def _card(card_id: str, name: str = "Test") -> PersonalityCard:
     )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def store(tmp_path: Path) -> AsyncIterator[EventStore]:
     s = EventStore(tmp_path / "test.sqlite")
     await s.open()
