@@ -554,6 +554,12 @@ class Agent(BaseModel):
     # label on the canvas so the inter-agent relationship is visible.
     # None for top-level agents.
     parent_preset: str | None = None
+    # Agent ids whose full transcripts are inlined as a context
+    # preamble on every send.  Lets a fresh agent (potentially a
+    # different provider / model) read prior conversations without
+    # having to be a literal child via spawn_followup.  Sticky on
+    # the agent so the context is consistent across turns.
+    reference_agent_ids: list[str] = Field(default_factory=list)
     transcript: list[dict[str, str]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

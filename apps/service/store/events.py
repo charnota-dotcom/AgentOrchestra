@@ -97,7 +97,13 @@ class EventStore:
         # CREATE TABLE IF NOT EXISTS won't add new columns to a pre-
         # existing table, so we ALTER explicitly with a duplicate-
         # column guard.  Each entry: (table, column, definition).
-        for table, column, defn in (("agents", "parent_preset", "TEXT"),):
+        for table, column, defn in (
+            ("agents", "parent_preset", "TEXT"),
+            # NOT NULL with a default so SQLite can backfill existing
+            # rows in a single ALTER.  The Python-side json.loads is
+            # tolerant of the empty-list literal we set here.
+            ("agents", "reference_agent_ids", "TEXT NOT NULL DEFAULT '[]'"),
+        ):
             if not await self._has_column(table, column):
                 await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {defn}")
         await self.db.commit()
@@ -327,8 +333,9 @@ class EventStore:
             INSERT INTO agents (
                 id, name, provider, model, system,
                 parent_id, parent_name, parent_preset,
+                reference_agent_ids,
                 transcript, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 agent.id,
@@ -339,6 +346,7 @@ class EventStore:
                 agent.parent_id,
                 agent.parent_name,
                 agent.parent_preset,
+                json.dumps(agent.reference_agent_ids),
                 json.dumps(agent.transcript),
                 agent.created_at.isoformat(),
                 agent.updated_at.isoformat(),
@@ -351,12 +359,18 @@ class EventStore:
         agent.updated_at = utc_now()
         await self.db.execute(
             """
-            UPDATE agents SET name = ?, system = ?, transcript = ?, updated_at = ?
+            UPDATE agents
+               SET name = ?,
+                   system = ?,
+                   reference_agent_ids = ?,
+                   transcript = ?,
+                   updated_at = ?
              WHERE id = ?
             """,
             (
                 agent.name,
                 agent.system,
+                json.dumps(agent.reference_agent_ids),
                 json.dumps(agent.transcript),
                 agent.updated_at.isoformat(),
                 agent.id,
@@ -365,24 +379,28 @@ class EventStore:
         await self.db.commit()
         return agent
 
+    @staticmethod
+    def _hydrate_agent_row(row: aiosqlite.Row) -> Agent:
+        d = dict(row)
+        d["transcript"] = json.loads(d.get("transcript") or "[]")
+        # reference_agent_ids was added later via ALTER TABLE; older
+        # rows might not have it as a recognised column even though
+        # the migration ran (e.g. mid-upgrade). Default to [].
+        raw_refs = d.get("reference_agent_ids")
+        d["reference_agent_ids"] = json.loads(raw_refs) if raw_refs else []
+        return Agent.model_validate(d)
+
     async def get_agent(self, agent_id: str) -> Agent | None:
         cur = await self.db.execute("SELECT * FROM agents WHERE id = ?", (agent_id,))
         row = await cur.fetchone()
         if not row:
             return None
-        d = dict(row)
-        d["transcript"] = json.loads(d["transcript"])
-        return Agent.model_validate(d)
+        return self._hydrate_agent_row(row)
 
     async def list_agents(self) -> list[Agent]:
         cur = await self.db.execute("SELECT * FROM agents ORDER BY updated_at DESC")
         rows = await cur.fetchall()
-        out: list[Agent] = []
-        for r in rows:
-            d = dict(r)
-            d["transcript"] = json.loads(d["transcript"])
-            out.append(Agent.model_validate(d))
-        return out
+        return [self._hydrate_agent_row(r) for r in rows]
 
     async def delete_agent(self, agent_id: str) -> bool:
         # Detach children — keep their history but null out the

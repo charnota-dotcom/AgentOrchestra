@@ -55,6 +55,31 @@ class AgentChatDialog(QtWidgets.QDialog):
         origin.setStyleSheet("color:#5b6068;font-size:11px;")
         v.addWidget(origin)
 
+        # References — read-only summary + "Edit" button.  Each
+        # referenced agent's full transcript is inlined as context
+        # on every send so this Claude / Gemini knows what those
+        # other conversations contained.
+        ref_row = QtWidgets.QHBoxLayout()
+        self.refs_label = QtWidgets.QLabel(self._format_refs_label(agent))
+        self.refs_label.setStyleSheet("color:#5b6068;font-size:11px;")
+        self.refs_label.setWordWrap(True)
+        ref_row.addWidget(self.refs_label, stretch=1)
+        edit_refs_btn = QtWidgets.QPushButton("Edit references")
+        edit_refs_btn.setStyleSheet(
+            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        edit_refs_btn.setToolTip(
+            "Pick other conversations whose full transcripts should be "
+            "inlined into this agent's prompt as read-only context.  "
+            "Cross-provider (e.g. Gemini reading a Claude conversation) "
+            "is supported — references are passed as plain text."
+        )
+        edit_refs_btn.clicked.connect(self._edit_references)  # type: ignore[arg-type]
+        ref_row.addWidget(edit_refs_btn)
+        v.addLayout(ref_row)
+
         self.transcript = QtWidgets.QPlainTextEdit()
         self.transcript.setReadOnly(True)
         self.transcript.setStyleSheet(
@@ -95,6 +120,90 @@ class AgentChatDialog(QtWidgets.QDialog):
         for turn in self.agent.get("transcript", []):
             who = "You" if turn.get("role") == "user" else self.agent.get("name", "Agent")
             self.transcript.appendPlainText(f"{who}:\n{turn.get('content', '')}\n")
+
+    @staticmethod
+    def _format_refs_label(agent: dict[str, Any]) -> str:
+        ref_ids = agent.get("reference_agent_ids") or []
+        if not ref_ids:
+            return "References: none"
+        return f"References: {len(ref_ids)} other conversation(s) inlined as context"
+
+    def _edit_references(self) -> None:
+        asyncio.ensure_future(self._open_refs_dialog())
+
+    async def _open_refs_dialog(self) -> None:
+        try:
+            agents = await self.client.call("agents.list", {})
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't load agents", str(exc))
+            return
+        # Drop ourselves so an agent can't reference itself.
+        candidates = [a for a in agents if a.get("id") != self.agent.get("id")]
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f"References for {self.agent.get('name', '?')}")
+        dlg.resize(520, 480)
+        v = QtWidgets.QVBoxLayout(dlg)
+
+        v.addWidget(
+            QtWidgets.QLabel(
+                "Tick the conversations whose full transcripts should be "
+                "inlined as read-only context on every message you send.  "
+                "Works cross-provider (e.g. Gemini reading a Claude chat) — "
+                "we just pass the text."
+            )
+        )
+        v.itemAt(0).widget().setWordWrap(True)  # type: ignore[union-attr]
+        v.itemAt(0).widget().setStyleSheet("color:#5b6068;font-size:11px;")  # type: ignore[union-attr]
+
+        listw = QtWidgets.QListWidget()
+        listw.setStyleSheet(
+            "QListWidget{background:#fff;border:1px solid #e6e7eb;border-radius:4px;}"
+            "QListWidget::item{padding:6px 8px;border-bottom:1px solid #eef0f3;}"
+        )
+        current_refs = set(self.agent.get("reference_agent_ids") or [])
+        for a in candidates:
+            tlen = len(a.get("transcript") or [])
+            label = (
+                f"{a.get('name', '?')}  ·  {a.get('model', '?')}  "
+                f"({a.get('provider', '?')})  ·  {tlen} turns"
+            )
+            item = QtWidgets.QListWidgetItem(label)
+            item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                QtCore.Qt.CheckState.Checked
+                if a.get("id") in current_refs
+                else QtCore.Qt.CheckState.Unchecked
+            )
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, a.get("id"))
+            listw.addItem(item)
+        v.addWidget(listw, stretch=1)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
+        buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
+        v.addWidget(buttons)
+
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        chosen: list[str] = []
+        for i in range(listw.count()):
+            it = listw.item(i)
+            if it is not None and it.checkState() == QtCore.Qt.CheckState.Checked:
+                chosen.append(str(it.data(QtCore.Qt.ItemDataRole.UserRole)))
+        try:
+            updated = await self.client.call(
+                "agents.set_references",
+                {"agent_id": self.agent["id"], "reference_agent_ids": chosen},
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't save references", str(exc))
+            return
+        self.agent = updated
+        self.refs_label.setText(self._format_refs_label(self.agent))
 
     def _send(self) -> None:
         text = self.input.toPlainText().strip()

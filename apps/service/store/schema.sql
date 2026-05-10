@@ -249,6 +249,12 @@ CREATE TABLE IF NOT EXISTS agents (
     -- on the canvas.  Existing installs get this column via the
     -- code-side migration in EventStore._migrate.
     parent_preset TEXT,
+    -- JSON list of agent_ids whose transcripts are inlined as a
+    -- context preamble on every send.  Lets a fresh agent (different
+    -- provider / model) reference prior conversations without being
+    -- a literal child.  Existing installs get this via the code-side
+    -- migration too.
+    reference_agent_ids TEXT NOT NULL DEFAULT '[]',
     transcript    TEXT NOT NULL DEFAULT '[]',  -- JSON: [{role, content}]
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL

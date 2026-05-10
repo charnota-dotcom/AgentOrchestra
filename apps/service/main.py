@@ -80,6 +80,38 @@ def _render_transcript(agent: Agent) -> str:
     return "\n\n".join(parts)
 
 
+def _render_references(refs: list[Agent]) -> str:
+    """Format referenced agents' transcripts as a context preamble.
+
+    Each reference is wrapped in clearly-delimited markers so the
+    target model can tell where its context ends and its own
+    conversation begins.  Cross-provider safe: works the same whether
+    Claude is reading a Gemini transcript or vice versa, since both
+    just see plain text.
+    """
+    if not refs:
+        return ""
+    blocks: list[str] = []
+    for ref in refs:
+        body = "\n".join(
+            f"{('User' if m.get('role') == 'user' else 'Assistant')}: {m.get('content', '')}"
+            for m in ref.transcript
+        )
+        blocks.append(
+            f"--- Reference: {ref.name}  "
+            f"({ref.provider} {ref.model}, {len(ref.transcript)} turns) ---\n"
+            f"{body}\n"
+            f"--- End reference: {ref.name} ---"
+        )
+    return (
+        "=== Context: prior conversations the user wants you to read first ===\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n=== End context ===\n\n"
+        "(The references above are read-only context.  Continue the "
+        "conversation below using them as background.)"
+    )
+
+
 def _data_dir() -> Path:
     p = DEFAULT_DATA_DIR
     p.mkdir(parents=True, exist_ok=True)
@@ -493,13 +525,35 @@ class Handlers:
         return agent.model_dump(mode="json")
 
     async def agents_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        refs = params.get("reference_agent_ids") or []
+        if not isinstance(refs, list):
+            refs = []
         agent = Agent(
             name=(params.get("name") or "Unnamed agent").strip(),
             provider=params["provider"],
             model=params["model"],
             system=params.get("system", ""),
+            reference_agent_ids=[str(r) for r in refs if r],
         )
         await self.store.insert_agent(agent)
+        return agent.model_dump(mode="json")
+
+    async def agents_set_references(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Replace an existing agent's reference_agent_ids list.
+
+        ``params``:
+          agent_id: id of the agent to update.
+          reference_agent_ids: list of agent ids to inline as context
+            on every subsequent send.  Empty list = no context.
+        """
+        agent = await self.store.get_agent(params["agent_id"])
+        if not agent:
+            raise ValueError(f"unknown agent: {params['agent_id']}")
+        refs = params.get("reference_agent_ids") or []
+        if not isinstance(refs, list):
+            refs = []
+        agent.reference_agent_ids = [str(r) for r in refs if r and r != agent.id]
+        await self.store.update_agent(agent)
         return agent.model_dump(mode="json")
 
     async def agents_send(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -520,7 +574,19 @@ class Handlers:
         # headless mode).  Fresh providers keep their own session
         # state per call; persisting it in our store is the
         # source-of-truth.
+        # Pull every referenced agent the operator wired up and
+        # prepend their transcripts as a context preamble.  Cross-
+        # provider safe: Gemini reading a Claude transcript or vice
+        # versa just sees plain text, so no special-casing.
+        refs: list[Agent] = []
+        for ref_id in agent.reference_agent_ids or []:
+            ref = await self.store.get_agent(ref_id)
+            if ref is not None:
+                refs.append(ref)
+        reference_block = _render_references(refs)
         prompt = _render_transcript(agent)
+        if reference_block:
+            prompt = reference_block + "\n\n" + prompt
 
         provider = get_provider(agent.provider)
         # Use an ephemeral card to reuse the existing provider auth.
@@ -801,6 +867,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("agents.create", h.agents_create)
     server.register("agents.send", h.agents_send)
     server.register("agents.spawn_followup", h.agents_spawn_followup)
+    server.register("agents.set_references", h.agents_set_references)
     server.register("agents.delete", h.agents_delete)
     server.register("agents.followup_presets", h.agents_followup_presets)
     server.register("providers", h.providers)
