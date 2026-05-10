@@ -33,12 +33,12 @@ class RpcClient:
             if isinstance(body, dict) and "error" in body:
                 typ = body.get("type") or ""
                 suffix = f" [{typ}]" if typ else ""
-                raise RuntimeError(f"{body['error']}{suffix}")
+                raise RuntimeError(_friendlier(f"{body['error']}{suffix}"))
             r.raise_for_status()
         if body is None:
             raise RuntimeError(f"empty response (HTTP {r.status_code})")
         if "error" in body:
-            raise RuntimeError(body["error"])
+            raise RuntimeError(_friendlier(body["error"]))
         return body["result"]
 
     async def healthz(self) -> dict[str, Any]:
@@ -48,3 +48,24 @@ class RpcClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+def _friendlier(message: str) -> str:
+    """Catch the most-confusing error patterns and append a hint.
+
+    "unknown method: agents.set_workspace" → almost always means the
+    operator's running service was started before that RPC's
+    registration line landed in main.py.  ``update.cmd`` git-pulls
+    new code but doesn't restart the orchestrator process, which
+    keeps its in-memory RPC table.  Restart picks up the fresh
+    registrations.
+    """
+    if "unknown method" in message.lower() or "unknown rpc" in message.lower():
+        return (
+            f"{message}\n\n"
+            "↳ This usually means the service is running an older "
+            "code version than the GUI.  Run scripts\\restart.cmd "
+            "(or click Restart in the Operator Panel) to pick up the "
+            "latest registrations."
+        )
+    return message

@@ -166,6 +166,19 @@ class CanvasPage(QtWidgets.QWidget):
 
         self.view.installEventFilter(self)
 
+    def showEvent(self, event: QtGui.QShowEvent) -> None:  # type: ignore[override]
+        """Refresh the palette's drones list every time the operator
+        navigates to the canvas tab.
+
+        Without this, a drone deployed from the Drones tab wouldn't
+        appear in the canvas Drones palette until the GUI was
+        restarted.  Cheap (single drones.list RPC); fires only on tab
+        switch.
+        """
+        super().showEvent(event)
+        if hasattr(self, "palette"):
+            asyncio.ensure_future(self.palette.reload_drones())
+
     # ------------------------------------------------------------------
     # Toolbar
     # ------------------------------------------------------------------
