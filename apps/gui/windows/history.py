@@ -84,6 +84,11 @@ class HistoryPage(QtWidgets.QWidget):
         )
         bar.addWidget(refresh)
         self.replay_btn = QtWidgets.QPushButton("Replay…")
+        self.replay_btn.setToolTip(
+            "Re-run the selected past run, optionally swapping its provider "
+            "or model.  Useful for comparing how Claude and Gemini answer the "
+            "same prompt, or for re-running with a fresher model."
+        )
         self.replay_btn.clicked.connect(self._replay_selected)  # type: ignore[arg-type]
         bar.addWidget(self.replay_btn)
         v.addLayout(bar)
@@ -202,7 +207,12 @@ class HistoryPage(QtWidgets.QWidget):
         dlg.setWindowTitle(f"Replay run {original['id']}")
         form = QtWidgets.QFormLayout(dlg)
         provider_input = QtWidgets.QComboBox()
-        provider_input.addItems(["", "anthropic", "google", "openai", "ollama"])
+        # Order matches the providers registry; the two CLI-backed
+        # entries appear first so Max-plan / Gemini-CLI users can swap
+        # without typing.
+        provider_input.addItems(
+            ["", "claude-cli", "gemini-cli", "anthropic", "google", "openai", "ollama"]
+        )
         model_input = QtWidgets.QLineEdit()
         model_input.setPlaceholderText("(blank to keep original model)")
         form.addRow("Provider override:", provider_input)
