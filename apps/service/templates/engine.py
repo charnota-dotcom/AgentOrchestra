@@ -166,12 +166,18 @@ def load_template(path: Path) -> InstructionTemplate:
 
 def render(template: InstructionTemplate, variables: dict[str, Any]) -> str:
     """Render `template.body` against `variables`.  Required vars must be
-    present; optional vars fall back to their declared defaults.
+    present *and non-empty*; optional vars fall back to their declared
+    defaults.  Treat empty strings / None the same as "missing" — the
+    composer GUI sends every input widget's value (including blanks)
+    so a presence-only check would let users dispatch prompts whose
+    required slots are empty.
     """
     vals: dict[str, Any] = {}
     for v in template.variables:
-        if v.name in variables:
-            vals[v.name] = variables[v.name]
+        raw = variables.get(v.name)
+        provided = raw not in (None, "")
+        if provided:
+            vals[v.name] = raw
         elif v.default is not None:
             vals[v.name] = v.default
         elif v.required:
