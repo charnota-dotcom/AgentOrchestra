@@ -394,6 +394,68 @@ class Handlers:
         )
         return {"ok": bool(ok)}
 
+    # ------------------------------------------------------------------
+    # Plain chat — no card, no template, no state machine.
+    # ------------------------------------------------------------------
+
+    async def chat_send(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Send one message to one provider and return the full reply.
+
+        Bypasses the dispatcher / Run state machine entirely.  This is
+        the "lay-person" path: a chat box, a model dropdown, optional
+        skills / thinking-depth annotations.  No worktrees, no cost
+        caps, no review state.
+
+        ``params``:
+          provider: "claude-cli" | "gemini-cli" | "anthropic" | "google" | ...
+          model:    e.g. "claude-sonnet-4-5" or "gemini-2.5-pro"
+          message:  the user's message text
+          system:   optional system prompt (e.g. derived from skills + thinking)
+        """
+        from apps.service.providers.protocol import ChatSession  # noqa: F401
+        from apps.service.providers.registry import get_provider
+        from apps.service.types import (
+            BlastRadiusPolicy,
+            CardMode,
+            CostPolicy,
+            PersonalityCard,
+            SandboxTier,
+        )
+
+        provider_name = params["provider"]
+        model = params["model"]
+        message = params["message"]
+        system = params.get("system") or ""
+
+        # Ephemeral card so we can reuse the existing provider
+        # adapters without duplicating their auth / env wiring.
+        card = PersonalityCard(
+            name="(chat)",
+            archetype="(chat)",
+            description="ephemeral chat card",
+            template_id="(chat)",
+            provider=provider_name,
+            model=model,
+            mode=CardMode.CHAT,
+            cost=CostPolicy(),
+            blast_radius=BlastRadiusPolicy(),
+            sandbox_tier=SandboxTier.DEVCONTAINER,
+        )
+        provider = get_provider(provider_name)
+        session = await provider.open_chat(card, system=system or None)
+        chunks: list[str] = []
+        try:
+            async for ev in session.send(message):
+                if ev.kind == "text_delta":
+                    chunks.append(ev.text)
+                elif ev.kind == "error":
+                    raise RuntimeError(ev.text or "provider error")
+                elif ev.kind == "finish":
+                    break
+        finally:
+            await session.close()
+        return {"reply": "".join(chunks)}
+
     async def hooks_status(self, params: dict[str, Any]) -> dict[str, Any]:
         return hook_status()
 
@@ -452,6 +514,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("flows.dispatch", h.flows_dispatch)
     server.register("flows.cancel", h.flows_cancel)
     server.register("flows.approve_human", h.flows_approve_human)
+    server.register("chat.send", h.chat_send)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
     server.register("hooks.status", h.hooks_status)
