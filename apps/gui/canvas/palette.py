@@ -36,6 +36,17 @@ _CONTROL_NODES = [
 class _DragList(QtWidgets.QListWidget):
     """A QListWidget that emits a custom-MIME drag on item press."""
 
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        # QListWidget defaults to dragDropMode=NoDragDrop / dragEnabled=
+        # False, so without these two lines Qt's view machinery never
+        # invokes startDrag — the palette items would look static even
+        # though startDrag below is wired up correctly.  DragOnly so we
+        # don't accept drops back into the palette (a dropped node
+        # belongs on the canvas, not in the source list).
+        self.setDragEnabled(True)
+        self.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.DragOnly)
+
     def startDrag(
         self,
         _supported_actions: QtCore.Qt.DropAction,

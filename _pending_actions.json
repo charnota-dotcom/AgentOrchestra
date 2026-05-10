@@ -78,6 +78,25 @@
         "tests/unit/test_blueprints_page.py"
       ],
       "annotation_excerpt": "I've selected Provider claude-cli, but the Model"
+    },
+    {
+      "annotation_index": 12,
+      "version": "0.1.0+canvas-palette-drag-enable",
+      "status": "shipped",
+      "description": "Operator: 'on the canvas the cards should be draggable onto the working space'. The _DragList widget in apps/gui/canvas/palette.py overrode startDrag to emit a custom-MIME drag, but never enabled the drag-source machinery — QListWidget defaults to dragDropMode=NoDragDrop / dragEnabled=False, so Qt's view layer never invoked startDrag. The override was effectively dead code. Added an __init__ that calls setDragEnabled(True) + setDragDropMode(DragOnly). Drop side on the canvas (apps/gui/canvas/view.py + page.py) was already wired correctly.",
+      "change_overview": [
+        "apps/gui/canvas/palette.py — _DragList.__init__ enables drag and sets DragOnly mode so startDrag actually fires; control nodes, agent cards, and drone actions are all now draggable onto the canvas working space"
+      ],
+      "risk_level": "Low",
+      "risk_note": "DragOnly means the palette won't accept drops back into itself, which matches the existing UX (the palette is purely a source).",
+      "next_steps": [
+        "Restart the GUI, open Canvas tab. Drag a Trigger / Branch / Output node from Control onto the canvas — should drop a node. Same for an Agent card and a Drone action.",
+        "Ready to merge."
+      ],
+      "files_changed": [
+        "apps/gui/canvas/palette.py"
+      ],
+      "annotation_excerpt": "on the canvas the cards should be draggable"
     }
   ]
 }
