@@ -15,13 +15,13 @@ from apps.gui.canvas.nodes.control import (
     OutputNode,
     TriggerNode,
 )
-from apps.gui.canvas.nodes.conversation import ConversationNode
+from apps.gui.canvas.nodes.drone_action import DroneActionNode
 
 __all__ = [
     "AgentNode",
     "BaseNode",
     "BranchNode",
-    "ConversationNode",
+    "DroneActionNode",
     "HumanNode",
     "MergeNode",
     "NodeStatus",

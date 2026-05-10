@@ -1,5 +1,35 @@
 # Changelog
 
+## Phase 6 — Drone model (2026-05)
+
+The "Agent" abstraction has been replaced by the **Drone** model.
+See `docs/DRONE_MODEL.md` for the full design.
+
+- **Drone Blueprints** (operator-set frozen templates) and **Drone
+  Actions** (deployed instances with their own transcripts).  Each
+  action snapshots its blueprint at deploy time so later blueprint
+  edits never reach in-flight conversations.
+- **Authority matrix** — every action carries a snapshotted role
+  (`worker` / `supervisor` / `courier` / `auditor`) that gates
+  cross-action mutations (`drones.append_reference`,
+  `drones.append_skill`).  Auditors are read-only by construction.
+- **New tabs** — Blueprints (template editor) + Drones (deploy +
+  chat surface).
+- **Canvas palette** — "Conversations" section renamed to "Drones".
+  `+ New conversation` → `Deploy` button picks a blueprint + workspace
+  + first message in one shot.  Drag the resulting drone onto the
+  canvas; double-click to open a small chat dialog.
+- **Agent rip-out** — `Agent` class, `agents.*` RPCs, `chat.send`,
+  `attachments.*`, `Attachment` class, `FOLLOWUP_PRESETS`, the Agents
+  tab, the Chat tab, the canvas Conversations palette, lineage boxes,
+  and lineage edges are gone.  The `agents` and `attachments` tables
+  are dropped on next service startup (operator-approved).
+- **Deferred** — drones.send currently doesn't support attachments
+  or cross-action references inlined into the prompt; both will
+  return in a follow-up PR.  Lineage visualisation on the canvas
+  needs re-design for the drone reference model (lists, not
+  parent_ids) and is also deferred.
+
 ## Phase 5 — PR #12 (merged 2026-05-10)
 
 Operator-facing additions in the big phase-5 super-PR:
