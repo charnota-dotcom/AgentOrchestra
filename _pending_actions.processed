@@ -1,0 +1,22 @@
+{
+  "for_app": "agentorchestra",
+  "attempts": [
+    {
+      "annotation_index": 1,
+      "version": "0.1.0",
+      "status": "no_change_needed",
+      "description": "Informational capture of the Live page after a Narrow Research dispatch. The system is behaving correctly: run reached reviewing in 7s, transcript shows Claude reply, Open review button is enabled, cost reads $0.0000 because subscription billing is not echoed back via the CLI. No code change needed.",
+      "change_overview": [
+        "no files changed"
+      ],
+      "risk_level": "Low",
+      "risk_note": "No side effects.",
+      "next_steps": [
+        "Restart the GUI to let the annotator pick up _pending_actions.json",
+        "For substantive answers from Narrow Research, ask a deeper question matching the archetype design"
+      ],
+      "files_changed": [],
+      "annotation_excerpt": "this is the view after I submitted the query"
+    }
+  ]
+}

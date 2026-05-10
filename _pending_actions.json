@@ -1,0 +1,85 @@
+{
+  "for_app": "agentorchestra",
+  "attempts": [
+    {
+      "annotation_index": 2,
+      "version": "0.1.1",
+      "status": "shipped",
+      "description": "Added per-row Approve/Reject buttons for runs in the reviewing state and a Cancel button for in-flight states on the History page. Stuck Reviewing runs can now be cleared in one click without leaving the page.",
+      "change_overview": [
+        "apps/gui/windows/history.py: 6th Actions column with state-aware buttons",
+        "wired existing runs.approve / runs.reject / runs.cancel RPCs to row buttons"
+      ],
+      "risk_level": "Low",
+      "risk_note": "Buttons only appear for the matching states; final-state runs show no actions and are unaffected.",
+      "next_steps": [
+        "Pull main, restart service+GUI, open History tab",
+        "Click Approve or Reject on the Reviewing runs to clear them"
+      ],
+      "files_changed": [
+        "apps/gui/windows/history.py"
+      ],
+      "annotation_excerpt": "two entries with state Reviewing the rest are aborted"
+    },
+    {
+      "annotation_index": 3,
+      "version": "0.1.1",
+      "status": "shipped",
+      "description": "Added a Remove button on each workspace row in the Home Workspace map plus a workspaces.remove RPC. Confirmation dialog explains runs are preserved and the repo on disk is untouched.",
+      "change_overview": [
+        "apps/service/store/events.py: EventStore.delete_workspace",
+        "apps/service/main.py: workspaces.remove RPC handler",
+        "apps/gui/widgets/workspace_map.py: Remove button + confirmation dialog"
+      ],
+      "risk_level": "Low",
+      "risk_note": "Foreign-key cascade not enforced; runs.workspace_id can dangle. Documented in the confirmation copy.",
+      "next_steps": [
+        "Pull main, restart service+GUI",
+        "Click Remove next to the docs workspace and confirm"
+      ],
+      "files_changed": [
+        "apps/service/store/events.py",
+        "apps/service/main.py",
+        "apps/gui/widgets/workspace_map.py"
+      ],
+      "annotation_excerpt": "there is an entry on the workspace app"
+    },
+    {
+      "annotation_index": 4,
+      "version": "0.1.1",
+      "status": "wontfix",
+      "description": "This is the annotators single-pick mode behaviour: an empty area inside a QScrollArea viewport resolves to the viewport widget itself rather than to the cells inside, so the whole section appears highlighted. AgentOrchestra cannot influence the picker.",
+      "change_overview": [
+        "no files changed"
+      ],
+      "risk_level": "Low",
+      "risk_note": "No side effects.",
+      "next_steps": [
+        "Use the multi_click mode for picking individual widgets one at a time",
+        "Or use the area mode to draw a precise rectangle around the cells of interest"
+      ],
+      "files_changed": [],
+      "annotation_excerpt": "I cant select individual fields here"
+    },
+    {
+      "annotation_index": 5,
+      "version": "0.1.1",
+      "status": "shipped",
+      "description": "Added a tooltip on the Replay button explaining its purpose (re-run a past run with optional provider/model swap; ideal for Claude-vs-Gemini comparisons). Also added claude-cli and gemini-cli to the Replay dialogs provider dropdown so operators can actually swap to a CLI from the UI.",
+      "change_overview": [
+        "apps/gui/windows/history.py: tooltip on Replay button",
+        "apps/gui/windows/history.py: provider dropdown order"
+      ],
+      "risk_level": "Low",
+      "risk_note": "Tooltip is purely additive; dropdown change preserves existing entries.",
+      "next_steps": [
+        "Pull main, restart GUI, hover Replay to see the explanation",
+        "Select a past run, click Replay, choose claude-cli or gemini-cli to re-run under the other vendor"
+      ],
+      "files_changed": [
+        "apps/gui/windows/history.py"
+      ],
+      "annotation_excerpt": "what does replay do?"
+    }
+  ]
+}
