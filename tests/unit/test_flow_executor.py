@@ -75,6 +75,10 @@ def _card(card_id: str, name: str = "Test") -> PersonalityCard:
 async def store(tmp_path: Path) -> AsyncIterator[EventStore]:
     s = EventStore(tmp_path / "test.sqlite")
     await s.open()
+    # Match the conftest fixture's behaviour — disable FK enforcement
+    # so micro-tests can insert cards / artifacts without first
+    # seeding their full referential closure.
+    await s.db.execute("PRAGMA foreign_keys = OFF")
     yield s
     await s.close()
 

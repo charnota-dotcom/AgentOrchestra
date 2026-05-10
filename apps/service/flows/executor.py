@@ -34,7 +34,7 @@ import re
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
-from apps.service.providers.registry import get_provider
+from apps.service.providers import registry as provider_registry
 from apps.service.types import (
     Event,
     EventKind,
@@ -317,7 +317,10 @@ class FlowExecutor:
                 f"agent node {node['id']} has neither a goal override nor an upstream input"
             )
 
-        provider = get_provider(card.provider)
+        # Look up via the module attribute (not a local binding) so
+        # tests that monkeypatch ``provider_registry.get_provider``
+        # actually hit our path.
+        provider = provider_registry.get_provider(card.provider)
         session = await provider.open_chat(card)
         accumulated: list[str] = []
         try:

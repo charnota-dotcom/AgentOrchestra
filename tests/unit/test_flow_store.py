@@ -15,6 +15,7 @@ from apps.service.types import Flow, FlowRun, FlowState
 async def store(tmp_path: Path) -> AsyncIterator[EventStore]:
     s = EventStore(tmp_path / "f.sqlite")
     await s.open()
+    await s.db.execute("PRAGMA foreign_keys = OFF")
     yield s
     await s.close()
 

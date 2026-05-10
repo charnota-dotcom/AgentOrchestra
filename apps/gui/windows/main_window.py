@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from PySide6 import QtCore, QtWidgets
 
 from apps.gui.annotator import setup_annotator
-from apps.gui.canvas import CanvasPage
+from apps.gui.canvas.page import CanvasPage
 from apps.gui.windows.agents import AgentsPage
 from apps.gui.windows.chat import ChatPage
 from apps.gui.windows.composer import ComposerPage

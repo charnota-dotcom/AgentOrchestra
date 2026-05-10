@@ -16,6 +16,7 @@ from apps.service.types import Agent
 async def store(tmp_path: Path) -> AsyncIterator[EventStore]:
     s = EventStore(tmp_path / "a.sqlite")
     await s.open()
+    await s.db.execute("PRAGMA foreign_keys = OFF")
     yield s
     await s.close()
 
