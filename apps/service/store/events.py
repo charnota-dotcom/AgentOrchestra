@@ -482,10 +482,29 @@ class EventStore:
     async def delete_agent(self, agent_id: str) -> bool:
         # Detach children — keep their history but null out the
         # parent ref so cascading deletes don't take a whole tree.
+        # Also scrub the deleted id out of any other agent's
+        # ``reference_agent_ids`` JSON list so dangling references
+        # don't accumulate over time (no FK on the JSON column, so
+        # this is the only place we can do it).
         async with self._lock:
             await self.db.execute(
                 "UPDATE agents SET parent_id = NULL WHERE parent_id = ?", (agent_id,)
             )
+            cur_refs = await self.db.execute(
+                "SELECT id, reference_agent_ids FROM agents WHERE reference_agent_ids LIKE ?",
+                (f'%"{agent_id}"%',),
+            )
+            for row in await cur_refs.fetchall():
+                try:
+                    refs = json.loads(row["reference_agent_ids"] or "[]")
+                except json.JSONDecodeError:
+                    refs = []
+                if agent_id in refs:
+                    refs = [r for r in refs if r != agent_id]
+                    await self.db.execute(
+                        "UPDATE agents SET reference_agent_ids = ? WHERE id = ?",
+                        (json.dumps(refs), row["id"]),
+                    )
             cur = await self.db.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
             await self.db.commit()
         return (cur.rowcount or 0) > 0

@@ -11,6 +11,7 @@ value is JSON-encoded and sent as the response.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -60,7 +61,10 @@ class JsonRpcServer:
 
     def _check_auth(self, request: Request) -> bool:
         header = request.headers.get("authorization", "")
-        return header == f"Bearer {self.token}"
+        # Constant-time comparison so a (very theoretical) timing attack
+        # can't peel off the token byte-by-byte.  On loopback the wire
+        # noise dwarfs any real signal, but it's free hardening.
+        return hmac.compare_digest(header, f"Bearer {self.token}")
 
     async def _rpc(self, request: Request) -> Response:
         if not self._check_auth(request):

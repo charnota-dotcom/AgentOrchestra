@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.presets import model_label_for
+
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
@@ -50,11 +52,27 @@ class AgentChatDialog(QtWidgets.QDialog):
         v.setContentsMargins(14, 14, 14, 14)
         v.setSpacing(10)
 
+        # Use the friendly label (e.g. "Claude Sonnet 4.6") instead of
+        # the raw provider/model id so the canvas chat dialog reads the
+        # same way the Chat tab transcript does.  Treat empty / None /
+        # missing the same way `conversation.py` does (`str(... or "")`)
+        # so the two surfaces never diverge.
+        _provider = str(agent.get("provider") or "")
+        _model = str(agent.get("model") or "?")
+        _friendly = model_label_for(_provider, _model) if _provider else _model
+        # Plain-text label so an attacker-controlled agent name (or model
+        # id, defensively) can't inject HTML.  We compose the rich-text
+        # bits manually with html.escape on the dynamic parts.
+        import html as _html
+
+        _name_safe = _html.escape(str(agent.get("name") or "?"))
+        _friendly_safe = _html.escape(_friendly)
+        _provider_safe = _html.escape(_provider or "?")
         header = QtWidgets.QLabel(
-            f"<b>{agent.get('name', '?')}</b>  ·  "
-            f"<span style='color:#5b6068'>{agent.get('model', '?')} "
-            f"({agent.get('provider', '?')})</span>"
+            f"<b>{_name_safe}</b>  ·  "
+            f"<span style='color:#5b6068'>{_friendly_safe} ({_provider_safe})</span>"
         )
+        header.setTextFormat(QtCore.Qt.TextFormat.RichText)
         header.setStyleSheet("font-size:14px;color:#0f1115;")
         v.addWidget(header)
 
@@ -496,9 +514,15 @@ class AgentChatDialog(QtWidgets.QDialog):
 
     @staticmethod
     def _format_workspace_label(agent: dict[str, Any]) -> str:
+        # html.escape the dynamic parts so an operator-typed workspace
+        # name like "<img src=x>" can't render as HTML — QLabel auto-
+        # detects rich text from a leading "<b>", so we have to be
+        # explicit about which bits are markup and which are user data.
+        import html as _html
+
         ws_id = agent.get("workspace_id")
-        ws_name = agent.get("workspace_name") or ""
-        ws_path = agent.get("workspace_path") or ""
+        ws_name = _html.escape(str(agent.get("workspace_name") or ""))
+        ws_path = _html.escape(str(agent.get("workspace_path") or ""))
         if not ws_id:
             return "📂 No repo bound — chat-only conversation"
         if ws_name and ws_path:
@@ -530,14 +554,19 @@ class AgentChatDialog(QtWidgets.QDialog):
             self.git_status_label.setVisible(True)
             self.switch_branch_btn.setVisible(False)
             return
-        branch = res.get("branch", "?")
+        # Escape every server-derived string before embedding into the
+        # rich-text banner — a commit subject of `<b>x</b>` should
+        # render as literal text, not bold.
+        import html as _html
+
+        branch = _html.escape(str(res.get("branch", "?")))
         ahead = res.get("ahead", 0)
         behind = res.get("behind", 0)
         modified = res.get("modified", 0)
         staged = res.get("staged", 0)
         untracked = res.get("untracked", 0)
-        last_sha = res.get("last_commit_sha", "")
-        last_subj = res.get("last_commit_subject", "")
+        last_sha = _html.escape(str(res.get("last_commit_sha", "")))
+        last_subj_raw = str(res.get("last_commit_subject", ""))
         dirty_bits: list[str] = []
         if modified:
             dirty_bits.append(f"{modified} modified")
@@ -553,8 +582,8 @@ class AgentChatDialog(QtWidgets.QDialog):
             ahead_marker += f" ↓{behind}"
         text = f"git: <b>{branch}</b>{ahead_marker}{clean_marker}"
         if last_sha:
-            short_subj = last_subj if len(last_subj) <= 60 else last_subj[:57] + "…"
-            text += f"  ·  last: {last_sha} {short_subj}"
+            short_subj_raw = last_subj_raw if len(last_subj_raw) <= 60 else last_subj_raw[:57] + "…"
+            text += f"  ·  last: {last_sha} {_html.escape(short_subj_raw)}"
         self.git_status_label.setText(text)
         self.git_status_label.setVisible(True)
         self.switch_branch_btn.setVisible(True)

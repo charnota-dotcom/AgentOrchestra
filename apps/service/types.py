@@ -54,9 +54,9 @@ def utc_now() -> datetime:
 
 
 class SandboxTier(StrEnum):
-    DEVCONTAINER = "devcontainer"  # V1 default
-    DOCKER = "docker"  # V2
-    FIRECRACKER = "firecracker"  # V3
+    DEVCONTAINER = "devcontainer"  # default; pure-Python in-process LocalSandbox
+    DOCKER = "docker"  # implemented (apps/service/sandbox/docker.py)
+    FIRECRACKER = "firecracker"  # not yet implemented (E2B microVM stub only)
 
 
 class BlastRadiusPolicy(BaseModel):
@@ -349,10 +349,18 @@ class Branch(BaseModel):
 
 
 class Workspace(BaseModel):
+    """A registered local git working tree.
+
+    ``WorktreeManager.register_workspace`` validates the path is a
+    working tree (not bare) and the row is the cwd that agents bound
+    to this workspace will run in.  Cloned-from-URL workspaces land
+    here too via ``workspaces.clone``.
+    """
+
     id: str = Field(default_factory=long_id)
     name: str
-    repo_path: str  # absolute
-    default_base_branch: str = "main"
+    repo_path: str  # absolute path on disk; cwd for agent CLI subprocesses
+    default_base_branch: str = "main"  # detected from origin/HEAD on clone, else "main"
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -606,9 +614,13 @@ class FlowState(StrEnum):
 class Flow(BaseModel):
     """A saved orchestration graph.
 
-    The `payload` is a Pydantic-validated nested structure (nodes +
-    edges) but stored as JSON in SQLite for simplicity — flows are
-    small (~50 KB even for hundred-node graphs) and edits are atomic.
+    The ``nodes`` and ``edges`` lists are the canonical payload — both
+    are stored as one JSON column in SQLite for simplicity (flows are
+    small, ~50 KB even for hundred-node graphs, and edits are atomic).
+    Each node / edge is an opaque ``dict[str, Any]`` rather than a
+    typed Pydantic class because the canvas needs to round-trip
+    arbitrary GUI metadata (positions, palette ids) the executor
+    doesn't read; promoting them to typed models is on the roadmap.
     """
 
     id: str = Field(default_factory=long_id)
@@ -626,14 +638,24 @@ class Flow(BaseModel):
 
 
 class FlowRun(BaseModel):
-    """A single execution of a Flow."""
+    """A single execution of a ``Flow``.
+
+    ``state`` walks PENDING → RUNNING → (FINISHED | FAILED | ABORTED).
+    ``node_outputs`` is keyed by node id and accumulates each node's
+    last assistant text as the run progresses.  ``error`` is only
+    populated when ``state is FAILED``.
+    """
 
     id: str = Field(default_factory=short_id)
     flow_id: str
     state: FlowState = FlowState.PENDING
     started_at: datetime = Field(default_factory=utc_now)
     ended_at: datetime | None = None
+    # node_id -> last assistant text the node produced (empty string for
+    # control nodes that don't emit text).  Persisted as JSON.
     node_outputs: dict[str, str] = Field(default_factory=dict)
+    # Set only when state transitions to FAILED; surfaces to the GUI
+    # via flow.completed.
     error: str | None = None
 
 

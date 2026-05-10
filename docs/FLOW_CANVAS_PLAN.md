@@ -1,5 +1,14 @@
 # Flow Canvas — Project & Implementation Plan
 
+> **Status (Phase 5):** core canvas (Phases 1-4 of this plan) is **shipped**
+> and lives at `apps/gui/canvas/` + `apps/service/flows/`.  The plan's
+> proposed `flows/types.py` / `flows/nodes.py` typed-node split was
+> intentionally not pursued — nodes/edges stayed as
+> `list[dict[str, Any]]` so the canvas can round-trip arbitrary GUI
+> metadata the executor doesn't need to read.  Treat this document as
+> the design rationale; the README's Canvas section is the current
+> operator-facing description.
+
 A visual, zoomable, drag-and-drop orchestration canvas for AgentOrchestra.
 
 ## 1. Goals

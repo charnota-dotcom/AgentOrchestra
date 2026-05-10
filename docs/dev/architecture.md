@@ -65,9 +65,18 @@ detail.
    merges into the base branch and cleans the worktree.
 9. Outcome row + final cost recorded.
 
-## Out of scope for V1
+## Out of scope (still)
 
-- Mergiraf integration (vendor binary; CLI shimmed)
-- Briefcase installer config (signing certs first)
-- Gemini and Ollama adapters
-- Docker / Firecracker sandbox tiers
+This list has shrunk substantially since V1.  As of Phase 5, **only
+the items below remain unshipped**:
+
+- Briefcase signed installer (certs not issued yet).
+- Firecracker / E2B microVM sandbox tier (E2B stub exists at
+  `apps/service/sandbox/e2b.py` but isn't wired into the dispatcher).
+
+Items previously listed here that have **shipped**:
+
+- Mergiraf integration (`apps/service/worktrees/merger.py`).
+- Gemini CLI + API providers (`providers/gemini_cli.py`, `providers/google.py`).
+- Ollama provider (`providers/ollama.py`).
+- Docker sandbox tier (`apps/service/sandbox/docker.py`).

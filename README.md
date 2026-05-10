@@ -40,10 +40,10 @@ The service does five things:
 1. **Drives sub-agents** through one of four providers — `claude-cli` (Claude Code), `gemini-cli`, `anthropic` (API), `google` (API), `ollama` — and normalises their stream events into one shape (`text_delta`, `assistant_message`, `tool_call`, `tool_result`, `usage`, `finish`, `error`).
 2. **Persists everything** to a single SQLite database (WAL mode, FTS5 search) — every Run, Branch, Step, Approval, Outcome, Event, Agent, Attachment, Flow, FlowRun, Workspace, Card, Template, Instruction.
 3. **Owns git worktrees** when an agentic Run is dispatched — branch per agent, optional Mergiraf merge, panic reset, drift sentinel.
-4. **Watches the host** — Claude session JSONL files, Claude Code hooks, and OTel collector for Gemini — so what you do interactively shows up in the orchestrator's history too.
+4. **Watches the host** — Claude session JSONL files and Claude Code hooks — so what you do interactively shows up in the orchestrator's history too.
 5. **Exposes ~50 RPC methods** the GUI calls into. The full list is below.
 
-The GUI presents this as nine task-focused tabs.
+The GUI presents this as **eight rail tabs** (Home, Chat, Agents, Compose, Canvas, History, Limits, Settings) plus two stack pages (Live, Review) reached when you dispatch a Run from Compose.
 
 ---
 
@@ -90,7 +90,7 @@ The recommended first-run flow uses the **Operator Panel** below — it walks yo
 | `doctor.cmd` | 7 | Diagnose: prints Python version, venv health, port 8765 status, last service log lines. |
 | `reset.cmd` | 8 | **Destructive.** Wipe the SQLite store. Use only when nothing else helps. |
 
-The GUI's **Home** tab and the operator panel both surface the same `manifest.json`; commands stay in sync.
+The Operator Panel (`scripts/ops.py`) reads `manifest.json` so adding a new `.cmd` file plus a manifest entry surfaces it as a new button automatically — no GUI code change needed.
 
 ---
 
@@ -98,7 +98,7 @@ The GUI's **Home** tab and the operator panel both surface the same `manifest.js
 
 ### Home
 
-Landing page. Shows recent activity, quick links to Chat / Compose / Canvas, the AgentOrchestra version, and a service-health indicator. The first time you open the app, a **first-run wizard** (`first_run.py`) walks you through the three CLI smoke tests so you know your subscriptions work before sending real prompts.
+Landing page. Shows a **Workspaces map** (registered repos with their last activity), an **Active runs** table (in-flight Runs across all workspaces), and a **Recent runs** table with one-row-per-Run history. A Refresh button re-pulls all three. The first time you open the app, a **first-run wizard** (`first_run.py`) walks you through the three CLI smoke tests so you know your subscriptions work before sending real prompts.
 
 ### Chat
 
@@ -106,8 +106,8 @@ A lay-person chat box — pick a model preset, type a message, get a reply. Desi
 
 **Controls:**
 
-- **Model picker** — entries from `_MODEL_PRESETS`. Each preset is a `(label, provider, model, mode_system)` tuple. Switching presets mid-thread starts a new chat (a fresh Agent is minted on the next send) because the backend doesn't currently model-swap an existing Agent. Default presets cover Claude Code Coding / General, Gemini Coding / General, the "File / artifact" mode that emits a leading `# filename.ext` line for one-click save, and "Image" mode.
-- **Thinking** — three steps from `_THINKING_PRESETS`: Quick / Normal / Deep. Adds a directive to the system prompt.
+- **Model picker** — entries from the shared `MODEL_PRESETS` registry in `apps/gui/presets.py` (12 rows: 3 Claude + 2 Gemini for Coding, plus 2 Claude + 1 Gemini for General Chat, plus 1 Claude + 1 Gemini each for File / artifact and Image prompt modes). Each preset is a `ModelPreset(label, provider, model, mode, system)` frozen dataclass. Switching presets mid-thread starts a new chat (a fresh Agent is minted on the next send) because the backend doesn't currently model-swap an existing Agent. The same registry powers the Canvas "+ New conversation" dialog and the Agents-tab "+ New agent" dialog so the three surfaces stay in sync.
+- **Thinking** — four steps from `THINKING_PRESETS`: Off / Normal / Hard / Very hard. Adds a directive to the system prompt. Default is Normal. Mid-thread changes apply to the next new chat (the system prompt is locked at agent creation).
 - **Skills** — free-form `/foo /bar baz` field. Inlined into the system prompt as instructions; not a real Skills invocation (that's interactive-only on the CLI side).
 - **Repo:** picker — bind this conversation to a git repo workspace. When set, the underlying CLI runs with `cwd=<repo_path>` so the model's built-in `Read` / `Bash` / `Edit` / `Grep` tools operate against the project. **Add repo…** picks an existing local directory; **Clone from git…** opens a URL/branch/depth dialog and runs `git clone` into `<data_dir>/clones/`. Switching the repo restarts the chat (same constraint as the model picker).
 - **Paperclip 📎** (or `Ctrl+Shift+A`) — attach an image (`.png/.jpg/.jpeg/.gif/.webp`) or spreadsheet (`.xlsx/.xls/.csv`) to the next message. You can also **drag a file from File Explorer onto the chat area**. Local files are cached on disk and uploaded only at send time (so they never orphan if you cancel). Attached chips wrap in a horizontal scroll so 50 files can't push the dialog off-screen.
@@ -286,7 +286,7 @@ A **per-workspace file lock** prevents two runs from clobbering the same `.agent
 ```
 ┌────────────────────────────────────────────────────────────┐
 │  GUI process                                               │
-│  PySide6 + qasync — single window, 9 tabs                  │
+│  PySide6 + qasync — single window, 8 rail tabs             │
 └────────────────────────┬───────────────────────────────────┘
                          │ JSON-RPC over 127.0.0.1:8765 (token-auth)
                          │ SSE for live event streams (run-id channels)
@@ -296,7 +296,7 @@ A **per-workspace file lock** prevents two runs from clobbering the same `.agent
 │  │ DISPATCH       │  INGESTION      │ STATE / STORE     │  │
 │  │ chat.send      │ JSONL watcher   │ SQLite + FTS5     │  │
 │  │ agents.send    │ Hook receiver   │ Event log         │  │
-│  │ runs.dispatch  │ OTel collector  │ WorktreeMgr       │  │
+│  │ runs.dispatch  │                 │ WorktreeMgr       │  │
 │  │ FlowExecutor   │ Stream parsers  │ Cards + Templates │  │
 │  ├────────────────┼─────────────────┼───────────────────┤  │
 │  │ PROVIDERS      │  TOOLS          │ POLICY            │  │
@@ -338,7 +338,7 @@ The token used for RPC auth is stored in the **OS keyring** (`keyring` package) 
 - **Subscription-only by default.** No API key path is opened in the standard chat / agent flow. The `anthropic` and `google` providers exist for the API-key route to the worktree-bound dispatcher, but the chat surface stays on `claude-cli` / `gemini-cli`.
 - **Localhost-only RPC.** The service binds `127.0.0.1:8765`. Token auth on top so a malicious local browser tab can't enumerate.
 - **Sandbox tiers** — `LocalSandbox` (default), `DockerSandbox` (cap-drop ALL, no-new-privileges, read-only root + tmpfs `/tmp`, no network unless card opts in, bind-mount of the worktree at `/workspace`). The DockerSandbox passes file paths via positional `sh` args (`sh -c '... "$1"'` style) so a malicious filename can't break out of the shell quoting.
-- **Path-injection guards** on every operator-supplied path (attachments filename, dictation audio path, workspace clone URL/branch, switch_branch name). Whitespace / `@` / option-prefix / control chars rejected.
+- **Path-injection guards** on every operator-supplied path: attachments filename rejects whitespace / `@` / `\n\r\t`; dictation audio paths must be regular files with allow-listed extensions; workspaces.clone refuses URLs starting with `-` or containing control chars (allows `@` so SSH URLs `git@github.com:…` work); switch_branch refuses names starting with `-` or containing whitespace.
 - **Cross-agent attachment auth** on every attachment RPC.
 - **CSRF / replay** — RPC token is a random 256-bit secret minted at first start.
 - **HITL approval gates** — the `Approval` table records who approved what when, with `risk_signals` JSON and a free-form note.
@@ -475,7 +475,7 @@ apps/
     │                            Outcome, Event, Attachment, …
     ├── attachments/             render pipeline (csv / xlsx / xls / images)
     ├── agents/                  follow-up presets + instruction renderer
-    ├── cards/                   PersonalityCard CRUD + seed cards
+    ├── cards/                   Seed cards (Broad-Research, QA-on-fix, …); CRUD lives in store/events.py
     ├── cost/                    Forecasts + price tables
     ├── dispatch/                ChatSession + Run lifecycle + EventBus + drift sentinel
     ├── dictation/               faster-whisper wrapper
@@ -497,7 +497,7 @@ apps/
 packs/
 ├── archetypes/                  Bundled cards (Broad-Research, QA-on-fix, …)
 ├── hooks/                       Claude hook scripts
-└── otel-presets/                Gemini OTel collector configs
+└── (otel-presets/ — planned, not shipped)
 scripts/
 ├── manifest.json                Operator-panel command manifest
 ├── ops.cmd / ops.py             Panel host

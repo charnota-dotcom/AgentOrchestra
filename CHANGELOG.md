@@ -1,5 +1,102 @@
 # Changelog
 
+## Phase 5 — PR #12 (merged 2026-05-10)
+
+Operator-facing additions in the big phase-5 super-PR:
+
+- **Image + Excel attachments end-to-end.**  `.png/.jpg/.gif/.webp`
+  pass through to the CLI as `@<path>` references; `.xlsx/.xls/.csv`
+  render to one fenced markdown table per sheet (200 rows × 30 cols
+  cap) and inline into the prompt.  25 MB upload cap, sanitized
+  filenames, cross-agent auth on every RPC.
+- **Repo-aware coding sessions.**  Bind an Agent to a Workspace; the
+  CLI subprocess runs with `cwd=<repo_path>` so its built-in Read /
+  Bash / Edit / Grep tools operate against the project.
+  ``workspaces.clone`` lets the operator clone a remote URL into
+  ``<data_dir>/clones/`` in one click.  Live ``workspaces.git_status``
+  banner + Switch-branch button on the canvas chat dialog.  The
+  system prompt auto-inlines the first project-convention file found
+  at the repo root (CLAUDE.md / AGENTS.md / GEMINI.md / .cursorrules)
+  capped at 8 KB.
+- **Conversations on the canvas.**  ConversationNodes wrap an Agent;
+  drag from the new Conversations palette section, double-click to
+  open a chat dialog scoped to that one agent.  Directional, labelled
+  lineage edges between parent and follow-up.  LineageBox cluster
+  wraps drawn around related conversations.  Visibility toggle dims
+  unrelated nodes when a conversation is selected.
+- **Cross-chat references.**  Each Agent has
+  ``reference_agent_ids``; referenced transcripts (and their
+  spreadsheet attachments) are inlined as a context preamble on every
+  send.  Cross-provider safe.  100 KB total cap.
+- **Limits tab.**  Cards per provider (Claude Code / Gemini CLI) with
+  plan picker + per-model caps + local message tally + attachment-
+  storage breakdown.  Manual refresh, 5-minute cooldown.
+- **Operator panel.**  ★ pinned utilities (start / restart / ops /
+  limits) plus 1-8 numbered setup flow.  ``start.cmd`` pre-flight
+  verifies both CLIs before launching; ``restart.cmd`` does a three-
+  pass kill (window-title + port-listening) so supervisor-spawned
+  services are reaped.
+- **Audit hardening.**  Three batches landed on top of the feature
+  work: HIGH security (DockerSandbox shell-injection, attachment-
+  upload size cap, CLI path-injection guards, Pillow decompression
+  bomb, xlsx zip-bomb walk fix, cross-agent auth, agent_dir boundary
+  on unlink, dictation path traversal, workspaces.clone URL guard,
+  switch_branch dash guard, EventStore connection-sharing, agents.send
+  lost-update, FlowExecutor cancel leak, RpcClient.aclose at quit);
+  MEDIUM (asyncio.to_thread on uploads, _render_references cap,
+  attachment-only sends, chip scroll, drag-drop, Ctrl+Shift+A,
+  flows.delete cancels active runs, optimistic flows.update); LOW
+  polish.
+- **Comprehensive README rewrite** + retrospective ROADMAP.md.
+
+## Unreleased — Phase 5 (PR #13)
+
+Continued phase-5 work on top of PR #12:
+
+- ``apps/gui/presets`` — new shared registry for model + thinking-depth
+  presets and the canonical ``compose_system(...)`` assembler.  Single
+  source of truth across the Chat tab, the Canvas "+ New conversation"
+  dialog, and the Agents-tab "+ New agent" dialog.  Public API:
+  ``MODEL_PRESETS`` (12 rows × 4 modes), ``THINKING_PRESETS`` (Off /
+  Normal / Hard / Very hard), ``compose_system``, ``model_label_for``.
+  Both registries are exported as tuples so a buggy consumer can't
+  corrupt them.
+- Chat tab refactored to consume the shared module — drops its local
+  ``_MODEL_PRESETS`` / ``_THINKING_PRESETS`` / ``_label_for`` / ``_skills_to_system``
+  definitions.  Behaviour-preserving.
+- Canvas "+ New conversation" dialog redesigned: provider filter,
+  full 12-row model + mode picker, thinking-depth dropdown, skills
+  field — same picker as the Chat tab.  ``compose_system`` produces
+  identical system prompts for identical inputs across screens.
+- Draft-canvas amber banner: "📐 Draft canvas — planning surface.  Run
+  is disabled. Model / thinking / skills / repo binding all behave
+  the same as the Chat tab; flip Draft off to dispatch."
+- Agents-tab "+ New agent" dialog: now slices ``MODEL_PRESETS`` for
+  Coding-mode rows.  Asserts non-empty at import and guards
+  ``currentIndex() == -1`` to refuse rather than IndexError.
+- AgentChatDialog header + ConversationNode subtitle/tooltip: use
+  ``model_label_for`` so the canvas shows the friendly label
+  ("Claude Sonnet 4.6") instead of the raw provider id.
+- Mid-thread thinking / skills changes now show a small amber hint —
+  "↳ Thinking / skills changes apply to the next New chat" — because
+  the system prompt is locked at agent creation.
+- **QA round 3** (this commit batch): 7-agent audit pass plus follow-
+  up fixes covering UX consistency (button styles, error toasts,
+  loading states), security (token timing, attachment filename
+  prompt-injection, tar-slip on backup restore, WAL/SHM cleanup,
+  workspaces.clone path traversal, derived default branch, agent
+  reference_agent_ids scrub on delete), GUI lifetime (deleted-parent
+  guards on long-running clone callbacks, hidden-label layout space,
+  visibility highlight cleared on node delete, signal connect
+  simplification), docstring drift (dispatcher, types.Workspace /
+  Flow / FlowRun / SandboxTier), README factual fixes (Home tab
+  description, OTel removal, 8-not-9 tabs, cards/ description,
+  manifest.json claim), CHANGELOG completeness, plus new
+  `docs/BACKUP.md`, `docs/ROADMAP.md`, and a stub `LICENSE` file.
+- New regression tests for attachments.upload, cross-agent attachment
+  auth, FlowVersionConflict on flows.update, flows.delete cancelling
+  in-flight runs.
+
 ## Unreleased — Phase 4
 
 Sprint 1 — multi-vendor agentic parity + sandbox tier.

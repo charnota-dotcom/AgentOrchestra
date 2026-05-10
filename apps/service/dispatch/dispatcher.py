@@ -1,17 +1,29 @@
 """RunDispatcher.
 
 Drives a Run from QUEUED to AWAITING_APPROVAL (the human-review state)
-by:
+by either of two paths chosen from the card's ``mode``:
 
-1. Loading the card, instruction, and (optional) workspace.
-2. Transitioning the Run state through the canonical state machine.
-3. Opening a ChatSession via the provider registry.
-4. Sending the rendered instruction; consuming the StreamEvent
-   iterator and persisting Step + Event rows.
-5. Saving the final assistant text as an Artifact (kind=transcript).
-6. Cost-accounting via the cost meter.
-7. Optionally creating a worktree (reserved for future archetypes that
-   touch files; the V1 archetypes are research/QA and do not).
+Chat path (``CardMode.CHAT``) — research / QA / general assistance:
+
+1. Load the card, instruction, and (optional) workspace.
+2. Transition the Run state through the canonical state machine.
+3. Open a ChatSession via the provider registry.
+4. Send the rendered instruction; consume the StreamEvent iterator
+   and persist Step + Event rows.
+5. Save the final assistant text as an Artifact (kind=transcript).
+6. Cost-account via the cost meter.
+
+Agentic path (``CardMode.AGENTIC``) — code-edit / artifact-producing
+runs.  Now fully shipped (was reserved for future archetypes):
+
+1. ``WorktreeManager.create`` cuts an ``agent/<run-id>`` branch +
+   worktree under ``<repo>/.agent-worktrees/<run-id>``.
+2. ``provider.run_with_tools`` runs the agent loop; each tool_use is
+   executed via ``ToolExecutor`` and its result fed back to the model.
+3. Each turn that touches files is committed automatically.  Drift
+   sentinel + per-card ``max_commits_per_run`` cap.
+4. ``commit / merge / approve / reject / abandon`` complete the
+   branch life-cycle; auto-QA optionally fires a child Run.
 
 The dispatcher is fire-and-forget: callers receive the run_id, then
 the live UI streams via the EventBus.  Errors are emitted as

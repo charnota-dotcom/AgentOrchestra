@@ -135,7 +135,23 @@ def restore_backup(*, archive_path: Path, target_db_path: Path) -> RestoreReport
         tmp_dir = target_db_path.parent / f".aorestore-tmp-{target_db_path.stem}"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         try:
-            tar.extractall(tmp_dir)
+            # ``filter='data'`` rejects archive members with absolute
+            # paths or `..` segments — without it a malicious .aobackup
+            # could write outside `tmp_dir` (tar-slip).  Available
+            # since Python 3.12; we require 3.11+ but the keyword is
+            # accepted on older interpreters via tarfile's compatibility
+            # layer (it just becomes a no-op there).
+            try:
+                tar.extractall(tmp_dir, filter="data")
+            except TypeError:
+                # Older tarfile without `filter` kwarg — fall back to
+                # an explicit member-path validator.
+                for m in tar.getmembers():
+                    if m.name.startswith("/") or ".." in Path(m.name).parts:
+                        raise ValueError(  # noqa: B904 — outer except is TypeError handling, not the ValueError's cause
+                            f"refusing tar-slip member: {m.name}"
+                        )
+                tar.extractall(tmp_dir)
             staged = tmp_dir / "store.sqlite"
             if target_db_path.exists():
                 backup_path = target_db_path.with_suffix(
@@ -144,6 +160,13 @@ def restore_backup(*, archive_path: Path, target_db_path: Path) -> RestoreReport
                 shutil.copy2(target_db_path, backup_path)
                 log.info("pre-restore backup at %s", backup_path)
             shutil.move(str(staged), str(target_db_path))
+            # Drop any stale -wal / -shm sidecars from the *previous*
+            # database; without this SQLite would replay pre-restore
+            # WAL frames into the freshly-restored file and corrupt it.
+            for sfx in (".sqlite-wal", ".sqlite-shm"):
+                sidecar = target_db_path.with_suffix(sfx)
+                if sidecar.exists():
+                    sidecar.unlink()
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 

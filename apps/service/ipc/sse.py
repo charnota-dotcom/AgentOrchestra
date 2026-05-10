@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 
@@ -18,7 +19,9 @@ def make_run_stream_route(bus: EventBus, *, token: str):
     """Returns an async function suitable as a Starlette endpoint."""
 
     async def endpoint(request: Request) -> Response:
-        if request.headers.get("authorization", "") != f"Bearer {token}":
+        # Constant-time comparison; cheap hardening against (very
+        # theoretical) loopback timing attacks.  See server.py.
+        if not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {token}"):
             return Response("unauthorized", status_code=401)
         run_id = request.path_params["run_id"]
 
