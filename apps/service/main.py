@@ -82,6 +82,13 @@ def _render_transcript(agent: Agent) -> str:
     return "\n\n".join(parts)
 
 
+# Maximum total characters of referenced-attachment markdown the
+# orchestrator will fold into a single prompt.  Without a cap, an
+# agent referencing a few sheets-heavy agents can balloon the prompt
+# past any model's context window before the user's own message.
+_MAX_REF_ATTACHMENT_CHARS = 100_000
+
+
 def _render_references(
     refs: list[Agent], ref_attachments: dict[str, list[Attachment]] | None = None
 ) -> str:
@@ -100,10 +107,16 @@ def _render_references(
     only — the receiving model can't actually see them via the text
     preamble (they need to be re-attached if the operator wants the
     new agent to view them).
+
+    Total inlined attachment markdown is capped at
+    ``_MAX_REF_ATTACHMENT_CHARS`` across all references combined; the
+    excess is replaced with a "(truncated …)" marker so the model
+    knows it's seeing a slice.
     """
     if not refs:
         return ""
     blocks: list[str] = []
+    remaining_budget = _MAX_REF_ATTACHMENT_CHARS
     for ref in refs:
         body = "\n".join(
             f"{('User' if m.get('role') == 'user' else 'Assistant')}: {m.get('content', '')}"
@@ -115,9 +128,24 @@ def _render_references(
             sections: list[str] = []
             for a in atts:
                 if a.kind == AttachmentKind.SPREADSHEET and a.rendered_text:
-                    sections.append(
-                        f"[attachment: {a.original_name}]\n{a.rendered_text}"
-                    )
+                    inlined = f"[attachment: {a.original_name}]\n{a.rendered_text}"
+                    if len(inlined) > remaining_budget:
+                        if remaining_budget > 200:
+                            sections.append(
+                                inlined[: remaining_budget - 100]
+                                + f"\n_(truncated; combined ref-attachment cap "
+                                f"of {_MAX_REF_ATTACHMENT_CHARS} chars hit)_"
+                            )
+                            remaining_budget = 0
+                        else:
+                            sections.append(
+                                f"[attachment: {a.original_name} — omitted; "
+                                f"ref-attachment budget exhausted]"
+                            )
+                        # Stop folding further spreadsheets for this ref.
+                        continue
+                    sections.append(inlined)
+                    remaining_budget -= len(inlined)
                 else:
                     sections.append(
                         f"[attachment: {a.original_name} ({a.kind.value}, {a.bytes} bytes) — "
@@ -1158,6 +1186,39 @@ class Handlers:
         rows = await self.store.list_attachments(agent_id)
         return [a.model_dump(mode="json") for a in rows]
 
+    async def attachments_usage(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Per-agent attachment storage tally for the Limits tab.
+
+        Returns total file count + total bytes broken out per agent and
+        a grand total.  Reads from the DB rows (stored_path bytes) so
+        we don't have to walk the filesystem.
+        """
+        agents = await self.store.list_agents()
+        per_agent: list[dict[str, Any]] = []
+        total_bytes = 0
+        total_files = 0
+        for a in agents:
+            atts = await self.store.list_attachments(a.id)
+            if not atts:
+                continue
+            agent_bytes = sum(att.bytes for att in atts)
+            total_bytes += agent_bytes
+            total_files += len(atts)
+            per_agent.append(
+                {
+                    "agent_id": a.id,
+                    "agent_name": a.name,
+                    "files": len(atts),
+                    "bytes": agent_bytes,
+                }
+            )
+        per_agent.sort(key=lambda r: r["bytes"], reverse=True)
+        return {
+            "agents": per_agent,
+            "total_files": total_files,
+            "total_bytes": total_bytes,
+        }
+
     async def attachments_delete(self, params: dict[str, Any]) -> dict[str, Any]:
         # Authz: require the caller to name the owning agent and confirm
         # the attachment belongs to it.  Stops cross-agent wipes.
@@ -1424,6 +1485,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("attachments.upload", h.attachments_upload)
     server.register("attachments.list", h.attachments_list)
     server.register("attachments.delete", h.attachments_delete)
+    server.register("attachments.usage", h.attachments_usage)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
     server.register("limits.check", h.limits_check)

@@ -28,6 +28,18 @@ if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
 
+def _humanize_bytes(n: int) -> str:
+    """Format a byte count for display ('12.3 MB', '728 KB', ...)."""
+    if n < 1024:
+        return f"{n} B"
+    for unit in ("KB", "MB", "GB", "TB"):
+        n_f = n / 1024
+        if n_f < 1024 or unit == "TB":
+            return f"{n_f:.1f} {unit}"
+        n = int(n_f)
+    return f"{n} B"
+
+
 class LimitsPage(QtWidgets.QWidget):
     # Soft cooldown so the Refresh button can't be hammered.  The
     # CLI status calls take real subprocess time and the operator
@@ -126,11 +138,16 @@ class LimitsPage(QtWidgets.QWidget):
             usage = await self.client.call("limits.usage", {})
         except Exception:
             usage = {"providers": {}}
+        try:
+            attachment_usage = await self.client.call("attachments.usage", {})
+        except Exception:
+            attachment_usage = {"agents": [], "total_files": 0, "total_bytes": 0}
         self._render_providers(
             res.get("providers", []),
             res.get("context_windows", {}),
             res.get("data_as_of", "?"),
             usage.get("providers", {}),
+            attachment_usage,
         )
         self.status_line.setText(
             f"Last checked: {QtCore.QDateTime.currentDateTime().toString('HH:mm:ss')}  "
@@ -144,6 +161,7 @@ class LimitsPage(QtWidgets.QWidget):
         context_windows: dict[str, int],
         data_as_of: str,
         local_usage: dict[str, dict[str, int]],
+        attachment_usage: dict[str, Any] | None = None,
     ) -> None:
         while self._cards_layout.count():
             item = self._cards_layout.takeAt(0)
@@ -159,7 +177,42 @@ class LimitsPage(QtWidgets.QWidget):
         # at a glance how big each model's prompt budget is.
         if context_windows:
             self._cards_layout.addWidget(self._build_context_card(context_windows))
+        # Attachment-storage card: total disk usage by agents'
+        # uploaded images + spreadsheets, so the operator can see where
+        # disk is going and clean up loud agents.
+        if attachment_usage and attachment_usage.get("total_files", 0) > 0:
+            self._cards_layout.addWidget(self._build_attachment_card(attachment_usage))
         self._cards_layout.addStretch(1)
+
+    def _build_attachment_card(self, usage: dict[str, Any]) -> QtWidgets.QWidget:
+        card = QtWidgets.QFrame()
+        card.setStyleSheet(
+            "QFrame{background:#fff;border:1px solid #e6e7eb;"
+            "border-radius:6px;padding:14px;}"
+        )
+        v = QtWidgets.QVBoxLayout(card)
+        v.setSpacing(6)
+        title = QtWidgets.QLabel("Attachment storage")
+        title.setStyleSheet("font-size:14px;font-weight:600;color:#0f1115;")
+        v.addWidget(title)
+        total_files = int(usage.get("total_files", 0))
+        total_bytes = int(usage.get("total_bytes", 0))
+        v.addWidget(
+            QtWidgets.QLabel(
+                f"<span style='color:#5b6068;font-size:11px;'>"
+                f"{total_files} file(s) · {_humanize_bytes(total_bytes)} total"
+                f"</span>"
+            )
+        )
+        for row in usage.get("agents", []):
+            line = QtWidgets.QLabel(
+                f"<b>{row.get('agent_name', '?')}</b>  ·  "
+                f"{row.get('files', 0)} files  ·  "
+                f"{_humanize_bytes(int(row.get('bytes', 0)))}"
+            )
+            line.setStyleSheet("font-size:11px;color:#0f1115;padding-left:6px;")
+            v.addWidget(line)
+        return card
 
     def _build_card(
         self,

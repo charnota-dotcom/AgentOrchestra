@@ -126,12 +126,26 @@ class AgentChatDialog(QtWidgets.QDialog):
 
         # Pending attachments — files the operator picked but hasn't
         # sent yet.  Each is a dict {id, original_name, kind, bytes}.
+        # Horizontal scroll so 50 chips can't push the dialog past the
+        # screen edge.
         self._pending_attachments: list[dict[str, Any]] = []
         self.attachments_row = QtWidgets.QHBoxLayout()
         self.attachments_row.setSpacing(6)
+        self.attachments_row.setContentsMargins(0, 0, 0, 0)
         self.attachments_row.addStretch(1)
-        att_wrap = QtWidgets.QWidget()
-        att_wrap.setLayout(self.attachments_row)
+        chip_inner = QtWidgets.QWidget()
+        chip_inner.setLayout(self.attachments_row)
+        att_wrap = QtWidgets.QScrollArea()
+        att_wrap.setWidgetResizable(True)
+        att_wrap.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        att_wrap.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        att_wrap.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        att_wrap.setFixedHeight(36)
+        att_wrap.setWidget(chip_inner)
         att_wrap.setVisible(False)
         self._attachments_wrap = att_wrap
         v.addWidget(att_wrap)
@@ -278,26 +292,50 @@ class AgentChatDialog(QtWidgets.QDialog):
         asyncio.ensure_future(self._upload_attachment(Path(path)))
 
     async def _upload_attachment(self, path: Path) -> None:
+        # Reject obviously-too-big files up front (matches the service's
+        # 25 MB cap) so we don't spend seconds reading + b64-encoding
+        # something the server will refuse anyway.
         try:
-            data = path.read_bytes()
+            size = path.stat().st_size
         except OSError as exc:
             QtWidgets.QMessageBox.warning(self, "Couldn't read file", str(exc))
             return
-        self.attach_btn.setEnabled(False)
-        try:
-            res = await self.client.call(
-                "attachments.upload",
-                {
-                    "agent_id": self.agent["id"],
-                    "original_name": path.name,
-                    "content_b64": base64.b64encode(data).decode("ascii"),
-                },
+        if size > 25 * 1024 * 1024:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "File too large",
+                f"{path.name} is {size // (1024 * 1024)} MB; max is 25 MB.",
             )
-        except Exception as exc:
-            QtWidgets.QMessageBox.warning(self, "Couldn't attach file", str(exc))
             return
+
+        self.attach_btn.setEnabled(False)
+        self.attach_btn.setText("…")  # cheap progress indicator
+        try:
+            # Read + base64 are CPU/IO heavy on multi-MB files — push
+            # them off the qasync event loop so the UI stays responsive.
+            try:
+                data = await asyncio.to_thread(path.read_bytes)
+            except OSError as exc:
+                QtWidgets.QMessageBox.warning(self, "Couldn't read file", str(exc))
+                return
+            content_b64 = await asyncio.to_thread(
+                lambda: base64.b64encode(data).decode("ascii")
+            )
+            try:
+                res = await self.client.call(
+                    "attachments.upload",
+                    {
+                        "agent_id": self.agent["id"],
+                        "original_name": path.name,
+                        "content_b64": content_b64,
+                    },
+                )
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(self, "Couldn't attach file", str(exc))
+                return
         finally:
             self.attach_btn.setEnabled(True)
+            self.attach_btn.setText("📎")
         if res.get("warning"):
             QtWidgets.QMessageBox.information(
                 self,

@@ -17,7 +17,7 @@ import base64
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6 import QtGui, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
@@ -270,12 +270,27 @@ class ChatPage(QtWidgets.QWidget):
         layout.addWidget(self.transcript, stretch=1)
 
         # Pending attachments — files the user picked but hasn't sent.
+        # Wrapped in a horizontal QScrollArea so spamming the paperclip
+        # 50 times can't push the dialog wider than the screen and
+        # clip the send button.
         self._pending_attachments: list[dict[str, Any]] = []
         self.attachments_row = QtWidgets.QHBoxLayout()
         self.attachments_row.setSpacing(6)
+        self.attachments_row.setContentsMargins(0, 0, 0, 0)
         self.attachments_row.addStretch(1)
-        self._attachments_wrap = QtWidgets.QWidget()
-        self._attachments_wrap.setLayout(self.attachments_row)
+        chip_inner = QtWidgets.QWidget()
+        chip_inner.setLayout(self.attachments_row)
+        self._attachments_wrap = QtWidgets.QScrollArea()
+        self._attachments_wrap.setWidgetResizable(True)
+        self._attachments_wrap.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._attachments_wrap.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._attachments_wrap.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self._attachments_wrap.setFixedHeight(36)
+        self._attachments_wrap.setWidget(chip_inner)
         self._attachments_wrap.setVisible(False)
         layout.addWidget(self._attachments_wrap)
 
@@ -439,6 +454,9 @@ class ChatPage(QtWidgets.QWidget):
         """Upload every cached local file and return the resulting
         attachment ids in order.  Files that fail to upload are
         skipped with a chat-side warning.
+
+        Read + base64-encode happen in a thread so a multi-MB file
+        doesn't freeze the qasync event loop.
         """
         ids: list[str] = []
         for att in list(self._pending_attachments):
@@ -447,17 +465,20 @@ class ChatPage(QtWidgets.QWidget):
                 continue
             local = att.get("local_path", "")
             try:
-                data = Path(local).read_bytes()
+                data = await asyncio.to_thread(Path(local).read_bytes)
             except OSError as exc:
                 self._append("Warning", f"could not read {local}: {exc}")
                 continue
+            content_b64 = await asyncio.to_thread(
+                lambda d=data: base64.b64encode(d).decode("ascii")
+            )
             try:
                 res = await self.client.call(
                     "attachments.upload",
                     {
                         "agent_id": agent_id,
                         "original_name": att.get("original_name", "upload"),
-                        "content_b64": base64.b64encode(data).decode("ascii"),
+                        "content_b64": content_b64,
                     },
                 )
             except Exception as exc:
@@ -472,8 +493,14 @@ class ChatPage(QtWidgets.QWidget):
 
     def _send(self) -> None:
         text = self.message_input.toPlainText().strip()
-        if not text:
+        # Attachment-only send: synthesise a short user message so the
+        # backend has something to record and the auto-name has a
+        # filename to derive from, rather than silently doing nothing.
+        if not text and not self._pending_attachments:
             return
+        if not text:
+            names = ", ".join(a.get("original_name", "?") for a in self._pending_attachments)
+            text = f"Please review the attached file{'s' if len(self._pending_attachments) > 1 else ''}: {names}"
         self._history.append({"role": "user", "content": text})
         if self._pending_attachments:
             names = ", ".join(a.get("original_name", "?") for a in self._pending_attachments)
@@ -511,7 +538,9 @@ class ChatPage(QtWidgets.QWidget):
                 created = await self.client.call(
                     "agents.create",
                     {
-                        "name": _auto_name_from(message, label),
+                        "name": _auto_name_from(
+                            message, label, self._pending_attachments
+                        ),
                         "provider": provider,
                         "model": model,
                         "system": system,
@@ -701,15 +730,30 @@ def _label_for(provider: str, model: str) -> str:
     return f"{model} ({provider})"
 
 
-def _auto_name_from(message: str, model_label: str) -> str:
+def _auto_name_from(
+    message: str,
+    model_label: str,
+    attachments: list[dict[str, Any]] | None = None,
+) -> str:
     """Produce a short browsable name from the user's first message.
 
     Truncates to ~50 chars and strips newlines so the Conversations
-    palette stays scannable.  Falls back to the model label when the
-    first message is essentially empty.
+    palette stays scannable.  When the message is essentially empty
+    but a file is attached, name the agent after the file so the
+    palette still reads as something specific (not the model label).
     """
     one_line = " ".join(message.split())
+    # Strip the synthetic "Please review the attached file: x.png"
+    # prefix we mint for attachment-only sends so the agent name is
+    # the filename rather than that boilerplate.
+    if attachments and one_line.lower().startswith("please review the attached"):
+        one_line = ""
     if not one_line:
+        if attachments:
+            first = attachments[0].get("original_name", "")
+            if first:
+                trimmed = first if len(first) <= 50 else first[:47] + "…"
+                return f"📎 {trimmed}"
         return model_label
     if len(one_line) <= 50:
         return one_line
