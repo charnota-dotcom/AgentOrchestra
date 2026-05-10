@@ -299,6 +299,25 @@ class Handlers:
         # fetch->mutate->LLM->store cycle.
         self._agent_send_locks: dict[str, asyncio.Lock] = {}
         self._agent_send_locks_guard = asyncio.Lock()
+        # Same lock pattern, but for drone actions (drones.send is the
+        # equivalent serialisation point).  Kept separate from the
+        # agent map so the two surfaces don't share lock identity by
+        # accident across the rip-out boundary.
+        self._action_send_locks: dict[str, asyncio.Lock] = {}
+        self._action_send_locks_guard = asyncio.Lock()
+
+    async def _lock_for_action(self, action_id: str) -> asyncio.Lock:
+        if not isinstance(action_id, str) or not action_id:
+            raise ValueError("action_id required")
+        async with self._action_send_locks_guard:
+            lock = self._action_send_locks.get(action_id)
+            if lock is None:
+                exists = await self.store.get_drone_action(action_id)
+                if exists is None:
+                    raise ValueError(f"unknown action: {action_id}")
+                lock = asyncio.Lock()
+                self._action_send_locks[action_id] = lock
+            return lock
 
     async def _lock_for_agent(self, agent_id: str) -> asyncio.Lock:
         # Validate the agent exists before minting a lock so a malformed
@@ -1590,7 +1609,118 @@ class Handlers:
 
     async def drones_delete(self, params: dict[str, Any]) -> dict[str, Any]:
         ok = await self.store.delete_drone_action(params["id"])
+        async with self._action_send_locks_guard:
+            self._action_send_locks.pop(params["id"], None)
         return {"deleted": bool(ok)}
+
+    async def drones_send(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Append the operator's message to a drone action's transcript
+        and get a reply.  Multi-turn — every turn after the first builds
+        on the prior transcript.
+
+        Reads from the action's frozen ``blueprint_snapshot`` for
+        provider / model / system_persona, layering in the action's
+        ``additional_skills`` on top of the snapshot's defaults so the
+        LLM sees ``effective_skills``.
+
+        First-version scope: chat-only or workspace-bound, no
+        attachments, no cross-action references.  Both deferred to a
+        follow-up PR.
+        """
+        from apps.service.providers.registry import get_provider
+
+        action_id = params["action_id"]
+        message = params["message"]
+        async with await self._lock_for_action(action_id):
+            action = await self.store.get_drone_action(action_id)
+            if not action:
+                raise ValueError(f"unknown action: {action_id}")
+            snapshot = action.blueprint_snapshot or {}
+            provider_name = snapshot.get("provider")
+            model = snapshot.get("model")
+            if not provider_name or not model:
+                # An action without a provider/model in its snapshot is
+                # malformed — refuse rather than guess.  The Blueprints
+                # tab requires both, so this only fires on hand-crafted
+                # rows or a future-format snapshot we don't fully
+                # understand.
+                raise ValueError(
+                    f"action {action_id} has no provider/model in snapshot — "
+                    "redeploy from a complete blueprint"
+                )
+            action.transcript.append({"role": "user", "content": message})
+
+            # Build the prompt body from the transcript.  Mirrors
+            # _render_transcript() but reads from the snapshot for the
+            # system header, since blueprint edits AFTER deploy must
+            # not retroactively change in-flight conversations.
+            persona = snapshot.get("system_persona") or ""
+            effective_skills = list(snapshot.get("skills") or []) + list(
+                action.additional_skills or []
+            )
+            parts: list[str] = []
+            if persona:
+                parts.append(f"System: {persona}")
+            if effective_skills:
+                # Inline the skill tokens so the model knows it's allowed
+                # to invoke them.  Provider adapters may further inject
+                # tool definitions; this is the minimum viable hint.
+                parts.append("Available skills: " + " ".join(effective_skills))
+            for m in action.transcript:
+                role = "User" if m.get("role") == "user" else "Assistant"
+                parts.append(f"{role}: {m.get('content', '')}")
+            parts.append("Assistant:")
+            prompt = "\n\n".join(parts)
+
+            provider = get_provider(provider_name)
+            from apps.service.types import (
+                BlastRadiusPolicy,
+                CardMode,
+                CostPolicy,
+                PersonalityCard,
+                SandboxTier,
+            )
+
+            card = PersonalityCard(
+                name=f"(drone {snapshot.get('name', action_id)})",
+                archetype="drone",
+                description="ephemeral card for a drone action",
+                template_id="drone",
+                provider=provider_name,
+                model=model,
+                mode=CardMode.CHAT,
+                cost=CostPolicy(),
+                blast_radius=BlastRadiusPolicy(),
+                sandbox_tier=SandboxTier.DEVCONTAINER,
+            )
+
+            cwd: str | None = None
+            system_prompt: str | None = persona or None
+            if action.workspace_id:
+                ws = await self.store.get_workspace(action.workspace_id)
+                if ws is not None:
+                    cwd = ws.repo_path
+                    system_prompt = await self._build_repo_system_prompt(
+                        ws, base_system=system_prompt
+                    )
+
+            session = await provider.open_chat(card, system=system_prompt, cwd=cwd)
+            chunks: list[str] = []
+            try:
+                async for ev in session.send(prompt, attachments=[]):
+                    if ev.kind == "text_delta":
+                        chunks.append(ev.text)
+                    elif ev.kind == "error":
+                        raise RuntimeError(ev.text or "provider error")
+                    elif ev.kind == "finish":
+                        break
+            finally:
+                await session.close()
+            reply = "".join(chunks)
+            action.transcript.append({"role": "assistant", "content": reply})
+            await self.store.update_drone_action(action)
+            await self.store.record_provider_message(provider_name, model)
+            return {"reply": reply, "action": action.model_dump(mode="json")}
 
     async def _load_actor_for_authority(self, actor_id: str) -> DroneAction:
         actor = await self.store.get_drone_action(actor_id)
@@ -2109,6 +2239,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("drones.get", h.drones_get)
     server.register("drones.deploy", h.drones_deploy)
     server.register("drones.delete", h.drones_delete)
+    server.register("drones.send", h.drones_send)
     server.register("drones.append_reference", h.drones_append_reference)
     server.register("drones.append_skill", h.drones_append_skill)
     server.register("attachments.upload", h.attachments_upload)

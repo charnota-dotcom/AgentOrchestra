@@ -20,6 +20,7 @@ from apps.gui.windows.agents import AgentsPage
 from apps.gui.windows.blueprints import BlueprintsPage
 from apps.gui.windows.chat import ChatPage
 from apps.gui.windows.composer import ComposerPage
+from apps.gui.windows.drones import DronesPage
 from apps.gui.windows.first_run import FirstRunWizard, first_run_pending
 from apps.gui.windows.history import HistoryPage
 from apps.gui.windows.home import HomePage
@@ -60,6 +61,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chat = ChatPage(self.client)
         self.agents = AgentsPage(self.client)
         self.blueprints = BlueprintsPage(self.client)
+        self.drones = DronesPage(self.client)
         self.limits = LimitsPage(self.client)
 
         self.stack.addWidget(self.home)  # 0
@@ -73,6 +75,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.addWidget(self.agents)  # 8
         self.stack.addWidget(self.limits)  # 9
         self.stack.addWidget(self.blueprints)  # 10
+        self.stack.addWidget(self.drones)  # 11
 
         self.setCentralWidget(central)
 
@@ -123,6 +126,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "Chat",
             "Agents",
             "Blueprints",
+            "Drones",
             "Compose",
             "Canvas",
             "History",
@@ -148,9 +152,9 @@ class MainWindow(QtWidgets.QMainWindow):
         return rail
 
     # Map rail button index -> stack widget index.
-    # Home → 0, Chat → 7, Agents → 8, Blueprints → 10, Compose → 1,
-    # Canvas → 6, History → 4, Limits → 9, Settings → 5
-    _NAV_TO_STACK = {0: 0, 1: 7, 2: 8, 3: 10, 4: 1, 5: 6, 6: 4, 7: 9, 8: 5}
+    # Home → 0, Chat → 7, Agents → 8, Blueprints → 10, Drones → 11,
+    # Compose → 1, Canvas → 6, History → 4, Limits → 9, Settings → 5
+    _NAV_TO_STACK = {0: 0, 1: 7, 2: 8, 3: 10, 4: 11, 5: 1, 6: 6, 7: 4, 8: 9, 9: 5}
 
     def _wire_navigation(self) -> None:
         for i, btn in enumerate(self._nav_buttons):
