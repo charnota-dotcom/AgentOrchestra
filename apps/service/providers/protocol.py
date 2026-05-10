@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from apps.service.types import Attachment, PersonalityCard
+from apps.service.types import PersonalityCard
 
 if TYPE_CHECKING:
     from apps.service.dispatch.tools import ToolExecutor
@@ -59,14 +59,13 @@ class ChatSession(Protocol):
         self,
         message: str,
         *,
-        attachments: list[Attachment] | None = None,
+        attachments: Any = None,
     ) -> AsyncIterator[StreamEvent]:
         """Send a user message and stream back events.
 
-        ``attachments`` are typed file references (typically images);
-        the adapter is responsible for handing the underlying file to
-        its CLI / API in whatever shape the vendor expects.  Providers
-        that don't support attachments may ignore the kwarg.
+        ``attachments`` is reserved for future attachment support; v1
+        providers accept the kwarg for protocol compatibility but
+        ignore it.
         """
         ...
 

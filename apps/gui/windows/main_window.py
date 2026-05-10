@@ -16,9 +16,9 @@ from PySide6 import QtCore, QtWidgets
 
 from apps.gui.annotator import setup_annotator
 from apps.gui.canvas.page import CanvasPage
-from apps.gui.windows.agents import AgentsPage
-from apps.gui.windows.chat import ChatPage
+from apps.gui.windows.blueprints import BlueprintsPage
 from apps.gui.windows.composer import ComposerPage
+from apps.gui.windows.drones import DronesPage
 from apps.gui.windows.first_run import FirstRunWizard, first_run_pending
 from apps.gui.windows.history import HistoryPage
 from apps.gui.windows.home import HomePage
@@ -56,8 +56,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.history = HistoryPage(self.client)
         self.settings = SettingsPage(self.client)
         self.canvas = CanvasPage(self.client)
-        self.chat = ChatPage(self.client)
-        self.agents = AgentsPage(self.client)
+        self.blueprints = BlueprintsPage(self.client)
+        self.drones = DronesPage(self.client)
         self.limits = LimitsPage(self.client)
 
         self.stack.addWidget(self.home)  # 0
@@ -67,9 +67,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.addWidget(self.history)  # 4
         self.stack.addWidget(self.settings)  # 5
         self.stack.addWidget(self.canvas)  # 6
-        self.stack.addWidget(self.chat)  # 7
-        self.stack.addWidget(self.agents)  # 8
-        self.stack.addWidget(self.limits)  # 9
+        self.stack.addWidget(self.limits)  # 7
+        self.stack.addWidget(self.blueprints)  # 8
+        self.stack.addWidget(self.drones)  # 9
 
         self.setCentralWidget(central)
 
@@ -117,8 +117,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._nav_buttons: list[QtWidgets.QPushButton] = []
         for label in (
             "Home",
-            "Chat",
-            "Agents",
+            "Drones",
+            "Blueprints",
             "Compose",
             "Canvas",
             "History",
@@ -144,9 +144,9 @@ class MainWindow(QtWidgets.QMainWindow):
         return rail
 
     # Map rail button index -> stack widget index.
-    # Home → 0, Chat → 7, Agents → 8, Compose → 1, Canvas → 6,
-    # History → 4, Limits → 9, Settings → 5
-    _NAV_TO_STACK = {0: 0, 1: 7, 2: 8, 3: 1, 4: 6, 5: 4, 6: 9, 7: 5}
+    # Home → 0, Drones → 9, Blueprints → 8, Compose → 1, Canvas → 6,
+    # History → 4, Limits → 7, Settings → 5
+    _NAV_TO_STACK = {0: 0, 1: 9, 2: 8, 3: 1, 4: 6, 5: 4, 6: 7, 7: 5}
 
     def _wire_navigation(self) -> None:
         for i, btn in enumerate(self._nav_buttons):

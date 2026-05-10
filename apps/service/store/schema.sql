@@ -230,51 +230,11 @@ CREATE TABLE IF NOT EXISTS flow_runs (
 CREATE INDEX IF NOT EXISTS idx_flow_runs_flow ON flow_runs(flow_id);
 
 -- ---------------------------------------------------------------------------
--- Agents (named, persistent conversations).  Distinct from `cards`
--- (template-bound dispatch units): agents are the lay-person path —
--- a name, a model, a transcript, and an optional parent link for
--- follow-up agents (summarise / annotate / deep dive / etc).
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS agents (
-    id            TEXT PRIMARY KEY,
-    name          TEXT NOT NULL,
-    provider      TEXT NOT NULL,
-    model         TEXT NOT NULL,
-    system        TEXT NOT NULL DEFAULT '',
-    parent_id     TEXT REFERENCES agents(id),
-    parent_name   TEXT,
-    -- preset name used when this agent was spawned as a follow-up
-    -- (summarise / annotate / deep_dive / critique / verify / custom).
-    -- NULL for top-level agents.  Drives the directional-edge label
-    -- on the canvas.  Existing installs get this column via the
-    -- code-side migration in EventStore._migrate.
-    parent_preset TEXT,
-    -- JSON list of agent_ids whose transcripts are inlined as a
-    -- context preamble on every send.  Lets a fresh agent (different
-    -- provider / model) reference prior conversations without being
-    -- a literal child.  Existing installs get this via the code-side
-    -- migration too.
-    reference_agent_ids TEXT NOT NULL DEFAULT '[]',
-    -- Optional Workspace this agent operates inside.  When set, the
-    -- CLI subprocess runs with cwd = workspace.repo_path so the model
-    -- can use its built-in file tools against the project.  Null =
-    -- pure chat agent with no repo access.  Code-side migration
-    -- backfills this column on existing installs.
-    workspace_id  TEXT REFERENCES workspaces(id),
-    transcript    TEXT NOT NULL DEFAULT '[]',  -- JSON: [{role, content}]
-    created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
-CREATE INDEX IF NOT EXISTS idx_agents_updated ON agents(updated_at DESC);
-
--- ---------------------------------------------------------------------------
 -- Provider-side message tally — append-only.  Lets the Limits tab show
 -- "X messages / cap" against the published plan limits without polling
--- the CLI.  One row per successful agents.send / chat.send.  Pruned by
--- a daily VACUUM-equivalent (left for a future cleanup pass; the cost
--- is roughly 50 bytes per send).
+-- the CLI.  One row per successful drones.send.  Pruned by a daily
+-- VACUUM-equivalent (left for a future cleanup pass; the cost is
+-- roughly 50 bytes per send).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS provider_messages (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -284,28 +244,6 @@ CREATE TABLE IF NOT EXISTS provider_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_provider_messages_at ON provider_messages(provider, sent_at DESC);
-
--- ---------------------------------------------------------------------------
--- Attachments: files (images, spreadsheets) the operator drops into a
--- chat or agent dialog.  Stored on disk under
--- <data_dir>/attachments/<agent_id>/<id>__<sanitized_filename>; this
--- row indexes them and caches the rendered-text representation for
--- spreadsheets so we don't reparse on every send.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS attachments (
-    id              TEXT PRIMARY KEY,
-    agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    turn_index      INTEGER NOT NULL DEFAULT -1,
-    kind            TEXT NOT NULL,            -- 'image' | 'spreadsheet'
-    original_name   TEXT NOT NULL,
-    stored_path     TEXT NOT NULL,
-    mime_type       TEXT NOT NULL,
-    bytes           INTEGER NOT NULL,
-    rendered_text   TEXT,
-    created_at      TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_attachments_agent ON attachments(agent_id, created_at DESC);
 
 -- ---------------------------------------------------------------------------
 -- Drones — see docs/DRONE_MODEL.md.

@@ -1,9 +1,9 @@
 """Palette panel — drag source for new canvas nodes.
 
-Two sections: control nodes (Trigger / Branch / Merge / Human /
-Output), then agent cards loaded from the service.  Each row is
-draggable; the canvas page reads the MIME data on drop and creates
-the matching node.
+Three sections: control nodes (Trigger / Branch / Merge / Human /
+Output), agent cards loaded from the service, and live drone actions
+(deployed instances of blueprints).  Each row is draggable; the canvas
+page reads the MIME data on drop and creates the matching node.
 
 V1 uses Qt's standard drag-and-drop with a custom MIME type so the
 canvas can distinguish a palette drag from a normal selection drag.
@@ -16,14 +16,6 @@ import json
 from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtGui, QtWidgets
-
-from apps.gui.presets import (
-    DEFAULT_MODEL_INDEX,
-    DEFAULT_THINKING_INDEX,
-    MODEL_PRESETS,
-    THINKING_PRESETS,
-    compose_system,
-)
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
@@ -62,12 +54,12 @@ class _DragList(QtWidgets.QListWidget):
 
 
 class PalettePanel(QtWidgets.QWidget):
-    # Emitted right after a "+ New conversation" succeeds, so the
-    # canvas page can drop a ConversationNode at the view's centre and
-    # auto-open the chat dialog.  Without this, the new agent was only
-    # added to the palette and the operator stared at an empty canvas
-    # wondering where it went.
-    conversation_created = QtCore.Signal(dict)  # the enriched agent dict
+    # Emitted right after a "Deploy" succeeds, so the canvas page can
+    # drop a DroneActionNode at the view's centre and auto-open the
+    # chat dialog.  Without this, the new drone was only added to the
+    # palette and the operator stared at an empty canvas wondering
+    # where it went.
+    drone_deployed = QtCore.Signal(dict)  # the enriched drone-action dict
 
     def __init__(self, client: RpcClient) -> None:
         super().__init__()
@@ -99,51 +91,68 @@ class PalettePanel(QtWidgets.QWidget):
         self.cards_list.setStyleSheet(self._list_stylesheet())
         layout.addWidget(self.cards_list, stretch=1)
 
-        # Persistent named conversations (Agents tab).  Drag onto the
-        # canvas to anchor a conversation as a node; double-click the
-        # node to open a chat dialog scoped to that one agent.
-        conv_header = QtWidgets.QHBoxLayout()
-        conv_header.setContentsMargins(0, 0, 0, 0)
-        conv_header.addWidget(self._section_header("Conversations"), stretch=1)
-        new_conv_btn = QtWidgets.QPushButton("+ New")
-        new_conv_btn.setStyleSheet(
-            "QPushButton{padding:2px 8px;border:1px solid #d0d3d9;"
-            "border-radius:4px;background:#f6f8fa;font-size:11px;}"
-            "QPushButton:hover{background:#eef0f3;}"
+        # Drones — deployed actions from the Drones tab.  Drag onto
+        # the canvas to anchor an action as a node; double-click the
+        # node to open a chat dialog scoped to that action.
+        drones_header = QtWidgets.QHBoxLayout()
+        drones_header.setContentsMargins(0, 0, 0, 0)
+        drones_header.addWidget(self._section_header("Drones"), stretch=1)
+        deploy_btn = QtWidgets.QPushButton("Deploy")
+        deploy_btn.setStyleSheet(
+            "QPushButton{padding:2px 8px;border:1px solid #1f6feb;"
+            "border-radius:4px;background:#1f6feb;color:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#1860d6;}"
         )
-        new_conv_btn.setToolTip("Create a new named conversation without leaving the canvas.")
-        new_conv_btn.clicked.connect(self._new_conversation_dialog)  # type: ignore[arg-type]
-        conv_header.addWidget(new_conv_btn)
-        layout.addLayout(conv_header)
+        deploy_btn.setToolTip(
+            "Deploy a new drone action from a blueprint without leaving the canvas."
+        )
+        deploy_btn.clicked.connect(self._deploy_dialog)  # type: ignore[arg-type]
+        drones_header.addWidget(deploy_btn)
+        layout.addLayout(drones_header)
 
-        self.agents_list = _DragList()
-        self.agents_list.setStyleSheet(self._list_stylesheet())
-        layout.addWidget(self.agents_list, stretch=1)
+        self.drones_list = _DragList()
+        self.drones_list.setStyleSheet(self._list_stylesheet())
+        layout.addWidget(self.drones_list, stretch=1)
 
         QtCore.QTimer.singleShot(0, lambda: asyncio.ensure_future(self._reload_all()))
 
     async def _reload_all(self) -> None:
-        await asyncio.gather(self.reload_cards(), self.reload_agents())
+        await asyncio.gather(self.reload_cards(), self.reload_drones())
 
-    # New-conversation dialog so the operator can mint an agent
-    # directly from the canvas with the *same* model / thinking / skills
-    # picker the live Chat tab uses.  Mirrors that screen so a flow
-    # drafted on the canvas behaves identically to the same prompt
-    # typed into Chat.  On success the palette refreshes and the new
-    # entry is draggable.
-    def _new_conversation_dialog(self) -> None:
+    # Deploy a drone action from a blueprint, without leaving the
+    # canvas.  Mirrors the Drones tab's Deploy dialog so the canvas
+    # surface behaves identically.  On success the palette refreshes
+    # and the new action is draggable + auto-dropped on the canvas.
+    def _deploy_dialog(self) -> None:
+        asyncio.ensure_future(self._deploy_dialog_async())
+
+    async def _deploy_dialog_async(self) -> None:
+        try:
+            blueprints = await self.client.call("blueprints.list", {})
+            workspaces = await self.client.call("workspaces.list", {})
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Cannot open deploy dialog", str(exc))
+            return
+        if not blueprints:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No blueprints yet",
+                "Create a blueprint on the Blueprints tab first, then deploy from here.",
+            )
+            return
+
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("New conversation")
-        dlg.resize(560, 520)
+        dlg.setWindowTitle("Deploy drone")
+        dlg.resize(520, 360)
         outer = QtWidgets.QVBoxLayout(dlg)
         outer.setContentsMargins(16, 16, 16, 12)
         outer.setSpacing(12)
-
         header = QtWidgets.QLabel(
-            "<b>New conversation</b><br/>"
-            "<span style='color:#5b6068;font-size:11px;'>Same picker as the "
-            "Chat tab — model, thinking depth, and skills all carry over to "
-            "this agent's system prompt.</span>"
+            "<b>Deploy drone</b><br/>"
+            "<span style='color:#5b6068;font-size:11px;'>Pick a blueprint + "
+            "(optional) workspace.  The action's blueprint snapshot is frozen "
+            "at deploy time — later blueprint edits don't affect this action."
+            "</span>"
         )
         header.setTextFormat(QtCore.Qt.TextFormat.RichText)
         outer.addWidget(header)
@@ -152,123 +161,33 @@ class PalettePanel(QtWidgets.QWidget):
         form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         form.setSpacing(8)
 
-        name_input = QtWidgets.QLineEdit()
-        name_input.setPlaceholderText(
-            "e.g. Agent Smith  (auto-generated from first message if blank)"
-        )
-        form.addRow("Name:", name_input)
+        bp_combo = QtWidgets.QComboBox()
+        for bp in blueprints:
+            label = (
+                f"{bp.get('name', '(unnamed)')}  ·  {bp.get('role', 'worker')}  ·  "
+                f"{bp.get('provider', '')} / {bp.get('model', '')}"
+            )
+            bp_combo.addItem(label, bp["id"])
+        form.addRow("Blueprint:", bp_combo)
 
-        # Provider filter — quick way to narrow the model dropdown when
-        # the operator only cares about Claude or Gemini.  "All" leaves
-        # every preset visible.
-        provider_filter = QtWidgets.QComboBox()
-        provider_filter.addItem("All", "")
-        provider_filter.addItem("Claude (claude-cli)", "claude-cli")
-        provider_filter.addItem("Gemini (gemini-cli)", "gemini-cli")
-        form.addRow("Provider:", provider_filter)
-
-        # Model + mode picker.  Item data carries the index into
-        # MODEL_PRESETS so we can recover the full ModelPreset on accept,
-        # even after the visible list has been filtered.
-        model_combo = QtWidgets.QComboBox()
-        for i, preset in enumerate(MODEL_PRESETS):
-            model_combo.addItem(preset.display(), i)
-        model_combo.setCurrentIndex(DEFAULT_MODEL_INDEX)
-        model_combo.setToolTip(
-            "Each row is one (model + mode) cell.  Modes (Coding, General "
-            "Chat, File / artifact, Image prompt) swap the system prompt "
-            "without leaving the same provider, exactly like the Chat tab."
-        )
-        form.addRow("Model:", model_combo)
-
-        def _filter_models(_idx: int) -> None:
-            wanted = provider_filter.currentData() or ""
-            saved_real_idx = model_combo.currentData()
-            model_combo.blockSignals(True)
-            model_combo.clear()
-            for i, preset in enumerate(MODEL_PRESETS):
-                if not wanted or preset.provider == wanted:
-                    model_combo.addItem(preset.display(), i)
-            # Try to restore the previous real index; if it was filtered
-            # out, fall back to the first visible row.
-            for ci in range(model_combo.count()):
-                if model_combo.itemData(ci) == saved_real_idx:
-                    model_combo.setCurrentIndex(ci)
-                    break
-            else:
-                if model_combo.count() > 0:
-                    model_combo.setCurrentIndex(0)
-            model_combo.blockSignals(False)
-
-        # Connection deferred until the OK-button gate is wired below
-        # so we connect `_filter_then_refresh` directly — no fragile
-        # disconnect/reconnect dance.
-
-        # Thinking-depth picker.  Same ladder as the Chat tab.
-        thinking_combo = QtWidgets.QComboBox()
-        for tp in THINKING_PRESETS:
-            thinking_combo.addItem(tp.label)
-        thinking_combo.setCurrentIndex(DEFAULT_THINKING_INDEX)
-        thinking_combo.setToolTip(
-            "Tells the model how hard to think before answering.  Off keeps "
-            "the prompt clean; Hard / Very hard ask for explicit reasoning."
-        )
-        form.addRow("Thinking:", thinking_combo)
-
-        # Skills field — free-form `/foo /bar baz` that becomes a system
-        # directive.  Matches the Chat tab's Skills input character-for-
-        # character.
-        skills_input = QtWidgets.QLineEdit()
-        skills_input.setPlaceholderText(
-            "Optional, e.g. /research-deep /cite-sources  (free-form, passed in the prompt)"
-        )
-        form.addRow("Skills:", skills_input)
-
-        # Repo picker — bind the new agent to a Workspace so the CLI
-        # runs inside that directory and can use its file tools.
         ws_combo = QtWidgets.QComboBox()
         ws_combo.addItem("(no repo — chat only)", "")
-        ws_combo.setToolTip(
-            "Pick a repo to give the agent file-tool access to.  "
-            "Add… registers an existing local path; Clone… clones a git URL."
+        for w in workspaces:
+            ws_combo.addItem(f"{w.get('name', '?')} — {w.get('repo_path', '?')}", w.get("id", ""))
+        form.addRow("Repo:", ws_combo)
+
+        skills_input = QtWidgets.QLineEdit()
+        skills_input.setPlaceholderText(
+            "/oneoff-skill, /another  (optional, layered on blueprint defaults)"
         )
-        ws_row = QtWidgets.QHBoxLayout()
-        ws_row.addWidget(ws_combo, stretch=1)
-        add_repo_btn = QtWidgets.QPushButton("Add…")
-        add_repo_btn.setStyleSheet(
-            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
-            "border-radius:4px;background:#fff;font-size:11px;}"
-            "QPushButton:hover{background:#eef0f3;}"
-        )
-        add_repo_btn.setToolTip("Pick an existing local repo on disk.")
-        add_repo_btn.clicked.connect(  # type: ignore[arg-type]
-            lambda: self._palette_add_repo(dlg, ws_combo)
-        )
-        ws_row.addWidget(add_repo_btn)
-        clone_btn = QtWidgets.QPushButton("Clone…")
-        clone_btn.setStyleSheet(
-            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
-            "border-radius:4px;background:#fff;font-size:11px;}"
-            "QPushButton:hover{background:#eef0f3;}"
-        )
-        clone_btn.setToolTip("Clone a remote git URL into a managed workspace.")
-        clone_btn.clicked.connect(  # type: ignore[arg-type]
-            lambda: self._palette_clone_repo(dlg, ws_combo)
-        )
-        ws_row.addWidget(clone_btn)
-        ws_wrap = QtWidgets.QWidget()
-        ws_wrap.setLayout(ws_row)
-        form.addRow("Repo:", ws_wrap)
-        # Populate asynchronously so the dialog appears immediately.
-        asyncio.ensure_future(self._populate_workspaces(ws_combo))
+        form.addRow("Extra skills:", skills_input)
 
         outer.addLayout(form)
 
         first_msg = QtWidgets.QPlainTextEdit()
         first_msg.setPlaceholderText(
-            "Optional: a first message to send right after creation.  "
-            "Without one, the agent is created and you double-click it on "
-            "the canvas to start chatting."
+            "Optional first message — sent right after deploy.  Without one, "
+            "the drone is created and you double-click it on the canvas to chat."
         )
         first_msg.setMinimumHeight(90)
         outer.addWidget(QtWidgets.QLabel("First message:"))
@@ -278,232 +197,80 @@ class PalettePanel(QtWidgets.QWidget):
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
-        ok_btn = buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok)
-        ok_btn.setText("Create")
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Deploy")
         buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
         buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
         outer.addWidget(buttons)
 
-        # Gate the OK button on the model combo having at least one
-        # selectable row.  Today the filter always yields >=1 row for
-        # both supported providers, but new providers / custom filters
-        # could render the combo empty — in that case Create would
-        # currentIndex() == -1 and the accept handler would silently
-        # return.  Disabling the button surfaces the state instead.
-        def _refresh_ok_state(*_: object) -> None:
-            ok_btn.setEnabled(model_combo.count() > 0)
-
-        # Single connect: filter + OK-button refresh as one unit.  Avoids
-        # the fragile disconnect/reconnect dance the previous version
-        # had (which would TypeError on any future re-ordering).
-        def _filter_then_refresh(idx: int) -> None:
-            _filter_models(idx)
-            _refresh_ok_state()
-
-        provider_filter.currentIndexChanged.connect(_filter_then_refresh)  # type: ignore[arg-type]
-        _refresh_ok_state()
-
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-
-        # Recover the real preset via item data so the filter doesn't
-        # silently shift our index.
-        real_idx = model_combo.currentData()
-        if real_idx is None or not (0 <= int(real_idx) < len(MODEL_PRESETS)):
-            return
-        preset = MODEL_PRESETS[int(real_idx)]
-        thinking = THINKING_PRESETS[thinking_combo.currentIndex()]
-        skills = skills_input.text().strip()
-        # Same assembler the Chat tab uses → identical system prompt.
-        system = compose_system(preset, thinking, skills)
-        ws_id = ws_combo.currentData() or ""
-        asyncio.ensure_future(
-            self._do_create(
-                (name_input.text() or "Unnamed conversation").strip(),
-                preset.provider,
-                preset.model,
-                system,
-                first_msg.toPlainText().strip(),
-                ws_id,
-            )
+        skills = [s.strip() for s in skills_input.text().replace("\n", ",").split(",") if s.strip()]
+        await self._do_deploy(
+            blueprint_id=bp_combo.currentData(),
+            workspace_id=ws_combo.currentData() or None,
+            additional_skills=skills,
+            first_message=first_msg.toPlainText().strip(),
         )
 
-    async def _populate_workspaces(
-        self, combo: QtWidgets.QComboBox, *, select_id: str | None = None
-    ) -> None:
-        try:
-            rows = await self.client.call("workspaces.list", {})
-        except Exception:
-            return
-        prev = select_id or (combo.currentData() or "")
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem("(no repo — chat only)", "")
-        for w in rows:
-            label = f"{w.get('name', '?')} — {w.get('repo_path', '?')}"
-            combo.addItem(label, w.get("id", ""))
-        for i in range(combo.count()):
-            if combo.itemData(i) == prev:
-                combo.setCurrentIndex(i)
-                break
-        combo.blockSignals(False)
-
-    def _palette_add_repo(self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox) -> None:
-        from pathlib import Path
-
-        path = QtWidgets.QFileDialog.getExistingDirectory(
-            parent,
-            "Pick the project repo to give the agent access to",
-            str(Path.home()),
-        )
-        if not path:
-            return
-
-        async def _go() -> None:
-            # Same parent-deletion guard as `_palette_clone_repo`: use
-            # `self` for message-box parent and survive the combo being
-            # gone if the dialog was closed mid-call.
-            try:
-                ws = await self.client.call(
-                    "workspaces.register",
-                    {"path": path, "name": Path(path).name},
-                )
-            except Exception as exc:
-                QtWidgets.QMessageBox.warning(self, "Couldn't register repo", str(exc))
-                return
-            try:
-                await self._populate_workspaces(combo, select_id=ws.get("id"))
-            except RuntimeError:
-                pass
-
-        asyncio.ensure_future(_go())
-
-    def _palette_clone_repo(self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox) -> None:
-        # Inline mini-dialog: URL + branch.  Keeps the new-conversation
-        # flow self-contained — no need to bounce out to the Chat tab.
-        dlg = QtWidgets.QDialog(parent)
-        dlg.setWindowTitle("Clone from git")
-        dlg.resize(440, 180)
-        form = QtWidgets.QFormLayout(dlg)
-        url_input = QtWidgets.QLineEdit()
-        url_input.setPlaceholderText("https://github.com/owner/repo.git")
-        form.addRow("Git URL:", url_input)
-        branch_input = QtWidgets.QLineEdit()
-        branch_input.setPlaceholderText("(leave blank for default)")
-        form.addRow("Branch:", branch_input)
-        info = QtWidgets.QLabel(
-            "Clones into AgentOrchestra's data directory; large repos may take a minute."
-        )
-        info.setWordWrap(True)
-        info.setStyleSheet("color:#5b6068;font-size:11px;")
-        form.addRow(info)
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Ok
-            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Clone")
-        buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
-        buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
-        form.addRow(buttons)
-
-        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        url = url_input.text().strip()
-        if not url:
-            return
-        branch = branch_input.text().strip() or None
-
-        async def _go() -> None:
-            # Clone can take minutes; the parent dialog may be closed
-            # by the operator mid-clone.  Use the persistent palette
-            # (`self`) as the message-box parent and guard the combo
-            # write so we don't poke a wrapped C++ object that has
-            # already been deleted.
-            try:
-                ws = await self.client.call("workspaces.clone", {"url": url, "branch": branch})
-            except Exception as exc:
-                QtWidgets.QMessageBox.warning(self, "Clone failed", str(exc))
-                return
-            try:
-                # If the parent dialog is gone, `combo` may be deleted.
-                # `_populate_workspaces` reads currentData() first, which
-                # would raise; catch + give up silently — the next dialog
-                # open will repopulate from a fresh list.
-                await self._populate_workspaces(combo, select_id=ws.get("id"))
-            except RuntimeError:
-                pass
-
-        asyncio.ensure_future(_go())
-
-    async def _do_create(
+    async def _do_deploy(
         self,
-        name: str,
-        provider: str,
-        model: str,
-        system: str,
+        *,
+        blueprint_id: str,
+        workspace_id: str | None,
+        additional_skills: list[str],
         first_message: str,
-        workspace_id: str = "",
     ) -> None:
-        # Friendlier default than "Unnamed conversation": derive from
-        # the model id + a short timestamp so multiple un-named agents
-        # are distinguishable in the palette.  Operators get a useful
-        # name even when they hit Create without typing one.
-        if not name:
-            from datetime import datetime as _dt
-
-            name = f"{model} · {_dt.now().strftime('%H:%M')}"
         try:
-            agent = await self.client.call(
-                "agents.create",
+            action = await self.client.call(
+                "drones.deploy",
                 {
-                    "name": name,
-                    "provider": provider,
-                    "model": model,
-                    "system": system,
-                    "workspace_id": workspace_id or None,
+                    "blueprint_id": blueprint_id,
+                    "workspace_id": workspace_id,
+                    "additional_skills": additional_skills,
                 },
             )
         except Exception as exc:
-            QtWidgets.QMessageBox.warning(self, "Create failed", str(exc))
+            QtWidgets.QMessageBox.warning(self, "Deploy failed", str(exc))
             return
         if first_message:
             try:
                 send_res = await self.client.call(
-                    "agents.send",
-                    {"agent_id": agent["id"], "message": first_message},
+                    "drones.send",
+                    {"action_id": action["id"], "message": first_message},
                 )
-                # Keep the freshest agent shape (transcript now has the
-                # first turn) for the canvas drop below.
-                agent = send_res.get("agent", agent)
+                # Keep the freshest action shape (transcript now has
+                # the first turn) for the canvas drop below.
+                action = send_res.get("action", action)
             except Exception as exc:
-                # The agent exists; just the first send failed.  Show
-                # the error but keep the agent in the list.
                 QtWidgets.QMessageBox.warning(self, "First message failed", str(exc))
-        await self.reload_agents()
-        # Surface the new agent on the canvas — the empty-canvas-after-
-        # Create UX was the #1 source of "where did my agent go?"
-        # confusion.  Page wires this signal to drop a ConversationNode
-        # at the view centre + auto-open the chat dialog.
-        self.conversation_created.emit(agent)
+        await self.reload_drones()
+        # Surface the new drone on the canvas — the empty-canvas-after-
+        # Deploy UX was the #1 source of "where did my drone go?"
+        # confusion before the rip-out.  Page wires this signal to drop
+        # a DroneActionNode at the view centre + auto-open the chat.
+        self.drone_deployed.emit(action)
 
-    async def reload_agents(self) -> None:
+    async def reload_drones(self) -> None:
         try:
-            agents = await self.client.call("agents.list", {})
+            actions = await self.client.call("drones.list", {})
         except Exception:
-            agents = []
-        self.agents_list.clear()
-        for a in agents:
-            label_lines = [a.get("name", "?")]
-            sub = f"{a.get('model', '?')} · {len(a.get('transcript') or [])} turns"
-            if a.get("parent_name"):
-                sub += f"  ↩ {a.get('parent_preset') or 'follow-up'} of {a['parent_name']}"
-            label_lines.append(sub)
-            item = QtWidgets.QListWidgetItem("\n".join(label_lines))
+            actions = []
+        self.drones_list.clear()
+        for a in actions:
+            snap = a.get("blueprint_snapshot") or {}
+            name = snap.get("name") or "(unnamed)"
+            sub = (
+                f"{snap.get('provider', '?')} / {snap.get('model', '?')}  ·  "
+                f"{len(a.get('transcript') or [])} turns"
+            )
+            if a.get("workspace_id"):
+                sub += "  ·  📂 repo"
+            item = QtWidgets.QListWidgetItem(f"{name}\n{sub}")
             item.setData(
                 QtCore.Qt.ItemDataRole.UserRole,
-                {"kind": "conversation", "agent": a},
+                {"kind": "drone_action", "action": a},
             )
-            self.agents_list.addItem(item)
+            self.drones_list.addItem(item)
 
     @staticmethod
     def _section_header(text: str) -> QtWidgets.QLabel:

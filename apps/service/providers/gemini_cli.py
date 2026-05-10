@@ -25,11 +25,10 @@ import logging
 import os
 import shutil
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
 from apps.service.providers.protocol import ChatSession, StreamEvent
-from apps.service.types import Attachment, PersonalityCard, ProviderError, utc_now
+from apps.service.types import PersonalityCard, ProviderError, utc_now
 
 log = logging.getLogger(__name__)
 
@@ -96,38 +95,11 @@ class GeminiCLIChatSession(ChatSession):
         self,
         message: str,
         *,
-        attachments: list[Attachment] | None = None,
+        attachments: Any = None,
     ) -> AsyncIterator[StreamEvent]:
-        # Image attachments: reference each path inline with the @-syntax
-        # the CLI accepts, plus pass --include-files so the bytes are
-        # available to the model.  Spreadsheets are inlined upstream
-        # (rendered_text in the prompt body), not via this path.
-        # Path safety mirror of claude_cli: refuse paths whose tokens
-        # would break the CLI's prompt parser or smuggle in extra files.
-        att_prefix = ""
-        include_args: list[str] = []
-        if attachments:
-            paths: list[str] = []
-            for a in attachments:
-                p = a.stored_path
-                if any(c in p for c in (" ", "\t", "\n", "\r")):
-                    yield StreamEvent(
-                        kind="error",
-                        text=f"attachment path contains whitespace, refused: {p}",
-                    )
-                    return
-                if "@" in Path(p).name:
-                    yield StreamEvent(
-                        kind="error",
-                        text=f"attachment filename contains '@', refused: {p}",
-                    )
-                    return
-                paths.append(p)
-            att_prefix = " ".join(f"@{p}" for p in paths)
-            for p in paths:
-                include_args.extend(["--include-files", p])
-        full_message = f"{att_prefix} {message}".strip() if att_prefix else message
-        self._history.append({"role": "user", "content": full_message})
+        # Attachments aren't wired through this provider in v1; accept
+        # kwarg for protocol compatibility and ignore.
+        self._history.append({"role": "user", "content": message})
         prompt = self._render_prompt()
         # The Gemini CLI refuses to run in an "untrusted" working
         # directory in headless mode.  The CLI advertises three
@@ -137,7 +109,7 @@ class GeminiCLIChatSession(ChatSession):
         # ("not running in a trusted directory") with the env-var-only
         # variant on certain CLI versions / cwd combinations.  See
         # https://geminicli.com/docs/cli/trusted-folders/#headless-and-automated-environments
-        args: list[str] = [self._binary, "-p", prompt, "--skip-trust", *include_args]
+        args: list[str] = [self._binary, "-p", prompt, "--skip-trust"]
         model = _resolve_model(self.card.model)
         if model:
             args.extend(["--model", model])
