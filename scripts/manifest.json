@@ -1,22 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "agentorchestra-scripts",
-  "description": "One-click terminal commands for AgentOrchestra on Windows.  Double-click any .cmd from File Explorer, or right-click → Send to → Desktop (create shortcut) for one-click access.",
-  "version": 1,
+  "description": "One-click terminal commands for AgentOrchestra on Windows.  Each entry has a `step` field that gives the typical first-time-to-running order (1 → install, 2/3 → verify CLI auth, 4 → launch, 5 → stop, 6 → update, 7 → diagnose, 8 → wipe-and-retry).  `ops` (the Operator Panel itself) sits outside the sequence — it's the host that exposes the rest.  Double-click any .cmd from File Explorer, or right-click → Send to → Desktop (create shortcut) for one-click access.",
+  "version": 2,
   "platform": "windows",
   "commands": [
     {
       "id": "ops",
-      "label": "Open the Operator Panel",
+      "step": 0,
+      "label": "Operator Panel",
       "file": "ops.cmd",
       "summary": "Tiny GUI window with one button per command in this folder + a live output pane.  Reads this manifest, so any command added here shows up automatically.",
-      "when_to_run": "Make this your everyday desktop shortcut if you want one clickable thing that exposes every operation.",
+      "when_to_run": "Make this your everyday desktop shortcut.  All the steps below are reachable from inside this panel.",
       "writes": [],
       "needs_internet": false
     },
     {
       "id": "setup",
-      "label": "First-time install",
+      "step": 1,
+      "label": "Step 1 — First-time install",
       "file": "setup.cmd",
       "summary": "Create the virtual environment and install AgentOrchestra + its [gui] extras.  Idempotent.  Re-run after a Python upgrade or if .venv goes missing.",
       "when_to_run": "Once, the first time you clone the repo.  Or any time you nuked .venv.",
@@ -24,17 +26,39 @@
       "needs_internet": true
     },
     {
+      "id": "test-claude",
+      "step": 2,
+      "label": "Step 2 — Verify Claude Code CLI",
+      "file": "test-claude.cmd",
+      "summary": "Smoke-test the local `claude` binary: confirm it's on PATH, then send `claude -p \"say hi in 5 words\"` to verify the Max-plan login is working in headless mode.",
+      "when_to_run": "Right after Step 1, and any time a Claude card stops replying.  If it says \"Not logged in\", run `claude` interactively and `/login`.",
+      "writes": [],
+      "needs_internet": true
+    },
+    {
+      "id": "test-gemini",
+      "step": 3,
+      "label": "Step 3 — Verify Gemini CLI",
+      "file": "test-gemini.cmd",
+      "summary": "Smoke-test the local `gemini` binary the same way: PATH check + a headless `gemini -p \"...\"` call to verify your Gemini CLI auth.",
+      "when_to_run": "Right after Step 2.  If auth fails, run `gemini` interactively to sign in.  Skip if you only use Claude.",
+      "writes": [],
+      "needs_internet": true
+    },
+    {
       "id": "launch",
-      "label": "Start AgentOrchestra",
+      "step": 4,
+      "label": "Step 4 — Start AgentOrchestra",
       "file": "launch.cmd",
       "summary": "Open the GUI.  The service is auto-spawned in the background by the GUI itself if 127.0.0.1:8765 is free.",
-      "when_to_run": "Every session, normally double-clicked from a desktop shortcut.",
+      "when_to_run": "Every session.  This is the everyday verb.",
       "writes": ["%USERPROFILE%\\.local\\share\\agentorchestra\\"],
       "needs_internet": false
     },
     {
       "id": "stop",
-      "label": "Stop AgentOrchestra",
+      "step": 5,
+      "label": "Step 5 — Stop AgentOrchestra",
       "file": "stop.cmd",
       "summary": "Close the GUI window and any background service it supervised.",
       "when_to_run": "When you close the laptop or want to free port 8765.",
@@ -43,7 +67,8 @@
     },
     {
       "id": "update",
-      "label": "Pull latest + refresh deps",
+      "step": 6,
+      "label": "Step 6 — Pull latest + refresh deps",
       "file": "update.cmd",
       "summary": "git pull --ff-only origin main, then pip install -e .[gui] --upgrade.",
       "when_to_run": "After GitHub Desktop's Pull origin, when you've changed branch, or before reporting a bug.",
@@ -52,7 +77,8 @@
     },
     {
       "id": "doctor",
-      "label": "Environment diagnostic",
+      "step": 7,
+      "label": "Step 7 — Environment diagnostic",
       "file": "doctor.cmd",
       "summary": "Print a one-page health report: Python version, .venv status, claude / gemini on PATH, port 8765, local data directory, annotator import, AgentOrchestra version.",
       "when_to_run": "When something's wrong.  Copy/paste the output into a bug report.",
@@ -60,29 +86,12 @@
       "needs_internet": false
     },
     {
-      "id": "test-claude",
-      "label": "Test Claude Code CLI",
-      "file": "test-claude.cmd",
-      "summary": "Smoke-test the local `claude` binary: confirm it's on PATH, then send `claude -p \"say hi in 5 words\"` to verify the Max-plan login is working in headless mode.",
-      "when_to_run": "First-time setup, after re-installing claude, or whenever a card dispatch is failing for unclear reasons.  If it says \"Not logged in\", run `claude` interactively and `/login`.",
-      "writes": [],
-      "needs_internet": true
-    },
-    {
-      "id": "test-gemini",
-      "label": "Test Gemini CLI",
-      "file": "test-gemini.cmd",
-      "summary": "Smoke-test the local `gemini` binary the same way: PATH check + a headless `gemini -p \"...\"` call to verify your Gemini CLI auth.",
-      "when_to_run": "First-time setup, after re-installing gemini, or when a Gemini card stops replying.  If auth fails, run `gemini` interactively to sign in.",
-      "writes": [],
-      "needs_internet": true
-    },
-    {
       "id": "reset",
-      "label": "Wipe local state",
+      "step": 8,
+      "label": "Step 8 — Wipe local state",
       "file": "reset.cmd",
       "summary": "Delete %USERPROFILE%\\.local\\share\\agentorchestra (SQLite store, first-run sentinel, annotation logs).  Does NOT touch the repo, git history, or CLI auth.",
-      "when_to_run": "When the local DB is wedged and you want a clean slate.  Confirms before deleting.",
+      "when_to_run": "Last resort, when the local DB is wedged and you want a clean slate.  Confirms before deleting.",
       "writes": ["%USERPROFILE%\\.local\\share\\agentorchestra\\ (DELETED)"],
       "needs_internet": false
     }
