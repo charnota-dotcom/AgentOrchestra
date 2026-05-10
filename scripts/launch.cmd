@@ -20,7 +20,10 @@ if not exist "%REPO%\.venv\Scripts\activate.bat" (
     exit /b 1
 )
 
-start "AgentOrchestra" cmd /c ^
+rem cmd /k keeps the window open after python exits so any
+rem traceback or error stays on screen for diagnosis.  Type `exit`
+rem in that window when you're done reading.
+start "AgentOrchestra" cmd /k ^
     "cd /d %REPO% && .venv\Scripts\activate.bat && python -m apps.gui.main"
 
 endlocal

@@ -44,9 +44,11 @@ if exist "%ANNOTATOR%\pyproject.toml" (
 )
 
 echo.
-echo [setup] Done.  Double-click launch.cmd to start AgentOrchestra.
+echo [setup] Done.  Double-click launch.cmd (or use the Operator
+echo [setup] Panel — scripts\ops.cmd) to start AgentOrchestra.
 echo.
-pause
+echo Press any key to close this window.
+pause >nul
 exit /b 0
 
 :err

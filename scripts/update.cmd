@@ -25,9 +25,11 @@ call "%REPO%\.venv\Scripts\activate.bat"
 pip install -e "%REPO%[gui]" --upgrade || goto :err
 
 echo.
-echo [update] Done.  Stop the app (stop.cmd) and start it again (launch.cmd).
+echo [update] Done.  Stop the app (stop.cmd) and start it again
+echo [update] (launch.cmd or ops.cmd).
 echo.
-pause
+echo Press any key to close this window.
+pause >nul
 exit /b 0
 
 :err

@@ -66,13 +66,28 @@ Every script:
   invoked from any working directory.
 * Re-uses the project's `.venv` by `call .venv\Scripts\activate.bat`
   rather than installing globally.
-* Pauses on failure so the error stays on screen instead of the cmd
-  window flashing closed.
+* **Always waits for a keypress before closing**, on both success
+  and failure. The window stays on screen so any error message,
+  traceback, or status line is readable. Press any key to close
+  when you're done reading.
+* `launch.cmd` and `ops.cmd` use `cmd /k` (not `/c`) so the host
+  cmd window stays open after the GUI / panel exits — useful when
+  the GUI crashes and the traceback is in the cmd window rather
+  than in the GUI itself. Type `exit` in that window when done.
 
 If you'd rather configure them programmatically, the same set is
 indexed in `manifest.json` (id, label, file, summary, when_to_run,
 writes, needs_internet) — useful for any wrapper UI or CI tool that
 wants to introspect what's available.
+
+## Reference for help / advice
+
+`scripts/manifest.json` is the canonical list of operator commands.
+When the assistant gives you instructions, it should look here first
+and prefer "double-click `setup.cmd`" over a typed command sequence.
+If a workflow isn't covered by an existing entry, it adds a new one
+to the manifest before suggesting commands you'd otherwise have to
+remember.
 
 ## Why `.cmd` and not `.bat`
 

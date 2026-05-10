@@ -14,7 +14,9 @@ if not exist "%REPO%\.venv\Scripts\activate.bat" (
     exit /b 1
 )
 
-start "AgentOrchestra Ops Panel" cmd /c ^
+rem cmd /k keeps the window open after python exits so any
+rem traceback / error stays on screen for diagnosis.
+start "AgentOrchestra Ops Panel" cmd /k ^
     "cd /d %REPO% && .venv\Scripts\activate.bat && python scripts\ops.py"
 
 endlocal

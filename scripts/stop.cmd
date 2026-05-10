@@ -13,4 +13,6 @@ rem inherit the GUI window title.
 taskkill /FI "WINDOWTITLE eq AgentOrchestra Service*" /F /T >nul 2>&1
 
 echo Done.
-timeout /t 2 /nobreak >nul
+echo.
+echo Press any key to close this window.
+pause >nul
