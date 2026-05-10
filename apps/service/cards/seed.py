@@ -216,7 +216,13 @@ _GEMINI_VARIANTS: dict[str, dict] = {
 async def seed_default_cards(store: EventStore) -> list[PersonalityCard]:
     existing_cards = await store.list_cards()
     existing_names = {c.name for c in existing_cards}
-    existing_archetypes = {c.archetype for c in existing_cards}
+    # Map archetype → template_id of an already-seeded card.  When we
+    # add variants to an installed instance the template row already
+    # exists in the DB but the InstructionTemplate object loaded from
+    # disk has a fresh UUID — using that fresh UUID as the variant's
+    # template_id would violate the foreign key.  Reuse the existing
+    # template_id instead.
+    existing_template_ids: dict[str, str] = {c.archetype: c.template_id for c in existing_cards}
     created: list[PersonalityCard] = []
     for path in sorted(PACK_PATH.glob("*.md")):
         template = load_template(path)
@@ -225,22 +231,29 @@ async def seed_default_cards(store: EventStore) -> list[PersonalityCard]:
             log.warning("no card defaults for archetype %s", template.archetype)
             continue
 
-        # Insert the template once per archetype.  Other cards built
-        # below reuse the same template_id.
-        if template.archetype not in existing_archetypes:
+        # Resolve the template_id we'll attach cards to.  If we're
+        # seeding this archetype for the first time, insert the
+        # template now and use the in-memory UUID.  Otherwise pull the
+        # ID off any pre-existing card for the same archetype so foreign
+        # keys line up.
+        if template.archetype in existing_template_ids:
+            template_id = existing_template_ids[template.archetype]
+        else:
             await store.insert_template(template)
+            template_id = template.id
 
         # Primary card — keyed by archetype for backwards-compatible
         # idempotency.
-        if template.archetype not in existing_archetypes:
+        if template.archetype not in existing_template_ids:
             card = PersonalityCard(
                 archetype=template.archetype,
-                template_id=template.id,
+                template_id=template_id,
                 **defaults,
             )
             await store.insert_card(card)
             created.append(card)
             existing_names.add(card.name)
+            existing_template_ids[card.archetype] = template_id
             log.info("seeded card: %s", template.archetype)
 
         # Extra Gemini variants — keyed by name so adding new variants
@@ -250,7 +263,7 @@ async def seed_default_cards(store: EventStore) -> list[PersonalityCard]:
         if variant and variant["name"] not in existing_names:
             v_card = PersonalityCard(
                 archetype=template.archetype,
-                template_id=template.id,
+                template_id=template_id,
                 **variant,
             )
             await store.insert_card(v_card)
