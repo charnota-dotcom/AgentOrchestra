@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — Phase 5
+
+Next batch.  Empty section opened on 2026-05-10 to track the work
+that will land in the PR following #12.
+
 ## Unreleased — Phase 4
 
 Sprint 1 — multi-vendor agentic parity + sandbox tier.
