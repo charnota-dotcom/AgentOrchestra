@@ -1,11 +1,21 @@
-"""Settings page — provider keys, workspaces, ingestion toggles."""
+"""Settings page — workspaces, hooks, and an advanced API-key fallback.
+
+Layout reflects the "subscription-only by default" thesis: the page
+opens with hooks (Claude Code session ingestion) and workspaces — the
+two surfaces every operator touches.  The provider-key card sits at
+the bottom inside a *collapsed-by-default* disclosure: most operators
+never need API keys, so they shouldn't see the fields up front.
+Operators who do need them (API-keyed Anthropic / Google / OpenAI
+providers, or the API-keyed agentic Run path) click the disclosure
+to expand.
+"""
 
 from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
 
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from apps.service.secrets.keyring_store import (
     anthropic_key,
@@ -32,28 +42,62 @@ class SettingsPage(QtWidgets.QWidget):
         title.setStyleSheet("font-size:24px;font-weight:600;color:#0f1115;")
         layout.addWidget(title)
 
-        layout.addWidget(self._provider_keys())
+        # Order matters: the subscription-only path sees hooks +
+        # workspaces.  API keys go last + collapsed.
         layout.addWidget(self._hooks_box())
         layout.addWidget(self._workspaces_box(), stretch=1)
+        layout.addWidget(self._provider_keys_disclosure())
 
-    def _provider_keys(self) -> QtWidgets.QWidget:
+    def _provider_keys_disclosure(self) -> QtWidgets.QWidget:
+        """Collapsible disclosure for the API-key card.
+
+        AgentOrchestra is subscription-only by default — chat /agents
+        / canvas all route through the local CLIs.  The fields below
+        are only useful when the operator wants to dispatch agentic
+        Runs through the API-keyed `anthropic` / `google` providers,
+        or use a Code-Edit card whose provider is API-keyed.  Hidden
+        by default so a fresh-install screenshot doesn't read as "you
+        need an Anthropic key to use this app".
+        """
         wrap = QtWidgets.QFrame()
         wrap.setStyleSheet("QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;}")
         v = QtWidgets.QVBoxLayout(wrap)
         v.setContentsMargins(16, 12, 16, 16)
-        v.setSpacing(10)
+        v.setSpacing(8)
 
-        heading = QtWidgets.QLabel("Provider keys")
-        heading.setStyleSheet("font-size:14px;font-weight:600;color:#0f1115;")
-        v.addWidget(heading)
+        # Disclosure header — a toggle button that flips the body.
+        toggle = QtWidgets.QToolButton()
+        toggle.setText("▶  Advanced — API fallback (optional)")
+        toggle.setStyleSheet(
+            "QToolButton{border:none;background:transparent;"
+            "font-size:13px;font-weight:600;color:#0f1115;text-align:left;}"
+            "QToolButton:hover{color:#1f6feb;}"
+        )
+        toggle.setCheckable(True)
+        toggle.setChecked(False)
+        toggle.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        v.addWidget(toggle)
 
-        sub = QtWidgets.QLabel("Stored in your OS keychain.  Never written to disk in plain text.")
-        sub.setStyleSheet("color:#5b6068;font-size:12px;")
+        sub = QtWidgets.QLabel(
+            "AgentOrchestra runs subscription-only by default — chat / agents / "
+            "canvas all route through your local Claude Code and Gemini CLIs.  "
+            "Set API keys here only if you also want to dispatch API-keyed "
+            "Runs (Code-Edit archetype, parallel Anthropic / Google / OpenAI "
+            "providers).  Stored in your OS keychain; never written to disk "
+            "in plain text."
+        )
+        sub.setStyleSheet("color:#5b6068;font-size:11px;")
+        sub.setWordWrap(True)
         v.addWidget(sub)
+
+        # Body — fields, hidden until the operator expands the disclosure.
+        body = QtWidgets.QWidget()
+        body_v = QtWidgets.QVBoxLayout(body)
+        body_v.setContentsMargins(0, 6, 0, 0)
+        body_v.setSpacing(8)
 
         form = QtWidgets.QFormLayout()
         form.setSpacing(8)
-
         for label, slot, getter in (
             ("Anthropic API key", "anthropic_api_key", anthropic_key),
             ("Google API key", "google_api_key", google_key),
@@ -72,8 +116,20 @@ class SettingsPage(QtWidgets.QWidget):
             row.addWidget(line, stretch=1)
             row.addWidget(save)
             form.addRow(QtWidgets.QLabel(label), row)
+        body_v.addLayout(form)
 
-        v.addLayout(form)
+        body.setVisible(False)
+        v.addWidget(body)
+
+        def _on_toggle(checked: bool) -> None:
+            body.setVisible(checked)
+            toggle.setText(
+                "▼  Advanced — API fallback (optional)"
+                if checked
+                else "▶  Advanced — API fallback (optional)"
+            )
+
+        toggle.toggled.connect(_on_toggle)  # type: ignore[arg-type]
         return wrap
 
     def _save_key(self, slot: str, widget: QtWidgets.QLineEdit) -> None:

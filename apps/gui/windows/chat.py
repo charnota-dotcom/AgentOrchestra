@@ -367,6 +367,17 @@ class ChatPage(QtWidgets.QWidget):
         except OSError as exc:
             QtWidgets.QMessageBox.warning(self, "Couldn't read file", str(exc))
             return
+        # Mirror the canvas chat dialog's pre-check — refuse oversize
+        # files BEFORE the multi-MB read + base64-encode + RPC round-trip.
+        # Server cap is 25 MB; matching it here saves several seconds of
+        # pointless work on a doomed upload.
+        if size > 25 * 1024 * 1024:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "File too large",
+                f"{p.name} is {size // (1024 * 1024)} MB; max is 25 MB.",
+            )
+            return
         kind = (
             "image"
             if p.suffix.lower()
