@@ -129,11 +129,12 @@ def test_render_xlsx_without_openpyxl_raises(
     monkeypatch.setitem(sys.modules, "openpyxl", None)
     src = tmp_path / "a.xlsx"
     src.write_bytes(b"PK\x03\x04not really xlsx")
-    # The render path falls back to embedding raw bytes — we should
-    # still get a result, just with a warning marker in the text.
-    result = render_attachment(src, dest=tmp_path / "out.xlsx", kind="spreadsheet")
-    assert result.rendered_text is not None
-    assert "could not render" in result.rendered_text
+    # render_attachment surfaces missing-parser as AttachmentRenderError
+    # so the upload handler can preserve raw bytes + flag the operator.
+    # The fallback-to-raw-text path is for *other* spreadsheet failures
+    # (corrupt xlsx etc.), not for missing optional deps.
+    with pytest.raises(AttachmentRenderError, match="openpyxl not installed"):
+        render_attachment(src, dest=tmp_path / "out.xlsx", kind="spreadsheet")
 
 
 def test_max_caps_are_sensible() -> None:

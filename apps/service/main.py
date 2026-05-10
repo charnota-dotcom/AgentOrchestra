@@ -409,12 +409,18 @@ class Handlers:
             raise ValueError(f"invalid branch name: {branch!r}")
         create = bool(params.get("create"))
         repo = Path(ws.repo_path)
-        args = ["git", "-C", str(repo), "switch"]
+        # git switch shape:
+        #   create:  `git switch -c <branch>`  (start-point defaults to HEAD)
+        #   plain:   `git switch -- <branch>`  (`--` end-of-options separator)
+        # We can't use `--` together with `-c` because `git switch -c <a> [<b>]`
+        # treats `<b>` as the start-point — `-c -- foo` would mean "create
+        # branch named `--` from start-point `foo`" which then errors with
+        # "invalid reference: foo".  Branch names have already been validated
+        # to not start with `-` so the create path is safe without `--`.
         if create:
-            args.append("-c")
-        # `--` separator so a branch literally named `-foo` (which we
-        # already reject) couldn't reach git's flag parser anyway.
-        args.extend(["--", branch])
+            args = ["git", "-C", str(repo), "switch", "-c", branch]
+        else:
+            args = ["git", "-C", str(repo), "switch", "--", branch]
 
         proc = await asyncio.create_subprocess_exec(
             *args,
