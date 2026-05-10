@@ -306,3 +306,67 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_attachments_agent ON attachments(agent_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Drones — see docs/DRONE_MODEL.md.
+--
+-- A *blueprint* is the operator-set template (frozen, repo-portable).
+-- A *drone action* is a deployed instance carrying live transcript +
+-- workspace + one-off skill / reference layers.  The action holds an
+-- immutable JSON snapshot of the blueprint as it was at deploy time
+-- so blueprint edits never reach in-flight actions.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS drone_blueprints (
+    id                       TEXT PRIMARY KEY,
+    name                     TEXT NOT NULL,
+    description              TEXT NOT NULL DEFAULT '',
+    role                     TEXT NOT NULL DEFAULT 'worker',
+    provider                 TEXT NOT NULL,
+    model                    TEXT NOT NULL,
+    system_persona           TEXT NOT NULL DEFAULT '',
+    skills                   TEXT NOT NULL DEFAULT '[]',
+    reference_blueprint_ids  TEXT NOT NULL DEFAULT '[]',
+    version                  INTEGER NOT NULL DEFAULT 1,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_drone_blueprints_updated
+    ON drone_blueprints(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS drone_actions (
+    id                                TEXT PRIMARY KEY,
+    blueprint_id                      TEXT NOT NULL REFERENCES drone_blueprints(id),
+    blueprint_snapshot                TEXT NOT NULL,                 -- JSON
+    workspace_id                      TEXT REFERENCES workspaces(id),
+    additional_skills                 TEXT NOT NULL DEFAULT '[]',
+    additional_reference_action_ids   TEXT NOT NULL DEFAULT '[]',
+    transcript                        TEXT NOT NULL DEFAULT '[]',
+    created_at                        TEXT NOT NULL,
+    updated_at                        TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_drone_actions_blueprint
+    ON drone_actions(blueprint_id);
+CREATE INDEX IF NOT EXISTS idx_drone_actions_updated
+    ON drone_actions(updated_at DESC);
+
+-- Drone-action attachments use the same on-disk shape as the existing
+-- attachments table; we keep them separate so a drone deletion can
+-- cascade cleanly without touching the (legacy) general-chat
+-- attachments.
+CREATE TABLE IF NOT EXISTS drone_action_attachments (
+    id              TEXT PRIMARY KEY,
+    action_id       TEXT NOT NULL REFERENCES drone_actions(id) ON DELETE CASCADE,
+    turn_index      INTEGER NOT NULL DEFAULT -1,
+    kind            TEXT NOT NULL,
+    original_name   TEXT NOT NULL,
+    stored_path     TEXT NOT NULL,
+    mime_type       TEXT NOT NULL,
+    bytes           INTEGER NOT NULL,
+    rendered_text   TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_drone_action_attachments_action
+    ON drone_action_attachments(action_id, created_at DESC);

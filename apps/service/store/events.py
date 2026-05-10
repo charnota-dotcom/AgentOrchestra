@@ -29,8 +29,12 @@ from apps.service.types import (
     Artifact,
     Attachment,
     AttachmentKind,
+    BlueprintVersionConflict,
     Branch,
     BranchState,
+    DroneAction,
+    DroneBlueprint,
+    DroneRole,
     Event,
     Flow,
     FlowRun,
@@ -964,6 +968,236 @@ class EventStore:
                 (turn_index, attachment_id, agent_id),
             )
             await self.db.commit()
+
+    # ------------------------------------------------------------------
+    # Drones — see docs/DRONE_MODEL.md.
+    #
+    # Blueprint = operator-set frozen template.
+    # Action    = deployed instance carrying live state.
+    # ------------------------------------------------------------------
+
+    async def insert_drone_blueprint(self, bp: DroneBlueprint) -> DroneBlueprint:
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO drone_blueprints (
+                    id, name, description, role, provider, model,
+                    system_persona, skills, reference_blueprint_ids,
+                    version, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    bp.id,
+                    bp.name,
+                    bp.description,
+                    bp.role.value,
+                    bp.provider,
+                    bp.model,
+                    bp.system_persona,
+                    json.dumps(bp.skills),
+                    json.dumps(bp.reference_blueprint_ids),
+                    bp.version,
+                    bp.created_at.isoformat(),
+                    bp.updated_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
+        return bp
+
+    async def update_drone_blueprint(
+        self, bp: DroneBlueprint, *, expected_version: int | None = None
+    ) -> DroneBlueprint:
+        """Optimistic-concurrency update.  Pass the version you read to
+        guard against racing edits.  Same pattern as ``update_flow``.
+        """
+        bp.updated_at = utc_now()
+        async with self._lock:
+            if expected_version is not None:
+                cur = await self.db.execute(
+                    """
+                    UPDATE drone_blueprints
+                       SET name = ?, description = ?, role = ?, provider = ?,
+                           model = ?, system_persona = ?, skills = ?,
+                           reference_blueprint_ids = ?,
+                           version = version + 1, updated_at = ?
+                     WHERE id = ? AND version = ?
+                    """,
+                    (
+                        bp.name,
+                        bp.description,
+                        bp.role.value,
+                        bp.provider,
+                        bp.model,
+                        bp.system_persona,
+                        json.dumps(bp.skills),
+                        json.dumps(bp.reference_blueprint_ids),
+                        bp.updated_at.isoformat(),
+                        bp.id,
+                        expected_version,
+                    ),
+                )
+                if (cur.rowcount or 0) == 0:
+                    raise BlueprintVersionConflict(
+                        f"blueprint {bp.id} version {expected_version} no longer current"
+                    )
+                bp.version = expected_version + 1
+            else:
+                await self.db.execute(
+                    """
+                    UPDATE drone_blueprints
+                       SET name = ?, description = ?, role = ?, provider = ?,
+                           model = ?, system_persona = ?, skills = ?,
+                           reference_blueprint_ids = ?,
+                           version = version + 1, updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (
+                        bp.name,
+                        bp.description,
+                        bp.role.value,
+                        bp.provider,
+                        bp.model,
+                        bp.system_persona,
+                        json.dumps(bp.skills),
+                        json.dumps(bp.reference_blueprint_ids),
+                        bp.updated_at.isoformat(),
+                        bp.id,
+                    ),
+                )
+                bp.version += 1
+            await self.db.commit()
+        return bp
+
+    @staticmethod
+    def _hydrate_drone_blueprint(row: aiosqlite.Row) -> DroneBlueprint:
+        d = dict(row)
+        d["role"] = DroneRole(d["role"])
+        d["skills"] = json.loads(d.get("skills") or "[]")
+        d["reference_blueprint_ids"] = json.loads(d.get("reference_blueprint_ids") or "[]")
+        return DroneBlueprint.model_validate(d)
+
+    async def get_drone_blueprint(self, blueprint_id: str) -> DroneBlueprint | None:
+        cur = await self.db.execute("SELECT * FROM drone_blueprints WHERE id = ?", (blueprint_id,))
+        row = await cur.fetchone()
+        return self._hydrate_drone_blueprint(row) if row else None
+
+    async def list_drone_blueprints(self) -> list[DroneBlueprint]:
+        cur = await self.db.execute("SELECT * FROM drone_blueprints ORDER BY updated_at DESC")
+        rows = await cur.fetchall()
+        return [self._hydrate_drone_blueprint(r) for r in rows]
+
+    async def delete_drone_blueprint(self, blueprint_id: str) -> bool:
+        """Refuses if any actions reference this blueprint.  Caller
+        should check ``count_actions_for_blueprint`` first and surface
+        a confirmation if non-zero.
+        """
+        async with self._lock:
+            cur = await self.db.execute(
+                "SELECT COUNT(*) AS n FROM drone_actions WHERE blueprint_id = ?",
+                (blueprint_id,),
+            )
+            row = await cur.fetchone()
+            if row and int(row["n"]) > 0:
+                # Don't silently cascade — operator should know.
+                return False
+            cur2 = await self.db.execute(
+                "DELETE FROM drone_blueprints WHERE id = ?", (blueprint_id,)
+            )
+            await self.db.commit()
+        return (cur2.rowcount or 0) > 0
+
+    async def count_actions_for_blueprint(self, blueprint_id: str) -> int:
+        cur = await self.db.execute(
+            "SELECT COUNT(*) AS n FROM drone_actions WHERE blueprint_id = ?",
+            (blueprint_id,),
+        )
+        row = await cur.fetchone()
+        return int(row["n"]) if row else 0
+
+    # --- Drone actions ------------------------------------------------
+
+    async def insert_drone_action(self, action: DroneAction) -> DroneAction:
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO drone_actions (
+                    id, blueprint_id, blueprint_snapshot, workspace_id,
+                    additional_skills, additional_reference_action_ids,
+                    transcript, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    action.id,
+                    action.blueprint_id,
+                    json.dumps(action.blueprint_snapshot),
+                    action.workspace_id,
+                    json.dumps(action.additional_skills),
+                    json.dumps(action.additional_reference_action_ids),
+                    json.dumps(action.transcript),
+                    action.created_at.isoformat(),
+                    action.updated_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
+        return action
+
+    async def update_drone_action(self, action: DroneAction) -> DroneAction:
+        action.updated_at = utc_now()
+        async with self._lock:
+            await self.db.execute(
+                """
+                UPDATE drone_actions
+                   SET workspace_id = ?,
+                       additional_skills = ?,
+                       additional_reference_action_ids = ?,
+                       transcript = ?,
+                       updated_at = ?
+                 WHERE id = ?
+                """,
+                (
+                    action.workspace_id,
+                    json.dumps(action.additional_skills),
+                    json.dumps(action.additional_reference_action_ids),
+                    json.dumps(action.transcript),
+                    action.updated_at.isoformat(),
+                    action.id,
+                ),
+            )
+            await self.db.commit()
+        return action
+
+    @staticmethod
+    def _hydrate_drone_action(row: aiosqlite.Row) -> DroneAction:
+        d = dict(row)
+        d["blueprint_snapshot"] = json.loads(d.get("blueprint_snapshot") or "{}")
+        d["additional_skills"] = json.loads(d.get("additional_skills") or "[]")
+        d["additional_reference_action_ids"] = json.loads(
+            d.get("additional_reference_action_ids") or "[]"
+        )
+        d["transcript"] = json.loads(d.get("transcript") or "[]")
+        return DroneAction.model_validate(d)
+
+    async def get_drone_action(self, action_id: str) -> DroneAction | None:
+        cur = await self.db.execute("SELECT * FROM drone_actions WHERE id = ?", (action_id,))
+        row = await cur.fetchone()
+        return self._hydrate_drone_action(row) if row else None
+
+    async def list_drone_actions(self, *, blueprint_id: str | None = None) -> list[DroneAction]:
+        if blueprint_id:
+            cur = await self.db.execute(
+                "SELECT * FROM drone_actions WHERE blueprint_id = ? ORDER BY updated_at DESC",
+                (blueprint_id,),
+            )
+        else:
+            cur = await self.db.execute("SELECT * FROM drone_actions ORDER BY updated_at DESC")
+        rows = await cur.fetchall()
+        return [self._hydrate_drone_action(r) for r in rows]
+
+    async def delete_drone_action(self, action_id: str) -> bool:
+        async with self._lock:
+            cur = await self.db.execute("DELETE FROM drone_actions WHERE id = ?", (action_id,))
+            await self.db.commit()
+        return (cur.rowcount or 0) > 0
 
     # ------------------------------------------------------------------
     # Convenience helpers
