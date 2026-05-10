@@ -236,16 +236,22 @@ CREATE INDEX IF NOT EXISTS idx_flow_runs_flow ON flow_runs(flow_id);
 -- follow-up agents (summarise / annotate / deep dive / etc).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS agents (
-    id           TEXT PRIMARY KEY,
-    name         TEXT NOT NULL,
-    provider     TEXT NOT NULL,
-    model        TEXT NOT NULL,
-    system       TEXT NOT NULL DEFAULT '',
-    parent_id    TEXT REFERENCES agents(id),
-    parent_name  TEXT,
-    transcript   TEXT NOT NULL DEFAULT '[]',  -- JSON: [{role, content}]
-    created_at   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    provider      TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    system        TEXT NOT NULL DEFAULT '',
+    parent_id     TEXT REFERENCES agents(id),
+    parent_name   TEXT,
+    -- preset name used when this agent was spawned as a follow-up
+    -- (summarise / annotate / deep_dive / critique / verify / custom).
+    -- NULL for top-level agents.  Drives the directional-edge label
+    -- on the canvas.  Existing installs get this column via the
+    -- code-side migration in EventStore._migrate.
+    parent_preset TEXT,
+    transcript    TEXT NOT NULL DEFAULT '[]',  -- JSON: [{role, content}]
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);

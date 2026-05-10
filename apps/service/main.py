@@ -606,6 +606,7 @@ class Handlers:
             system=parent.system,
             parent_id=parent.id,
             parent_name=parent.name,
+            parent_preset=params.get("preset", "custom"),
             transcript=seeded_transcript,
         )
         await self.store.insert_agent(agent)

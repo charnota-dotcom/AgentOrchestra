@@ -549,6 +549,11 @@ class Agent(BaseModel):
     system: str = ""
     parent_id: str | None = None
     parent_name: str | None = None  # denormalised for cheap display
+    # Which preset created this child (summarise / annotate / deep_dive
+    # / critique / verify / custom).  Becomes the directional-edge
+    # label on the canvas so the inter-agent relationship is visible.
+    # None for top-level agents.
+    parent_preset: str | None = None
     transcript: list[dict[str, str]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

@@ -84,7 +84,37 @@ class PalettePanel(QtWidgets.QWidget):
         self.cards_list.setStyleSheet(self._list_stylesheet())
         layout.addWidget(self.cards_list, stretch=1)
 
-        QtCore.QTimer.singleShot(0, lambda: asyncio.ensure_future(self.reload_cards()))
+        # Persistent named conversations (Agents tab).  Drag onto the
+        # canvas to anchor a conversation as a node; double-click the
+        # node to open a chat dialog scoped to that one agent.
+        layout.addWidget(self._section_header("Conversations"))
+        self.agents_list = _DragList()
+        self.agents_list.setStyleSheet(self._list_stylesheet())
+        layout.addWidget(self.agents_list, stretch=1)
+
+        QtCore.QTimer.singleShot(0, lambda: asyncio.ensure_future(self._reload_all()))
+
+    async def _reload_all(self) -> None:
+        await asyncio.gather(self.reload_cards(), self.reload_agents())
+
+    async def reload_agents(self) -> None:
+        try:
+            agents = await self.client.call("agents.list", {})
+        except Exception:
+            agents = []
+        self.agents_list.clear()
+        for a in agents:
+            label_lines = [a.get("name", "?")]
+            sub = f"{a.get('model', '?')} · {len(a.get('transcript') or [])} turns"
+            if a.get("parent_name"):
+                sub += f"  ↩ {a.get('parent_preset') or 'follow-up'} of {a['parent_name']}"
+            label_lines.append(sub)
+            item = QtWidgets.QListWidgetItem("\n".join(label_lines))
+            item.setData(
+                QtCore.Qt.ItemDataRole.UserRole,
+                {"kind": "conversation", "agent": a},
+            )
+            self.agents_list.addItem(item)
 
     @staticmethod
     def _section_header(text: str) -> QtWidgets.QLabel:

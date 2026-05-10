@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.canvas.chat_dialog import AgentChatDialog
 from apps.gui.canvas.commands import (
     AddEdgeCommand,
     AddNodeCommand,
@@ -45,6 +46,7 @@ from apps.gui.canvas.nodes.control import (
     OutputNode,
     TriggerNode,
 )
+from apps.gui.canvas.nodes.conversation import ConversationNode
 from apps.gui.canvas.palette import PALETTE_MIME, PalettePanel
 from apps.gui.canvas.ports import Port, PortDirection
 from apps.gui.canvas.scene import CanvasScene
@@ -214,12 +216,34 @@ class CanvasPage(QtWidgets.QWidget):
             node = cls(_node_id())
         elif kind == "agent":
             node = AgentNode(_node_id(), payload.get("card", {}))
+        elif kind == "conversation":
+            agent = payload.get("agent") or {}
+            # If this exact agent is already on the canvas, don't
+            # double-create — recentre the existing one instead.  Two
+            # ConversationNodes wrapping the same agent would confuse
+            # the lineage-edge drawing.
+            existing = next(
+                (
+                    n
+                    for n in self.scene.nodes()
+                    if isinstance(n, ConversationNode) and n.agent.get("id") == agent.get("id")
+                ),
+                None,
+            )
+            if existing is not None:
+                existing.setPos(scene_pos)
+                return
+            node = ConversationNode(_node_id(), agent)
         else:
             return
         node.setPos(scene_pos)
         self._wire_node(node)
         # Add via undo stack so a misclick is one Ctrl+Z away.
         self.undo_stack.push(AddNodeCommand(self.scene, node))
+        # If we just dropped a conversation, draw any lineage edges
+        # to / from it.
+        if isinstance(node, ConversationNode):
+            self._refresh_lineage_edges()
 
     def _wire_node(self, node: BaseNode) -> None:
         for port in node.input_ports + node.output_ports:
@@ -227,6 +251,87 @@ class CanvasPage(QtWidgets.QWidget):
         node.geometry_changed.connect(  # type: ignore[arg-type]
             lambda nid=node.node_id: self._note_node_moved(nid)
         )
+        # Conversation nodes get a double-click hook that opens the
+        # per-agent chat dialog.
+        if isinstance(node, ConversationNode):
+            node.double_clicked.connect(  # type: ignore[arg-type]
+                lambda n=node: self._open_chat_for(n)
+            )
+
+    # ------------------------------------------------------------------
+    # Per-agent chat dialog
+    # ------------------------------------------------------------------
+
+    def _open_chat_for(self, node: ConversationNode) -> None:
+        dlg = AgentChatDialog(self.client, node.agent, parent=self)
+        # When the operator sends a message, the agent's transcript on
+        # the service is updated; refresh the node so it shows the
+        # latest assistant turn next time the chat is opened.
+        dlg.sent.connect(  # type: ignore[arg-type]
+            lambda updated_agent, n=node: self._refresh_conversation_node(n, updated_agent)
+        )
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _refresh_conversation_node(
+        self, node: ConversationNode, updated_agent: dict[str, Any]
+    ) -> None:
+        node.agent = updated_agent
+        transcript = updated_agent.get("transcript") or []
+        last = next(
+            (m.get("content", "") for m in reversed(transcript) if m.get("role") == "assistant"),
+            "",
+        )
+        node._subtitle = f"{updated_agent.get('model', '?')} · {len(transcript)} turns"
+        node.set_body((last or "(no replies yet — double-click to chat)").strip())
+
+    # ------------------------------------------------------------------
+    # Lineage edges
+    # ------------------------------------------------------------------
+
+    def _refresh_lineage_edges(self) -> None:
+        """Auto-draw a directional, labelled edge between a parent
+        ConversationNode and any spawned children also on the canvas.
+
+        Only one edge per (parent, child) pair — re-runnable safely
+        on every drop because we de-dupe by endpoint identity.
+        """
+        convos = [n for n in self.scene.nodes() if isinstance(n, ConversationNode)]
+        if not convos:
+            return
+        by_agent_id: dict[str, ConversationNode] = {
+            n.agent.get("id"): n for n in convos if n.agent.get("id")
+        }
+        existing_pairs: set[tuple[BaseNode, BaseNode]] = set()
+        for e in self.scene.edges():
+            if e.source is None or e.target is None:
+                continue
+            existing_pairs.add((e.source.owner, e.target.owner))
+
+        from apps.gui.canvas.ports import Port, PortDirection  # local — avoid cycle
+
+        for child in convos:
+            parent_id = child.agent.get("parent_id")
+            if not parent_id:
+                continue
+            parent = by_agent_id.get(parent_id)
+            if parent is None or (parent, child) in existing_pairs:
+                continue
+            # ConversationNodes have no flow ports; mint hidden ports
+            # just for the lineage edge so Edge's existing geometry
+            # pipeline works.
+            src_port = Port(parent, PortDirection.OUTPUT, name="lineage")
+            src_port.setVisible(False)
+            src_port.setPos(0, 0)  # owner-relative; positioned on the node centre
+            src_port.setParentItem(parent)
+            dst_port = Port(child, PortDirection.INPUT, name="lineage")
+            dst_port.setVisible(False)
+            dst_port.setPos(0, 0)
+            dst_port.setParentItem(child)
+            label = (child.agent.get("parent_preset") or "follow-up").replace("_", " ")
+            edge = Edge(src_port, dst_port, label=label, directional=True)
+            self.scene.add_edge(edge)
 
     def _note_node_moved(self, node_id: str) -> None:
         # We can't tell from a single ItemPositionHasChanged whether
@@ -495,6 +600,24 @@ class CanvasPage(QtWidgets.QWidget):
                 node = _CONTROL_FACTORY[node_type](node_id)
                 if node_type == "branch" and isinstance(node, BranchNode):
                     node.pattern = (n.get("params") or {}).get("pattern", ".*")
+            elif node_type == "conversation":
+                agent_id = n.get("agent_id")
+                # Pull from the palette's agents list if it's been
+                # populated; the canvas opened before the agents-list
+                # async load completed will fall back to a stub.
+                agent = next(
+                    (
+                        c.data(QtCore.Qt.ItemDataRole.UserRole)["agent"]
+                        for c in [
+                            self.palette.agents_list.item(i)
+                            for i in range(self.palette.agents_list.count())
+                        ]
+                        if c is not None
+                        and c.data(QtCore.Qt.ItemDataRole.UserRole)["agent"].get("id") == agent_id
+                    ),
+                    {"id": agent_id, "name": "Missing agent"},
+                )
+                node = ConversationNode(node_id, agent)
             else:
                 continue
             node.setPos(n.get("x", 0), n.get("y", 0))
@@ -516,6 +639,9 @@ class CanvasPage(QtWidgets.QWidget):
             )
             if src_port and dst_port:
                 self.scene.add_edge(Edge(src_port, dst_port))
+        # Re-render lineage edges for any conversation nodes the
+        # loaded flow brought back onto the canvas.
+        self._refresh_lineage_edges()
         self.inspector.show_for([])
         self.view.fit_all()
 

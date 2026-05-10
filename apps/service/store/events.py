@@ -93,6 +93,19 @@ class EventStore:
         # executescript wraps in its own transaction
         await self.db.executescript(sql)
         await self.db.commit()
+        # Code-side migrations for additive column changes.  SQLite
+        # CREATE TABLE IF NOT EXISTS won't add new columns to a pre-
+        # existing table, so we ALTER explicitly with a duplicate-
+        # column guard.  Each entry: (table, column, definition).
+        for table, column, defn in (("agents", "parent_preset", "TEXT"),):
+            if not await self._has_column(table, column):
+                await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {defn}")
+        await self.db.commit()
+
+    async def _has_column(self, table: str, column: str) -> bool:
+        cur = await self.db.execute(f"PRAGMA table_info({table})")
+        rows = await cur.fetchall()
+        return any(r["name"] == column for r in rows)
 
     # ------------------------------------------------------------------
     # Event append
@@ -306,8 +319,17 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def insert_agent(self, agent: Agent) -> Agent:
+        # Explicit column list (rather than VALUES (?, ?, ?...)) so
+        # adding new columns via the code-side migration doesn't break
+        # this insert when schema column order shifts.
         await self.db.execute(
-            "INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            """
+            INSERT INTO agents (
+                id, name, provider, model, system,
+                parent_id, parent_name, parent_preset,
+                transcript, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             (
                 agent.id,
                 agent.name,
@@ -316,6 +338,7 @@ class EventStore:
                 agent.system,
                 agent.parent_id,
                 agent.parent_name,
+                agent.parent_preset,
                 json.dumps(agent.transcript),
                 agent.created_at.isoformat(),
                 agent.updated_at.isoformat(),
