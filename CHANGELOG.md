@@ -2,8 +2,36 @@
 
 ## Unreleased — Phase 5
 
-Next batch.  Empty section opened on 2026-05-10 to track the work
-that will land in the PR following #12.
+Next batch.  Tracks PR #13 — work that will land on top of merged
+PR #12.
+
+- ``apps/gui/presets`` — new shared registry for model + thinking-depth
+  presets and the canonical ``compose_system(...)`` assembler.  Single
+  source of truth across the Chat tab, the Canvas "+ New conversation"
+  dialog, and the Agents-tab "+ New agent" dialog.  Public API:
+  ``MODEL_PRESETS`` (12 rows × 4 modes), ``THINKING_PRESETS`` (Off /
+  Normal / Hard / Very hard), ``compose_system``, ``model_label_for``.
+  Both registries are exported as tuples so a buggy consumer can't
+  corrupt them.
+- Chat tab refactored to consume the shared module — drops its local
+  ``_MODEL_PRESETS`` / ``_THINKING_PRESETS`` / ``_label_for`` / ``_skills_to_system``
+  definitions.  Behaviour-preserving.
+- Canvas "+ New conversation" dialog redesigned: provider filter,
+  full 12-row model + mode picker, thinking-depth dropdown, skills
+  field — same picker as the Chat tab.  ``compose_system`` produces
+  identical system prompts for identical inputs across screens.
+- Draft-canvas amber banner: "📐 Draft canvas — planning surface.  Run
+  is disabled. Model / thinking / skills / repo binding all behave
+  the same as the Chat tab; flip Draft off to dispatch."
+- Agents-tab "+ New agent" dialog: now slices ``MODEL_PRESETS`` for
+  Coding-mode rows.  Asserts non-empty at import and guards
+  ``currentIndex() == -1`` to refuse rather than IndexError.
+- AgentChatDialog header + ConversationNode subtitle/tooltip: use
+  ``model_label_for`` so the canvas shows the friendly label
+  ("Claude Sonnet 4.6") instead of the raw provider id.
+- Mid-thread thinking / skills changes now show a small amber hint —
+  "↳ Thinking / skills changes apply to the next New chat" — because
+  the system prompt is locked at agent creation.
 
 ## Unreleased — Phase 4
 

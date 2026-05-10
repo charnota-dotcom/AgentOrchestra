@@ -269,10 +269,31 @@ class PalettePanel(QtWidgets.QWidget):
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Create")
+        ok_btn = buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        ok_btn.setText("Create")
         buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
         buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
         outer.addWidget(buttons)
+
+        # Gate the OK button on the model combo having at least one
+        # selectable row.  Today the filter always yields >=1 row for
+        # both supported providers, but new providers / custom filters
+        # could render the combo empty — in that case Create would
+        # currentIndex() == -1 and the accept handler would silently
+        # return.  Disabling the button surfaces the state instead.
+        def _refresh_ok_state(*_: object) -> None:
+            ok_btn.setEnabled(model_combo.count() > 0)
+
+        # Wrap _filter_models so OK gating runs after every refresh.
+        _orig_filter = _filter_models
+
+        def _filter_then_refresh(idx: int) -> None:
+            _orig_filter(idx)
+            _refresh_ok_state()
+
+        provider_filter.currentIndexChanged.disconnect(_filter_models)  # type: ignore[arg-type]
+        provider_filter.currentIndexChanged.connect(_filter_then_refresh)  # type: ignore[arg-type]
+        _refresh_ok_state()
 
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return

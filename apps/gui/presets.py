@@ -86,7 +86,11 @@ MODE_FILE = "File / artifact"
 MODE_IMAGE = "Image prompt"
 
 
-MODEL_PRESETS: list[ModelPreset] = [
+# Frozen registries — exported as tuples so a buggy consumer can't
+# .append() / setitem one of these and corrupt every other importer.
+# Indexing semantics are unchanged (canvas + chat already iterate or
+# index by position).
+MODEL_PRESETS: tuple[ModelPreset, ...] = (
     # --- Coding -------------------------------------------------------
     ModelPreset("Claude Sonnet 4.6", "claude-cli", "claude-sonnet-4-6", MODE_CODING, ""),
     ModelPreset("Claude Opus 4.7", "claude-cli", "claude-opus-4-7", MODE_CODING, ""),
@@ -105,10 +109,10 @@ MODEL_PRESETS: list[ModelPreset] = [
     # --- Image prompt ------------------------------------------------
     ModelPreset("Claude Sonnet 4.6", "claude-cli", "claude-sonnet-4-6", MODE_IMAGE, _MODE_IMAGE),
     ModelPreset("Gemini 2.5 Pro", "gemini-cli", "gemini-2.5-pro", MODE_IMAGE, _MODE_IMAGE),
-]
+)
 
 
-THINKING_PRESETS: list[ThinkingPreset] = [
+THINKING_PRESETS: tuple[ThinkingPreset, ...] = (
     ThinkingPreset("Off", ""),
     ThinkingPreset("Normal", "Think briefly before answering."),
     ThinkingPreset(
@@ -121,7 +125,7 @@ THINKING_PRESETS: list[ThinkingPreset] = [
         "Consider edge cases, alternative interpretations, and potential pitfalls. "
         "Show your reasoning explicitly.",
     ),
-]
+)
 
 
 # Default selections — consistent across both screens.  Coding-Sonnet

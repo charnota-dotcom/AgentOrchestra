@@ -114,6 +114,20 @@ class ChatPage(QtWidgets.QWidget):
         for tp in THINKING_PRESETS:
             self.thinking_combo.addItem(tp.label)
         self.thinking_combo.setCurrentIndex(DEFAULT_THINKING_INDEX)
+        # Mid-thread changes to thinking are silently ignored — the
+        # system prompt is locked at agents.create.  Show a transient
+        # hint so the operator knows to start a new chat when they
+        # change it after the first send.
+        self.thinking_combo.setToolTip(
+            "Tells the model how hard to think before answering.  "
+            "Off keeps the prompt clean; Hard / Very hard ask for "
+            "explicit reasoning.\n\n"
+            "Mid-thread changes apply to the next New chat (the system "
+            "prompt is locked at the first send)."
+        )
+        self.thinking_combo.currentIndexChanged.connect(  # type: ignore[arg-type]
+            self._show_apply_on_new_chat_hint
+        )
         top.addWidget(self.thinking_combo)
 
         layout.addLayout(top)
@@ -126,8 +140,25 @@ class ChatPage(QtWidgets.QWidget):
         self.skills_input.setPlaceholderText(
             "Optional, e.g. /research-deep /cite-sources  (free-form, passed in the prompt)"
         )
+        self.skills_input.setToolTip(
+            "Free-form skill directives passed in the system prompt.  "
+            "Mid-thread changes apply to the next New chat (system prompt "
+            "is locked at the first send)."
+        )
+        self.skills_input.editingFinished.connect(  # type: ignore[arg-type]
+            self._show_apply_on_new_chat_hint
+        )
         skills_row.addWidget(self.skills_input, stretch=1)
         layout.addLayout(skills_row)
+
+        # Tiny inline status label — shows briefly after the operator
+        # changes thinking / skills mid-thread so they understand the
+        # change won't take effect until the next New chat.  Hidden
+        # otherwise to keep the page uncluttered.
+        self._apply_hint = QtWidgets.QLabel("")
+        self._apply_hint.setStyleSheet("color:#a96b00;font-size:11px;padding-left:48px;")
+        self._apply_hint.setVisible(False)
+        layout.addWidget(self._apply_hint)
 
         # Workspace picker — when set, the CLI subprocess is spawned
         # with cwd = repo_path so the model can use its built-in file
@@ -566,6 +597,23 @@ class ChatPage(QtWidgets.QWidget):
         self._history.clear()
         self.transcript.clear()
         self.message_input.clear()
+        # Hide the "applies on new chat" hint — that warning is moot
+        # now that we *are* a new chat.
+        self._apply_hint.setVisible(False)
+
+    def _show_apply_on_new_chat_hint(self, *_: object) -> None:
+        """Surface a tiny amber line under thinking/skills when the
+        operator changes either mid-thread.  Cleared by ``_new_chat``.
+        """
+        if self._agent_id is None:
+            # No agent yet — first send will pick up the new value, no
+            # warning needed.
+            return
+        self._apply_hint.setText(
+            "↳ Thinking / skills changes apply to the next New chat — "
+            "the current agent's system prompt is locked."
+        )
+        self._apply_hint.setVisible(True)
 
     # ------------------------------------------------------------------
     # Workspaces (project repos)

@@ -56,10 +56,19 @@ class ConversationNode(BaseNode):
             if (agent.get("workspace_id") and ws_name)
             else ("  ·  📂 repo" if agent.get("workspace_id") else "")
         )
+        # Friendly model label ("Claude Sonnet 4.6") rather than the
+        # raw provider id ("claude-sonnet-4-6") so the canvas matches
+        # the Chat tab's transcript header.  Falls back gracefully
+        # for unknown (provider, model) pairs.
+        from apps.gui.presets import model_label_for as _mlf
+
+        provider = str(agent.get("provider", ""))
+        raw_model = str(agent.get("model", "?"))
+        friendly_model = _mlf(provider, raw_model) if provider else raw_model
         super().__init__(
             node_id=node_id,
             title=str(agent.get("name") or "Agent"),
-            subtitle=f"{agent.get('model', '?')} · {len(transcript)} turns{repo_marker}",
+            subtitle=f"{friendly_model} · {len(transcript)} turns{repo_marker}",
             body=body,
         )
         self.agent = agent
@@ -86,7 +95,7 @@ class ConversationNode(BaseNode):
         self.setToolTip(
             f"{agent.get('name', '?')}\n"
             f"Provider: {agent.get('provider', '?')}\n"
-            f"Model:    {agent.get('model', '?')}\n"
+            f"Model:    {friendly_model} ({raw_model})\n"
             f"Turns:    {len(transcript)}\n"
             f"{repo_line}"
             f"\n{origin}\n\n"

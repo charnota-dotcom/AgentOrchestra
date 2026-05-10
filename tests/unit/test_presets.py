@@ -81,6 +81,58 @@ def test_compose_system_joins_in_order() -> None:
     assert "\n\n" in composed
 
 
+def test_compose_system_no_leading_or_trailing_whitespace() -> None:
+    """Empty parts get dropped — the assembled string must never start
+    or end with a newline (otherwise the prompt would carry a stray
+    blank line into the model)."""
+    general = next(p for p in MODEL_PRESETS if p.mode == MODE_GENERAL)
+    hard = next(t for t in THINKING_PRESETS if t.label == "Hard")
+
+    # mode + thinking, no skills
+    composed = compose_system(general, hard, "")
+    assert not composed.startswith("\n")
+    assert not composed.endswith("\n")
+
+    # mode + skills, thinking off
+    off = THINKING_PRESETS[0]
+    composed = compose_system(general, off, "/cite")
+    assert not composed.startswith("\n")
+    assert not composed.endswith("\n")
+
+    # only thinking — Coding preset has empty system, so this is the
+    # "operator picked Coding + Hard thinking" middle case the chat
+    # tab default exercises constantly.
+    coding = next(p for p in MODEL_PRESETS if p.mode == MODE_CODING and p.system == "")
+    composed = compose_system(coding, hard, "")
+    assert composed == hard.system  # exact, no padding
+
+
+def test_compose_system_chat_tab_default_is_just_thinking() -> None:
+    """Chat tab opens at Coding + Normal thinking + no skills.  The
+    composed system prompt should be exactly the Normal directive —
+    no leading or trailing whitespace, no stray paragraph break."""
+    coding = MODEL_PRESETS[0]
+    normal = next(t for t in THINKING_PRESETS if t.label == "Normal")
+    composed = compose_system(coding, normal, "")
+    assert composed == normal.system
+
+
+def test_model_presets_are_immutable_tuples() -> None:
+    """Defence in depth: a buggy consumer should not be able to
+    .append() / setitem the registries."""
+    import apps.gui.presets as P
+
+    assert isinstance(P.MODEL_PRESETS, tuple)
+    assert isinstance(P.THINKING_PRESETS, tuple)
+
+
+def test_every_display_label_is_unique() -> None:
+    """Two visually-identical rows would let the operator pick the
+    wrong cell with no way to tell them apart."""
+    seen = [p.display() for p in MODEL_PRESETS]
+    assert len(seen) == len(set(seen)), f"duplicate display labels in MODEL_PRESETS: {seen}"
+
+
 def test_model_label_for_known_pair() -> None:
     p = MODEL_PRESETS[DEFAULT_MODEL_INDEX]
     assert model_label_for(p.provider, p.model) == p.label

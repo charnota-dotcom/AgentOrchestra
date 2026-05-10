@@ -50,10 +50,17 @@ class AgentChatDialog(QtWidgets.QDialog):
         v.setContentsMargins(14, 14, 14, 14)
         v.setSpacing(10)
 
+        # Use the friendly label (e.g. "Claude Sonnet 4.6") instead of
+        # the raw provider/model id so the canvas chat dialog reads the
+        # same way the Chat tab transcript does.
+        from apps.gui.presets import model_label_for as _mlf
+
+        _provider = agent.get("provider", "?")
+        _model = agent.get("model", "?")
+        _friendly = _mlf(_provider, _model) if _provider != "?" else _model
         header = QtWidgets.QLabel(
             f"<b>{agent.get('name', '?')}</b>  ·  "
-            f"<span style='color:#5b6068'>{agent.get('model', '?')} "
-            f"({agent.get('provider', '?')})</span>"
+            f"<span style='color:#5b6068'>{_friendly} ({_provider})</span>"
         )
         header.setStyleSheet("font-size:14px;color:#0f1115;")
         v.addWidget(header)

@@ -35,7 +35,14 @@ if TYPE_CHECKING:
 # use the canvas New-Conversation dialog or the Chat tab.  Showing the
 # full 12-row matrix here would be confusing without those companion
 # fields.
-_AGENTS_TAB_PRESETS: list = [p for p in MODEL_PRESETS if p.mode == MODE_CODING]
+_AGENTS_TAB_PRESETS: tuple = tuple(p for p in MODEL_PRESETS if p.mode == MODE_CODING)
+# Loud import-time check — if the Coding mode constant ever drifts or
+# gets renamed and this list ends up empty, the dialog would silently
+# open with zero rows and IndexError on accept.  Better to crash on
+# launch than to mislead the operator at runtime.
+assert _AGENTS_TAB_PRESETS, (
+    "apps.gui.presets has no Coding-mode entries; the Agents tab dialog depends on at least one"
+)
 
 
 class AgentsPage(QtWidgets.QWidget):
@@ -304,7 +311,13 @@ class AgentsPage(QtWidgets.QWidget):
         form.addRow(buttons)
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        chosen = _AGENTS_TAB_PRESETS[model.currentIndex()]
+        idx = model.currentIndex()
+        if idx < 0 or idx >= len(_AGENTS_TAB_PRESETS):
+            # Defensive: combo was rebuilt or model emptied between
+            # show + accept.  Refuse rather than IndexError into the
+            # user's face.
+            return
+        chosen = _AGENTS_TAB_PRESETS[idx]
         provider, model_name = chosen.provider, chosen.model
         asyncio.ensure_future(
             self._do_create(
