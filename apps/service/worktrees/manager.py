@@ -206,9 +206,7 @@ class WorktreeManager:
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            _stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=300.0
-            )
+            _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
         except TimeoutError:
             proc.kill()
             with contextlib.suppress(Exception):

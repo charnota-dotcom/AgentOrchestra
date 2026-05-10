@@ -68,9 +68,7 @@ async def test_list_attachments_per_agent(store: EventStore, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_attachments_by_ids_preserves_order(
-    store: EventStore, tmp_path
-) -> None:
+async def test_get_attachments_by_ids_preserves_order(store: EventStore, tmp_path) -> None:
     agent = await _make_agent(store)
     ids = []
     for i in range(3):
@@ -91,9 +89,7 @@ async def test_get_attachments_by_ids_preserves_order(
 
 
 @pytest.mark.asyncio
-async def test_delete_attachment_returns_row_then_gone(
-    store: EventStore, tmp_path
-) -> None:
+async def test_delete_attachment_returns_row_then_gone(store: EventStore, tmp_path) -> None:
     agent = await _make_agent(store)
     att = await store.insert_attachment(
         Attachment(

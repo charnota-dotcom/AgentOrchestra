@@ -169,12 +169,8 @@ class AgentChatDialog(QtWidgets.QDialog):
         chip_inner.setLayout(self.attachments_row)
         att_wrap = QtWidgets.QScrollArea()
         att_wrap.setWidgetResizable(True)
-        att_wrap.setHorizontalScrollBarPolicy(
-            QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        att_wrap.setVerticalScrollBarPolicy(
-            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        att_wrap.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        att_wrap.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         att_wrap.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         att_wrap.setFixedHeight(36)
         att_wrap.setWidget(chip_inner)
@@ -315,8 +311,14 @@ class AgentChatDialog(QtWidgets.QDialog):
         self.refs_label.setText(self._format_refs_label(self.agent))
 
     _SUPPORTED_EXTS = {
-        ".png", ".jpg", ".jpeg", ".gif", ".webp",
-        ".xlsx", ".xls", ".csv",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".xlsx",
+        ".xls",
+        ".csv",
     }
 
     def _attach_file(self) -> None:
@@ -331,9 +333,7 @@ class AgentChatDialog(QtWidgets.QDialog):
         asyncio.ensure_future(self._upload_attachment(Path(path)))
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # type: ignore[override]
-        if event.mimeData().hasUrls() and any(
-            u.toLocalFile() for u in event.mimeData().urls()
-        ):
+        if event.mimeData().hasUrls() and any(u.toLocalFile() for u in event.mimeData().urls()):
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
@@ -386,9 +386,7 @@ class AgentChatDialog(QtWidgets.QDialog):
             except OSError as exc:
                 QtWidgets.QMessageBox.warning(self, "Couldn't read file", str(exc))
                 return
-            content_b64 = await asyncio.to_thread(
-                lambda: base64.b64encode(data).decode("ascii")
-            )
+            content_b64 = await asyncio.to_thread(lambda: base64.b64encode(data).decode("ascii"))
             try:
                 res = await self.client.call(
                     "attachments.upload",
@@ -465,9 +463,7 @@ class AgentChatDialog(QtWidgets.QDialog):
         except Exception as exc:
             # Surface so the operator knows an orphan is sitting on
             # their disk.  Previously this was silently swallowed.
-            self.transcript.appendPlainText(
-                f"Warning: couldn't delete attachment ({exc})\n"
-            )
+            self.transcript.appendPlainText(f"Warning: couldn't delete attachment ({exc})\n")
 
     def closeEvent(self, event: Any) -> None:  # type: ignore[override]
         # Clean up any attachments uploaded but not yet sent so we
@@ -521,9 +517,7 @@ class AgentChatDialog(QtWidgets.QDialog):
             self.switch_branch_btn.setVisible(False)
             return
         try:
-            res = await self.client.call(
-                "workspaces.git_status", {"workspace_id": ws_id}
-            )
+            res = await self.client.call("workspaces.git_status", {"workspace_id": ws_id})
         except Exception as exc:
             self.git_status_label.setText(f"⚠ git status failed: {exc}")
             self.git_status_label.setVisible(True)
@@ -595,9 +589,7 @@ class AgentChatDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(self, "Couldn't switch branch", str(exc))
             return
         self.transcript.appendPlainText(
-            f"System: switched to branch '{branch}'"
-            + (" (created)" if create else "")
-            + "\n"
+            f"System: switched to branch '{branch}'" + (" (created)" if create else "") + "\n"
         )
         await self._refresh_git_status()
 
@@ -631,9 +623,7 @@ class AgentChatDialog(QtWidgets.QDialog):
         none_item.setData(QtCore.Qt.ItemDataRole.UserRole, "")
         listw.addItem(none_item)
         for w in workspaces:
-            item = QtWidgets.QListWidgetItem(
-                f"{w.get('name', '?')}  ·  {w.get('repo_path', '?')}"
-            )
+            item = QtWidgets.QListWidgetItem(f"{w.get('name', '?')}  ·  {w.get('repo_path', '?')}")
             item.setData(QtCore.Qt.ItemDataRole.UserRole, w.get("id", ""))
             listw.addItem(item)
         # Pre-select the current binding.
@@ -708,9 +698,7 @@ class AgentChatDialog(QtWidgets.QDialog):
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Couldn't register repo", str(exc))
             return
-        item = QtWidgets.QListWidgetItem(
-            f"{ws.get('name', '?')}  ·  {ws.get('repo_path', '?')}"
-        )
+        item = QtWidgets.QListWidgetItem(f"{ws.get('name', '?')}  ·  {ws.get('repo_path', '?')}")
         item.setData(QtCore.Qt.ItemDataRole.UserRole, ws.get("id", ""))
         listw.addItem(item)
         listw.setCurrentItem(item)

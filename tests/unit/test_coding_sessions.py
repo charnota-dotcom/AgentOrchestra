@@ -55,9 +55,7 @@ async def test_clone_workspace_rejects_existing_dest(tmp_path: Path, store) -> N
     dest = tmp_path / "dest"
     dest.mkdir()
     with pytest.raises(WorktreeError, match="already exists"):
-        await mgr.clone_workspace(
-            "https://example.com/x.git", dest_dir=dest
-        )
+        await mgr.clone_workspace("https://example.com/x.git", dest_dir=dest)
 
 
 @pytest.mark.asyncio
@@ -72,9 +70,7 @@ async def test_clone_workspace_rejects_dash_branch(tmp_path: Path, store) -> Non
 
 
 @pytest.mark.asyncio
-async def test_clone_workspace_clones_local_url(
-    tmp_path: Path, store
-) -> None:
+async def test_clone_workspace_clones_local_url(tmp_path: Path, store) -> None:
     """End-to-end: clone a local source repo into a managed dest and
     register it.  Skipped gracefully if `git` isn't on PATH (CI image)."""
     if not _which("git"):
@@ -84,9 +80,7 @@ async def test_clone_workspace_clones_local_url(
     _git_init(src)
     mgr = WorktreeManager(store)
     dest = tmp_path / "managed_clones" / "src"
-    ws = await mgr.clone_workspace(
-        f"file://{src}", dest_dir=dest, name="cloned-src"
-    )
+    ws = await mgr.clone_workspace(f"file://{src}", dest_dir=dest, name="cloned-src")
     assert ws.name == "cloned-src"
     assert Path(ws.repo_path).resolve() == dest.resolve()
     assert (dest / "README.md").is_file()
@@ -181,9 +175,7 @@ async def test_workspaces_switch_branch_rejects_dash(tmp_path: Path, store) -> N
 
 
 @pytest.mark.asyncio
-async def test_build_repo_system_prompt_inlines_claude_md(
-    tmp_path: Path, store
-) -> None:
+async def test_build_repo_system_prompt_inlines_claude_md(tmp_path: Path, store) -> None:
     if not _which("git"):
         pytest.skip("git not on PATH")
     src = tmp_path / "repo"
@@ -196,8 +188,13 @@ async def test_build_repo_system_prompt_inlines_claude_md(
     # Re-add so the convention file is part of HEAD; not strictly
     # required for the prompt builder which reads from disk, but
     # keeps the repo state coherent.
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@e.com",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@e.com"}
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@e.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@e.com",
+    }
     subprocess.run(["git", "-C", str(src), "add", "."], check=True, env=env)
     subprocess.run(
         ["git", "-C", str(src), "commit", "-q", "-m", "claude.md"],

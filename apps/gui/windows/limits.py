@@ -187,8 +187,7 @@ class LimitsPage(QtWidgets.QWidget):
     def _build_attachment_card(self, usage: dict[str, Any]) -> QtWidgets.QWidget:
         card = QtWidgets.QFrame()
         card.setStyleSheet(
-            "QFrame{background:#fff;border:1px solid #e6e7eb;"
-            "border-radius:6px;padding:14px;}"
+            "QFrame{background:#fff;border:1px solid #e6e7eb;border-radius:6px;padding:14px;}"
         )
         v = QtWidgets.QVBoxLayout(card)
         v.setSpacing(6)

@@ -232,7 +232,9 @@ class EventStore:
                     flow.id,
                     flow.name,
                     flow.description,
-                    json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
+                    json.dumps(
+                        {"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}
+                    ),
                     flow.version,
                     flow.created_at.isoformat(),
                     flow.updated_at.isoformat(),
@@ -255,7 +257,9 @@ class EventStore:
                     (
                         flow.name,
                         flow.description,
-                        json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
+                        json.dumps(
+                            {"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}
+                        ),
                         flow.updated_at.isoformat(),
                         flow.id,
                         expected_version,
@@ -275,7 +279,9 @@ class EventStore:
                     (
                         flow.name,
                         flow.description,
-                        json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
+                        json.dumps(
+                            {"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}
+                        ),
                         flow.updated_at.isoformat(),
                         flow.id,
                     ),
@@ -490,9 +496,7 @@ class EventStore:
         away.  Returns True if a row was removed.
         """
         async with self._lock:
-            cur = await self.db.execute(
-                "DELETE FROM workspaces WHERE id = ?", (workspace_id,)
-            )
+            cur = await self.db.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
             await self.db.commit()
         return (cur.rowcount or 0) > 0
 
@@ -896,9 +900,7 @@ class EventStore:
         return Attachment.model_validate(d)
 
     async def get_attachment(self, attachment_id: str) -> Attachment | None:
-        cur = await self.db.execute(
-            "SELECT * FROM attachments WHERE id = ?", (attachment_id,)
-        )
+        cur = await self.db.execute("SELECT * FROM attachments WHERE id = ?", (attachment_id,))
         row = await cur.fetchone()
         return self._hydrate_attachment(row) if row else None
 
@@ -914,9 +916,7 @@ class EventStore:
         if not ids:
             return []
         qmarks = ",".join("?" for _ in ids)
-        cur = await self.db.execute(
-            f"SELECT * FROM attachments WHERE id IN ({qmarks})", ids
-        )
+        cur = await self.db.execute(f"SELECT * FROM attachments WHERE id IN ({qmarks})", ids)
         rows = await cur.fetchall()
         # Preserve the caller's order so the prompt assembly matches
         # what the operator selected.
@@ -925,16 +925,12 @@ class EventStore:
 
     async def delete_attachment(self, attachment_id: str) -> Attachment | None:
         async with self._lock:
-            cur = await self.db.execute(
-                "SELECT * FROM attachments WHERE id = ?", (attachment_id,)
-            )
+            cur = await self.db.execute("SELECT * FROM attachments WHERE id = ?", (attachment_id,))
             row = await cur.fetchone()
             if not row:
                 return None
             attachment = self._hydrate_attachment(row)
-            await self.db.execute(
-                "DELETE FROM attachments WHERE id = ?", (attachment_id,)
-            )
+            await self.db.execute("DELETE FROM attachments WHERE id = ?", (attachment_id,))
             await self.db.commit()
         return attachment
 

@@ -51,8 +51,10 @@ class ConversationNode(BaseNode):
         # Repo binding shows up in the subtitle so an operator can
         # tell at a glance which agents have file-tool access.
         ws_name = agent.get("workspace_name") or ""
-        repo_marker = f"  ·  📂 {ws_name}" if (agent.get("workspace_id") and ws_name) else (
-            "  ·  📂 repo" if agent.get("workspace_id") else ""
+        repo_marker = (
+            f"  ·  📂 {ws_name}"
+            if (agent.get("workspace_id") and ws_name)
+            else ("  ·  📂 repo" if agent.get("workspace_id") else "")
         )
         super().__init__(
             node_id=node_id,

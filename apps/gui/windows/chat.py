@@ -393,8 +393,14 @@ class ChatPage(QtWidgets.QWidget):
     # ------------------------------------------------------------------
 
     _SUPPORTED_EXTS = {
-        ".png", ".jpg", ".jpeg", ".gif", ".webp",
-        ".xlsx", ".xls", ".csv",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".xlsx",
+        ".xls",
+        ".csv",
     }
 
     def _attach_file(self) -> None:
@@ -416,8 +422,7 @@ class ChatPage(QtWidgets.QWidget):
         if p.suffix.lower() not in self._SUPPORTED_EXTS:
             self._append(
                 "Warning",
-                f"unsupported file type {p.suffix!r}; "
-                f"supported: {sorted(self._SUPPORTED_EXTS)}",
+                f"unsupported file type {p.suffix!r}; supported: {sorted(self._SUPPORTED_EXTS)}",
             )
             return
         try:
@@ -425,18 +430,25 @@ class ChatPage(QtWidgets.QWidget):
         except OSError as exc:
             QtWidgets.QMessageBox.warning(self, "Couldn't read file", str(exc))
             return
-        kind = "image" if p.suffix.lower() in {
-            ".png", ".jpg", ".jpeg", ".gif", ".webp",
-        } else "spreadsheet"
+        kind = (
+            "image"
+            if p.suffix.lower()
+            in {
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".gif",
+                ".webp",
+            }
+            else "spreadsheet"
+        )
         self._pending_attachments.append(
             {"local_path": str(p), "original_name": p.name, "kind": kind, "bytes": size}
         )
         self._render_pending_attachments()
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # type: ignore[override]
-        if event.mimeData().hasUrls() and any(
-            u.toLocalFile() for u in event.mimeData().urls()
-        ):
+        if event.mimeData().hasUrls() and any(u.toLocalFile() for u in event.mimeData().urls()):
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
@@ -486,22 +498,16 @@ class ChatPage(QtWidgets.QWidget):
         return chip
 
     def _remove_attachment(self, att: dict[str, Any]) -> None:
-        self._pending_attachments = [
-            a for a in self._pending_attachments if a is not att
-        ]
+        self._pending_attachments = [a for a in self._pending_attachments if a is not att]
         self._render_pending_attachments()
         # If the attachment was already uploaded server-side, delete it.
         # Surface failures as a toast so the operator notices an
         # orphan staying behind on their disk; the previous code
         # silently swallowed everything.
         if att.get("id") and self._agent_id:
-            asyncio.ensure_future(
-                self._delete_remote_attachment(att, self._agent_id)
-            )
+            asyncio.ensure_future(self._delete_remote_attachment(att, self._agent_id))
 
-    async def _delete_remote_attachment(
-        self, att: dict[str, Any], agent_id: str
-    ) -> None:
+    async def _delete_remote_attachment(self, att: dict[str, Any], agent_id: str) -> None:
         try:
             await self.client.call(
                 "attachments.delete",
@@ -598,9 +604,7 @@ class ChatPage(QtWidgets.QWidget):
                 created = await self.client.call(
                     "agents.create",
                     {
-                        "name": _auto_name_from(
-                            message, label, self._pending_attachments
-                        ),
+                        "name": _auto_name_from(message, label, self._pending_attachments),
                         "provider": provider,
                         "model": model,
                         "system": system,

@@ -176,9 +176,7 @@ def _inline_spreadsheet_attachments(prompt: str, attachments: list[Attachment]) 
     sheets = [a for a in attachments if a.kind == AttachmentKind.SPREADSHEET and a.rendered_text]
     if not sheets:
         return prompt
-    blocks = [
-        f"[attachment: {a.original_name}]\n{a.rendered_text}" for a in sheets
-    ]
+    blocks = [f"[attachment: {a.original_name}]\n{a.rendered_text}" for a in sheets]
     return (
         prompt
         + "\n\n=== Attached spreadsheets ===\n\n"
@@ -327,9 +325,7 @@ class Handlers:
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout
-                )
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except TimeoutError:
                 proc.kill()
                 with contextlib.suppress(Exception):
@@ -350,9 +346,7 @@ class Handlers:
         branch = branch_out.strip() if rc_b == 0 else "?"
         # ahead/behind upstream — gracefully degrade if no upstream.
         ahead = behind = 0
-        rc_ab, ab_out, _ = await _git(
-            "rev-list", "--left-right", "--count", "HEAD...@{u}"
-        )
+        rc_ab, ab_out, _ = await _git("rev-list", "--left-right", "--count", "HEAD...@{u}")
         if rc_ab == 0 and ab_out.strip():
             try:
                 a_str, b_str = ab_out.strip().split()
@@ -377,9 +371,7 @@ class Handlers:
         # Last commit (subject only — short for the GUI banner).
         last_sha = ""
         last_subj = ""
-        rc_l, log_out, _ = await _git(
-            "log", "-1", "--format=%h %s", "--no-color"
-        )
+        rc_l, log_out, _ = await _git("log", "-1", "--format=%h %s", "--no-color")
         if rc_l == 0 and log_out.strip():
             parts = log_out.strip().split(maxsplit=1)
             last_sha = parts[0]
@@ -430,9 +422,7 @@ class Handlers:
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            _stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=15.0
-            )
+            _stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=15.0)
         except TimeoutError:
             proc.kill()
             with contextlib.suppress(Exception):
@@ -481,9 +471,7 @@ class Handlers:
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
-                stdout_b, _stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=10.0
-                )
+                stdout_b, _stderr_b = await asyncio.wait_for(proc.communicate(), timeout=10.0)
             except TimeoutError:
                 proc.kill()
                 with contextlib.suppress(TimeoutError, ProcessLookupError):
@@ -949,9 +937,7 @@ class Handlers:
     # the prompt.  Honest truncation marker so the model knows.
     _CONVENTION_INLINE_CAP = 8000
 
-    async def _build_repo_system_prompt(
-        self, ws: Any, *, base_system: str | None
-    ) -> str:
+    async def _build_repo_system_prompt(self, ws: Any, *, base_system: str | None) -> str:
         """Compose the system prompt for a repo-bound coding session.
 
         Folds together (in order):
@@ -1014,8 +1000,7 @@ class Handlers:
 
         parts: list[str] = []
         header = (
-            f"You are operating inside the project at {ws.repo_path} "
-            f"(workspace name: {ws.name})"
+            f"You are operating inside the project at {ws.repo_path} (workspace name: {ws.name})"
         )
         if branch:
             header += f", currently on branch '{branch}'"
@@ -1177,9 +1162,7 @@ class Handlers:
                 # agent's files.
                 for a in attachments:
                     if a.agent_id != agent_id:
-                        raise ValueError(
-                            f"attachment {a.id} belongs to a different agent"
-                        )
+                        raise ValueError(f"attachment {a.id} belongs to a different agent")
 
             # Fold transcript + system into a single prompt for the CLI
             # adapter (which doesn't accept structured messages in
@@ -1247,13 +1230,9 @@ class Handlers:
             # adapter has no path concept for tabular data); images
             # remain as Attachment objects passed via send(...).
             prompt_with_sheets = _inline_spreadsheet_attachments(prompt, attachments)
-            image_attachments = [
-                a for a in attachments if a.kind == AttachmentKind.IMAGE
-            ]
+            image_attachments = [a for a in attachments if a.kind == AttachmentKind.IMAGE]
             try:
-                async for ev in session.send(
-                    prompt_with_sheets, attachments=image_attachments
-                ):
+                async for ev in session.send(prompt_with_sheets, attachments=image_attachments):
                     if ev.kind == "text_delta":
                         chunks.append(ev.text)
                     elif ev.kind == "error":
@@ -1268,9 +1247,7 @@ class Handlers:
             # Bind each attachment to the user-turn we just appended so
             # the GUI can show "this turn had X attached".
             for a in attachments:
-                await self.store.update_attachment_turn(
-                    a.id, new_turn_index, agent_id=agent_id
-                )
+                await self.store.update_attachment_turn(a.id, new_turn_index, agent_id=agent_id)
             # Record the send for the in-app message-tally counter so the
             # Limits tab can show "X / cap" against the published plan
             # caps without having to ask the CLI.
@@ -1535,9 +1512,7 @@ class Handlers:
         if existing is None:
             return {"deleted": False}
         if existing.agent_id != agent_id:
-            raise ValueError(
-                f"attachment {attachment_id} does not belong to agent {agent_id}"
-            )
+            raise ValueError(f"attachment {attachment_id} does not belong to agent {agent_id}")
         # Serialise with sends so we don't unlink mid-prompt.
         async with await self._lock_for_agent(agent_id):
             attachment = await self.store.delete_attachment(attachment_id)

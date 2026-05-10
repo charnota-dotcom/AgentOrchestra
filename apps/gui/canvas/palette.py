@@ -247,9 +247,7 @@ class PalettePanel(QtWidgets.QWidget):
                 break
         combo.blockSignals(False)
 
-    def _palette_add_repo(
-        self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox
-    ) -> None:
+    def _palette_add_repo(self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox) -> None:
         from pathlib import Path
 
         path = QtWidgets.QFileDialog.getExistingDirectory(
@@ -273,9 +271,7 @@ class PalettePanel(QtWidgets.QWidget):
 
         asyncio.ensure_future(_go())
 
-    def _palette_clone_repo(
-        self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox
-    ) -> None:
+    def _palette_clone_repo(self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox) -> None:
         # Inline mini-dialog: URL + branch.  Keeps the new-conversation
         # flow self-contained — no need to bounce out to the Chat tab.
         dlg = QtWidgets.QDialog(parent)
@@ -289,8 +285,7 @@ class PalettePanel(QtWidgets.QWidget):
         branch_input.setPlaceholderText("(leave blank for default)")
         form.addRow("Branch:", branch_input)
         info = QtWidgets.QLabel(
-            "Clones into AgentOrchestra's data directory; large repos "
-            "may take a minute."
+            "Clones into AgentOrchestra's data directory; large repos may take a minute."
         )
         info.setWordWrap(True)
         info.setStyleSheet("color:#5b6068;font-size:11px;")
@@ -313,9 +308,7 @@ class PalettePanel(QtWidgets.QWidget):
 
         async def _go() -> None:
             try:
-                ws = await self.client.call(
-                    "workspaces.clone", {"url": url, "branch": branch}
-                )
+                ws = await self.client.call("workspaces.clone", {"url": url, "branch": branch})
             except Exception as exc:
                 QtWidgets.QMessageBox.warning(parent, "Clone failed", str(exc))
                 return
