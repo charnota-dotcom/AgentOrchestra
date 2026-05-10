@@ -69,6 +69,40 @@ def _data_dir() -> Path:
     return p
 
 
+def _first_descriptive_line(text: str) -> str:
+    """Return the first non-empty, non-front-matter, non-marker line of
+    a markdown blob, trimmed.  Used by ``skills.list`` to derive a
+    one-line description for each Claude Code skill file.
+
+    Skips:
+      * YAML front-matter delimiters (``---``).
+      * Blank lines.
+      * Heading markers (lines starting with ``#``) — those are usually
+        just the skill name.
+
+    Returns ``""`` if nothing useful is found in the first 40 lines.
+    """
+    in_frontmatter = False
+    for i, raw in enumerate(text.splitlines()):
+        if i > 40:
+            break
+        line = raw.strip()
+        if not line:
+            continue
+        if line == "---":
+            in_frontmatter = not in_frontmatter
+            continue
+        if in_frontmatter:
+            # Inside YAML; pick up `description:` if it shows up.
+            if line.lower().startswith("description:"):
+                return line.split(":", 1)[1].strip().strip("\"'")
+            continue
+        if line.startswith("#"):
+            continue
+        return line[:200]
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Drone authority — see docs/DRONE_MODEL.md ("Authority matrix").
 #
@@ -1263,6 +1297,53 @@ class Handlers:
             await self.store.update_drone_action(target)
         return target.model_dump(mode="json")
 
+    async def skills_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Discover skills available to a given provider.
+
+        Returns ``{provider, skills, source}`` where:
+          * ``provider`` is the requested provider name.
+          * ``skills`` is a list of ``{name, description, path}`` dicts.
+          * ``source`` is either ``"~/.claude/skills"`` (Claude) or
+            ``"none"`` (Gemini today — no first-class skills mechanism
+            in the Gemini CLI; the operator can still type free-form
+            ``/foo /bar`` directives that we inline as system text).
+
+        For Claude (``claude-cli`` or ``anthropic``) we scan
+        ``~/.claude/skills/*.md`` for the operator's installed skills.
+        Each file's stem becomes the skill name.  The first non-empty
+        non-front-matter line of the body becomes the description so
+        the picker dialog has something to render under each name.
+        Skills directory missing → empty list (not an error).
+        """
+        provider = (params.get("provider") or "").strip()
+        if provider in ("claude-cli", "anthropic"):
+            skills_dir = Path.home() / ".claude" / "skills"
+            entries: list[dict[str, str]] = []
+            if skills_dir.is_dir():
+                for path in sorted(skills_dir.glob("*.md")):
+                    try:
+                        text = path.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    description = _first_descriptive_line(text)
+                    entries.append(
+                        {
+                            "name": path.stem,
+                            "description": description,
+                            "path": str(path),
+                        }
+                    )
+            return {
+                "provider": provider,
+                "skills": entries,
+                "source": str(skills_dir) if skills_dir.is_dir() else "none",
+            }
+        # Gemini / Ollama / API providers don't have a first-class
+        # skills mechanism the way Claude Code does.  Return empty
+        # so the GUI can render a helpful "no skills detected — type
+        # free-form" message.
+        return {"provider": provider, "skills": [], "source": "none"}
+
     async def limits_check(self, params: dict[str, Any]) -> dict[str, Any]:
         """Probe every locally-installed CLI for whatever subscription
         / usage info it exposes.  Returns a structured dict the GUI's
@@ -1495,6 +1576,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("drones.send", h.drones_send)
     server.register("drones.append_reference", h.drones_append_reference)
     server.register("drones.append_skill", h.drones_append_skill)
+    server.register("skills.list", h.skills_list)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
     server.register("limits.check", h.limits_check)

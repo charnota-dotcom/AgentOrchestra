@@ -180,7 +180,41 @@ class PalettePanel(QtWidgets.QWidget):
         skills_input.setPlaceholderText(
             "/oneoff-skill, /another  (optional, layered on blueprint defaults)"
         )
-        form.addRow("Extra skills:", skills_input)
+        browse_skills_btn = QtWidgets.QPushButton("Browse…")
+        browse_skills_btn.setStyleSheet(
+            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        browse_skills_btn.setToolTip(
+            "Pick skills from the list installed on your machine "
+            "instead of typing /name tokens manually.  Claude scans "
+            "~/.claude/skills/; Gemini has none today."
+        )
+        bp_by_id = {bp["id"]: bp for bp in blueprints}
+
+        def _open_picker() -> None:
+            from apps.gui.widgets.skills_picker import SkillsPicker
+
+            bp = bp_by_id.get(bp_combo.currentData() or "")
+            provider = (bp or {}).get("provider") or "claude-cli"
+            current = skills_input.text()
+            picker = SkillsPicker(self.client, provider, current=current, parent=dlg)
+            if picker.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            free_form = " ".join(t for t in current.split() if not t.startswith("/"))
+            picked = picker.selected_tokens()
+            merged = " ".join(p for p in (picked, free_form) if p).strip()
+            skills_input.setText(merged)
+
+        browse_skills_btn.clicked.connect(_open_picker)  # type: ignore[arg-type]
+        skills_row = QtWidgets.QHBoxLayout()
+        skills_row.setContentsMargins(0, 0, 0, 0)
+        skills_row.addWidget(skills_input, stretch=1)
+        skills_row.addWidget(browse_skills_btn)
+        skills_wrap = QtWidgets.QWidget()
+        skills_wrap.setLayout(skills_row)
+        form.addRow("Extra skills:", skills_wrap)
 
         outer.addLayout(form)
 
