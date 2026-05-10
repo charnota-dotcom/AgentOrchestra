@@ -121,9 +121,25 @@ def _render_image(src: Path, dest: Path) -> RenderResult:
         dest.write_bytes(raw)
         return RenderResult(rendered_text=None, mime_type=mime, bytes_written=len(raw))
 
+    # Bound the maximum decoded pixel count.  Without this, a small
+    # PNG with extreme dimensions can balloon to gigabytes during
+    # resize.  50 MP is generous (~7000x7000) but bounded.
+    Image.MAX_IMAGE_PIXELS = 50_000_000
+
     try:
         with Image.open(io.BytesIO(raw)) as im:
             w, h = im.size
+            # Pillow only checks MAX_IMAGE_PIXELS lazily; do an explicit
+            # guard so we never attempt to resize a hostile image.
+            if w * h > Image.MAX_IMAGE_PIXELS:
+                log.warning(
+                    "image %s pixel count %d > cap %d; storing raw bytes",
+                    src.name,
+                    w * h,
+                    Image.MAX_IMAGE_PIXELS,
+                )
+                dest.write_bytes(raw)
+                return RenderResult(rendered_text=None, mime_type=mime, bytes_written=len(raw))
             long_edge = max(w, h)
             if long_edge <= MAX_IMAGE_LONG_EDGE:
                 dest.write_bytes(raw)
@@ -220,12 +236,16 @@ def _render_xlsx(src: Path) -> str:
     try:
         for sheet in wb.worksheets:
             rows: list[list[str]] = []
-            row_total = 0
             col_capped = False
-            for i, row in enumerate(sheet.iter_rows(values_only=True)):
-                row_total = i + 1
+            row_iter = sheet.iter_rows(values_only=True)
+            row_overflow = False
+            for i, row in enumerate(row_iter):
                 if i >= MAX_ROWS_PER_SHEET:
-                    continue
+                    # Stop iterating immediately — the previous code
+                    # walked the whole sheet just to compute row_total,
+                    # which is a bomb on a million-row sheet.
+                    row_overflow = True
+                    break
                 cells = list(row[:MAX_COLS_PER_SHEET])
                 if len(row) > MAX_COLS_PER_SHEET:
                     col_capped = True
@@ -235,9 +255,9 @@ def _render_xlsx(src: Path) -> str:
                 out.append(f"{heading}\n_(empty sheet)_")
                 continue
             parts = [heading, _to_markdown_table(rows)]
-            if row_total > MAX_ROWS_PER_SHEET:
+            if row_overflow:
                 parts.append(
-                    f"_(showing first {MAX_ROWS_PER_SHEET} of {row_total} rows)_",
+                    f"_(showing first {MAX_ROWS_PER_SHEET} rows; sheet has more)_",
                 )
             if col_capped:
                 parts.append(f"_(showing first {MAX_COLS_PER_SHEET} columns)_")
@@ -256,23 +276,30 @@ def _render_xls(src: Path) -> str:
             "(legacy .xls only — convert to .xlsx if possible)"
         ) from exc
 
-    book = xlrd.open_workbook(str(src))
+    book = xlrd.open_workbook(str(src), on_demand=True)
     out: list[str] = []
-    for sheet in book.sheets():
-        rows: list[list[str]] = []
-        for r in range(min(sheet.nrows, MAX_ROWS_PER_SHEET)):
-            cols = sheet.row_values(r)[:MAX_COLS_PER_SHEET]
-            rows.append([_clip_cell(c) for c in cols])
-        heading = f"### Sheet: {sheet.name}"
-        if not rows:
-            out.append(f"{heading}\n_(empty sheet)_")
-            continue
-        parts = [heading, _to_markdown_table(rows)]
-        if sheet.nrows > MAX_ROWS_PER_SHEET:
-            parts.append(f"_(showing first {MAX_ROWS_PER_SHEET} of {sheet.nrows} rows)_")
-        if sheet.ncols > MAX_COLS_PER_SHEET:
-            parts.append(f"_(showing first {MAX_COLS_PER_SHEET} columns)_")
-        out.append("\n".join(parts))
+    try:
+        for sheet in book.sheets():
+            rows: list[list[str]] = []
+            for r in range(min(sheet.nrows, MAX_ROWS_PER_SHEET)):
+                cols = sheet.row_values(r)[:MAX_COLS_PER_SHEET]
+                rows.append([_clip_cell(c) for c in cols])
+            heading = f"### Sheet: {sheet.name}"
+            if not rows:
+                out.append(f"{heading}\n_(empty sheet)_")
+                continue
+            parts = [heading, _to_markdown_table(rows)]
+            if sheet.nrows > MAX_ROWS_PER_SHEET:
+                parts.append(f"_(showing first {MAX_ROWS_PER_SHEET} of {sheet.nrows} rows)_")
+            if sheet.ncols > MAX_COLS_PER_SHEET:
+                parts.append(f"_(showing first {MAX_COLS_PER_SHEET} columns)_")
+            out.append("\n".join(parts))
+    finally:
+        # Release the mmap so the file isn't held open on Windows.
+        try:
+            book.release_resources()
+        except Exception:
+            log.debug("xlrd release_resources failed", exc_info=True)
     return "\n\n".join(out) if out else "_(no sheets)_"
 
 

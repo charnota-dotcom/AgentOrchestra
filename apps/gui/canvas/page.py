@@ -622,14 +622,27 @@ class CanvasPage(QtWidgets.QWidget):
 
     def _delete_node(self, node: BaseNode) -> None:
         self.undo_stack.push(RemoveNodeCommand(self.scene, node))
+        # Refresh lineage so any LineageBox / lineage edge that
+        # referenced the now-deleted node drops its stale reference.
+        # Without this, the next geometry_changed signal calls
+        # sceneBoundingRect() on a wrapped C++ object that has been
+        # deleted and Qt raises RuntimeError.
+        self._refresh_lineage_edges()
+        self._refresh_lineage_boxes()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         if event.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace):
+            removed_any = False
             for item in list(self.scene.selectedItems()):
                 if isinstance(item, BaseNode):
                     self.undo_stack.push(RemoveNodeCommand(self.scene, item))
+                    removed_any = True
                 elif isinstance(item, Edge):
                     self.undo_stack.push(RemoveEdgeCommand(self.scene, item))
+                    removed_any = True
+            if removed_any:
+                self._refresh_lineage_edges()
+                self._refresh_lineage_boxes()
         else:
             super().keyPressEvent(event)
 

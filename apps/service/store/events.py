@@ -938,11 +938,15 @@ class EventStore:
             await self.db.commit()
         return attachment
 
-    async def update_attachment_turn(self, attachment_id: str, turn_index: int) -> None:
+    async def update_attachment_turn(
+        self, attachment_id: str, turn_index: int, *, agent_id: str
+    ) -> None:
+        # Scope the UPDATE to the owning agent so a future caller
+        # can't be tricked into bumping a foreign attachment's turn.
         async with self._lock:
             await self.db.execute(
-                "UPDATE attachments SET turn_index = ? WHERE id = ?",
-                (turn_index, attachment_id),
+                "UPDATE attachments SET turn_index = ? WHERE id = ? AND agent_id = ?",
+                (turn_index, attachment_id, agent_id),
             )
             await self.db.commit()
 

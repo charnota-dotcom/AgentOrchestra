@@ -127,7 +127,12 @@ async def test_update_attachment_turn_index(store: EventStore, tmp_path) -> None
         )
     )
     assert att.turn_index == -1
-    await store.update_attachment_turn(att.id, 7)
+    await store.update_attachment_turn(att.id, 7, agent_id=agent.id)
     fetched = await store.get_attachment(att.id)
     assert fetched is not None
     assert fetched.turn_index == 7
+    # Foreign agent_id is a no-op (scope guard).
+    await store.update_attachment_turn(att.id, 99, agent_id="not-the-owner")
+    fetched2 = await store.get_attachment(att.id)
+    assert fetched2 is not None
+    assert fetched2.turn_index == 7

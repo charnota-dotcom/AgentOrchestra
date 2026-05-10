@@ -416,10 +416,24 @@ class ChatPage(QtWidgets.QWidget):
         ]
         self._render_pending_attachments()
         # If the attachment was already uploaded server-side, delete it.
-        if att.get("id"):
+        # Surface failures as a toast so the operator notices an
+        # orphan staying behind on their disk; the previous code
+        # silently swallowed everything.
+        if att.get("id") and self._agent_id:
             asyncio.ensure_future(
-                self.client.call("attachments.delete", {"id": att["id"]})
+                self._delete_remote_attachment(att, self._agent_id)
             )
+
+    async def _delete_remote_attachment(
+        self, att: dict[str, Any], agent_id: str
+    ) -> None:
+        try:
+            await self.client.call(
+                "attachments.delete",
+                {"id": att["id"], "agent_id": agent_id},
+            )
+        except Exception as exc:
+            self._append("Warning", f"could not delete {att.get('original_name', '?')}: {exc}")
 
     async def _upload_pending_for_agent(self, agent_id: str) -> list[str]:
         """Upload every cached local file and return the resulting
@@ -539,6 +553,25 @@ class ChatPage(QtWidgets.QWidget):
         # session's Agent stays in the Conversations palette so it
         # can still be resumed from the canvas or the Agents tab.
         # The next send mints a fresh Agent.
+        # Pending attachments must be wiped too, otherwise:
+        #  - chips with no `id` (cached local paths) would silently
+        #    rebind to the next agent's first send, leaking files
+        #    across agents.
+        #  - chips with an `id` (already uploaded) belong to the
+        #    *previous* agent's directory and would get rejected by
+        #    the cross-agent auth check on send anyway.
+        prev_agent_id = self._agent_id
+        for att in list(self._pending_attachments):
+            att_id = att.get("id")
+            if att_id and prev_agent_id:
+                asyncio.ensure_future(
+                    self._delete_remote_attachment(
+                        {"id": att_id, "original_name": att.get("original_name", "?")},
+                        prev_agent_id,
+                    )
+                )
+        self._pending_attachments = []
+        self._render_pending_attachments()
         self._agent_id = None
         self._history.clear()
         self.transcript.clear()

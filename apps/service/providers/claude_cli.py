@@ -22,6 +22,7 @@ import json
 import logging
 import shutil
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from apps.service.providers.protocol import ChatSession, StreamEvent
@@ -95,9 +96,30 @@ class ClaudeCLIChatSession(ChatSession):
         # CLI understands so the model "sees" the file.  Non-image
         # attachments are dropped here — the orchestrator inlines
         # spreadsheet text into the prompt before calling us.
+        # Path safety: the prompt is one big string, so paths with
+        # whitespace / newlines / extra `@` would break the CLI's
+        # tokenizer or smuggle in arbitrary file references.  Refuse
+        # them here even though attachments_upload also rejects them
+        # — defence in depth for any code path that constructs a
+        # session directly.
         att_prefix = ""
         if attachments:
-            paths = [a.stored_path for a in attachments]
+            paths: list[str] = []
+            for a in attachments:
+                p = a.stored_path
+                if any(c in p for c in (" ", "\t", "\n", "\r")):
+                    yield StreamEvent(
+                        kind="error",
+                        text=f"attachment path contains whitespace, refused: {p}",
+                    )
+                    return
+                if "@" in Path(p).name:
+                    yield StreamEvent(
+                        kind="error",
+                        text=f"attachment filename contains '@', refused: {p}",
+                    )
+                    return
+                paths.append(p)
             att_prefix = " ".join(f"@{p}" for p in paths)
         full_message = f"{att_prefix} {message}".strip() if att_prefix else message
         self._history.append({"role": "user", "content": full_message})

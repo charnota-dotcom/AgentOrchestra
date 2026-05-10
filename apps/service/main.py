@@ -195,9 +195,20 @@ class Handlers:
         self._agent_send_locks_guard = asyncio.Lock()
 
     async def _lock_for_agent(self, agent_id: str) -> asyncio.Lock:
+        # Validate the agent exists before minting a lock so a malformed
+        # RPC can't leave a permanent dict entry behind for an id that
+        # never corresponded to a real row.
+        if not isinstance(agent_id, str) or not agent_id:
+            raise ValueError("agent_id required")
         async with self._agent_send_locks_guard:
             lock = self._agent_send_locks.get(agent_id)
             if lock is None:
+                # Cheap existence check (agents.send / .delete will
+                # re-fetch the row anyway).  Skipping the disk hit for
+                # repeat callers since the dict entry already exists.
+                exists = await self.store.get_agent(agent_id)
+                if exists is None:
+                    raise ValueError(f"unknown agent: {agent_id}")
                 lock = asyncio.Lock()
                 self._agent_send_locks[agent_id] = lock
             return lock
@@ -924,7 +935,9 @@ class Handlers:
             # Bind each attachment to the user-turn we just appended so
             # the GUI can show "this turn had X attached".
             for a in attachments:
-                await self.store.update_attachment_turn(a.id, new_turn_index)
+                await self.store.update_attachment_turn(
+                    a.id, new_turn_index, agent_id=agent_id
+                )
             # Record the send for the in-app message-tally counter so the
             # Limits tab can show "X / cap" against the published plan
             # caps without having to ask the CLI.
@@ -1000,6 +1013,11 @@ class Handlers:
     # Attachments — file uploads bound to an Agent
     # ------------------------------------------------------------------
 
+    # Hard upload size cap.  25 MB covers normal screenshots and
+    # spreadsheets without giving an operator (or a compromised local
+    # process) a way to fill the disk in a single RPC.
+    MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
     async def attachments_upload(self, params: dict[str, Any]) -> dict[str, Any]:
         """Persist an uploaded file, render it (markdown table for
         spreadsheets, optional resize for images) and index a row.
@@ -1010,7 +1028,6 @@ class Handlers:
             content_b64:   base64-encoded bytes
         """
         import base64
-        import tempfile
 
         from apps.service.attachments import (
             AttachmentRenderError,
@@ -1025,12 +1042,27 @@ class Handlers:
             raise ValueError(f"unknown agent: {agent_id}")
 
         original_name = str(params.get("original_name") or "upload")
+        b64 = params.get("content_b64")
+        if not isinstance(b64, str) or not b64:
+            raise ValueError("content_b64 missing")
+        # Pre-check the encoded length so we reject oversized uploads
+        # before allocating the decoded bytes.  base64 expands by ~4/3.
+        encoded_cap = (self.MAX_ATTACHMENT_BYTES * 4 // 3) + 8
+        if len(b64) > encoded_cap:
+            raise ValueError(
+                f"attachment too large; max {self.MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB"
+            )
         try:
-            raw = base64.b64decode(params["content_b64"], validate=True)
-        except (KeyError, ValueError) as exc:
-            raise ValueError(f"content_b64 missing or not valid base64: {exc}") from exc
+            raw = base64.b64decode(b64, validate=True)
+        except ValueError as exc:
+            raise ValueError(f"content_b64 not valid base64: {exc}") from exc
         if not raw:
             raise ValueError("attachment is empty")
+        if len(raw) > self.MAX_ATTACHMENT_BYTES:
+            raise ValueError(
+                f"attachment too large ({len(raw)} bytes); max "
+                f"{self.MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB"
+            )
 
         # Decide kind from extension; reject unknown types up front so
         # the operator gets a useful error.
@@ -1042,28 +1074,46 @@ class Handlers:
             )
 
         attachment_id = long_id()
+        # Agent dir is under our attachments root.  agent_id is a
+        # service-minted long_id (alphanumeric) so it can't traverse,
+        # but resolve+is_relative_to is cheap belt-and-braces.
         agent_dir = self.attachments_dir / agent_id
         agent_dir.mkdir(parents=True, exist_ok=True)
+        if not agent_dir.resolve().is_relative_to(self.attachments_dir.resolve()):
+            raise ValueError("agent_dir escaped attachments root")
         safe_name = sanitize_filename(original_name)
+        # Refuse paths containing whitespace or `@` so an `@<path>` token
+        # injected into a CLI prompt can't be split or misparsed by the
+        # tokenizer (claude-cli/gemini-cli read the prompt as text).
+        # safe_name should already be free of these but assert for the
+        # boundary.
+        if any(c in safe_name for c in (" ", "\n", "\t", "\r", "@")):
+            raise ValueError(f"sanitised filename still has unsafe chars: {safe_name!r}")
         stored_path = agent_dir / f"{attachment_id}__{safe_name}"
+        stored_str = str(stored_path)
+        if any(c in stored_str for c in (" ", "\n", "\t", "\r")):
+            # Operator's data_dir contains whitespace.  Refuse the upload
+            # rather than risk CLI prompt-token splitting on our path.
+            raise ValueError(
+                "data directory path contains whitespace which would break "
+                "CLI argument injection; move the data_dir to a path without spaces"
+            )
 
-        # Render goes via a temp file so we get a uniform read-from-Path
-        # API even though the caller hands us bytes.  Cleanup is by
-        # context.
-        with tempfile.NamedTemporaryFile(
-            "wb", delete=False, suffix=Path(safe_name).suffix
-        ) as tmp:
-            tmp.write(raw)
-            tmp_path = Path(tmp.name)
+        # Atomic-rename pattern: write the file via a sibling .part path
+        # we own, then rename into place.  Avoids the temp-file leak on
+        # crash that the previous tempfile dance had.
+        part_path = stored_path.with_suffix(stored_path.suffix + ".part")
+        part_path.write_bytes(raw)
         render_warning: str | None = None
         try:
             try:
-                result = render_attachment(tmp_path, dest=stored_path, kind=kind)
+                result = render_attachment(part_path, dest=stored_path, kind=kind)
+                # render_attachment writes to dest; drop the .part
+                if part_path.exists():
+                    part_path.unlink(missing_ok=True)
             except AttachmentRenderError as exc:
-                # Render failed but we still want the bytes available so
-                # the operator can retry with another tool.  Persist raw
-                # and surface a warning in the response.
-                stored_path.write_bytes(raw)
+                # Render failed; preserve the raw bytes and flag a warning.
+                part_path.replace(stored_path)
                 render_warning = str(exc)
                 from apps.service.attachments.render import RenderResult
 
@@ -1072,11 +1122,10 @@ class Handlers:
                     mime_type="application/octet-stream",
                     bytes_written=len(raw),
                 )
-        finally:
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
+        except Exception:
+            part_path.unlink(missing_ok=True)
+            stored_path.unlink(missing_ok=True)
+            raise
 
         attachment = Attachment(
             id=attachment_id,
@@ -1088,28 +1137,61 @@ class Handlers:
             bytes=result.bytes_written,
             rendered_text=result.rendered_text,
         )
-        await self.store.insert_attachment(attachment)
+        try:
+            await self.store.insert_attachment(attachment)
+        except Exception:
+            # DB row failed; don't leave the bytes on disk as orphans.
+            stored_path.unlink(missing_ok=True)
+            raise
         out = attachment.model_dump(mode="json")
         if render_warning:
             out["warning"] = render_warning
         return out
 
     async def attachments_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        # Authz: only the owning agent's caller can enumerate.  Without
+        # this any local process could browse another agent's files.
         agent_id = params["agent_id"]
+        agent = await self.store.get_agent(agent_id)
+        if not agent:
+            raise ValueError(f"unknown agent: {agent_id}")
         rows = await self.store.list_attachments(agent_id)
         return [a.model_dump(mode="json") for a in rows]
 
     async def attachments_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        # Authz: require the caller to name the owning agent and confirm
+        # the attachment belongs to it.  Stops cross-agent wipes.
         attachment_id = params["id"]
-        attachment = await self.store.delete_attachment(attachment_id)
-        if attachment is None:
+        agent_id = params.get("agent_id")
+        if not agent_id:
+            raise ValueError("agent_id required")
+        existing = await self.store.get_attachment(attachment_id)
+        if existing is None:
             return {"deleted": False}
-        # Best-effort filesystem cleanup; missing file is fine (operator
-        # may have wiped the data dir).
-        try:
-            Path(attachment.stored_path).unlink()
-        except OSError:
-            log.debug("attachment file already gone: %s", attachment.stored_path)
+        if existing.agent_id != agent_id:
+            raise ValueError(
+                f"attachment {attachment_id} does not belong to agent {agent_id}"
+            )
+        # Serialise with sends so we don't unlink mid-prompt.
+        async with await self._lock_for_agent(agent_id):
+            attachment = await self.store.delete_attachment(attachment_id)
+            if attachment is None:
+                return {"deleted": False}
+            # Boundary check: refuse to unlink anything outside our
+            # attachments tree even if the row's stored_path was
+            # tampered with.
+            try:
+                target = Path(attachment.stored_path).resolve()
+                root = self.attachments_dir.resolve()
+                if target.is_relative_to(root):
+                    target.unlink(missing_ok=True)
+                else:
+                    log.warning(
+                        "refused to unlink %s (outside attachments root)",
+                        attachment.stored_path,
+                    )
+            except OSError:
+                log.debug("attachment file already gone: %s", attachment.stored_path)
         return {"deleted": True}
 
     async def limits_check(self, params: dict[str, Any]) -> dict[str, Any]:

@@ -352,11 +352,27 @@ class AgentChatDialog(QtWidgets.QDialog):
         if not attachment_id:
             return
         try:
-            await self.client.call("attachments.delete", {"id": attachment_id})
-        except Exception:
-            # Worst case it stays in the agent's folder; the cleanup
-            # button on the Limits tab can sweep it later.
-            pass
+            await self.client.call(
+                "attachments.delete",
+                {"id": attachment_id, "agent_id": self.agent["id"]},
+            )
+        except Exception as exc:
+            # Surface so the operator knows an orphan is sitting on
+            # their disk.  Previously this was silently swallowed.
+            self.transcript.appendPlainText(
+                f"Warning: couldn't delete attachment ({exc})\n"
+            )
+
+    def closeEvent(self, event: Any) -> None:  # type: ignore[override]
+        # Clean up any attachments uploaded but not yet sent so we
+        # don't leak rows + bytes when the operator closes the dialog
+        # without sending.  Schedule the deletes onto the running loop
+        # — this fires synchronously from Qt's closeEvent.
+        for att in list(self._pending_attachments):
+            att_id = att.get("id")
+            if att_id:
+                asyncio.ensure_future(self._delete_attachment(att_id))
+        super().closeEvent(event)
 
     def _send(self) -> None:
         text = self.input.toPlainText().strip()

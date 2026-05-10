@@ -41,10 +41,18 @@ class LineageBox(QtWidgets.QGraphicsObject):
 
     def _reposition(self) -> None:
         bbox: QtCore.QRectF | None = None
+        # A member's underlying C++ Qt object may have been deleted
+        # between our subscribe-time and now; sceneBoundingRect() on
+        # such an object raises RuntimeError("wrapped C/C++ object …
+        # has been deleted").  Catch and skip so a deletion can never
+        # take down the whole canvas.
         for m in self._members:
-            if m.scene() is None:
+            try:
+                if m.scene() is None:
+                    continue
+                r = m.sceneBoundingRect()
+            except RuntimeError:
                 continue
-            r = m.sceneBoundingRect()
             bbox = r if bbox is None else bbox.united(r)
         if bbox is None:
             self._cached_rect = QtCore.QRectF()
