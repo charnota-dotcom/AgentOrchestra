@@ -105,6 +105,15 @@ class CanvasPage(QtWidgets.QWidget):
 
         self.palette = PalettePanel(client)
         self.palette.setFixedWidth(220)
+        # When the operator clicks "+ New conversation" in the
+        # palette and the agent is created server-side, the palette
+        # emits this signal so we can drop a ConversationNode onto
+        # the canvas and auto-open the chat dialog.  Without this the
+        # operator stared at an empty canvas wondering where the new
+        # agent went — annotation #6 from 2026-05-10.
+        self.palette.conversation_created.connect(  # type: ignore[arg-type]
+            self._on_conversation_created
+        )
         root.addWidget(self.palette)
 
         centre = QtWidgets.QWidget()
@@ -333,6 +342,52 @@ class CanvasPage(QtWidgets.QWidget):
     # ------------------------------------------------------------------
     # Per-agent chat dialog
     # ------------------------------------------------------------------
+
+    def _on_conversation_created(self, agent: dict[str, Any]) -> None:
+        """Fired by the palette right after a successful "+ New conversation".
+
+        Drops a ConversationNode onto the canvas at the centre of the
+        currently-visible viewport and auto-opens the chat dialog so
+        the operator immediately sees their new agent — and is
+        already in chat, not staring at an empty grid.
+
+        Idempotent: if the agent is already on the canvas (the
+        operator opened the New dialog twice for the same agent for
+        whatever reason) we don't double-add.
+        """
+        if not isinstance(agent, dict) or not agent.get("id"):
+            return
+        # If a ConversationNode for this agent already exists, just
+        # bring it to attention rather than spawning a duplicate.
+        existing = next(
+            (
+                n
+                for n in self.scene.nodes()
+                if isinstance(n, ConversationNode) and n.agent.get("id") == agent.get("id")
+            ),
+            None,
+        )
+        if existing is not None:
+            existing.setSelected(True)
+            self.view.centerOn(existing)
+            self._open_chat_for(existing)
+            return
+
+        # Centre of the current view in scene coordinates.
+        viewport = self.view.viewport()
+        viewport_centre_view = QtCore.QPoint(viewport.width() // 2, viewport.height() // 2)
+        scene_pos = self.view.mapToScene(viewport_centre_view)
+
+        node = ConversationNode(_node_id(), agent)
+        node.setPos(scene_pos)
+        self._wire_node(node)
+        self.undo_stack.push(AddNodeCommand(self.scene, node))
+        self._refresh_lineage_edges()
+        self._refresh_lineage_boxes()
+        node.setSelected(True)
+        # Auto-open the chat dialog so the operator immediately sees
+        # the agent they just created and can start talking to it.
+        self._open_chat_for(node)
 
     def _open_chat_for(self, node: ConversationNode) -> None:
         dlg = AgentChatDialog(self.client, node.agent, parent=self)
