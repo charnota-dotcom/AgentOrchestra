@@ -22,6 +22,7 @@ from apps.gui.windows.composer import ComposerPage
 from apps.gui.windows.first_run import FirstRunWizard, first_run_pending
 from apps.gui.windows.history import HistoryPage
 from apps.gui.windows.home import HomePage
+from apps.gui.windows.limits import LimitsPage
 from apps.gui.windows.live import LivePage
 from apps.gui.windows.review import ReviewPage
 from apps.gui.windows.settings import SettingsPage
@@ -57,6 +58,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas = CanvasPage(self.client)
         self.chat = ChatPage(self.client)
         self.agents = AgentsPage(self.client)
+        self.limits = LimitsPage(self.client)
 
         self.stack.addWidget(self.home)  # 0
         self.stack.addWidget(self.composer)  # 1
@@ -67,6 +69,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.addWidget(self.canvas)  # 6
         self.stack.addWidget(self.chat)  # 7
         self.stack.addWidget(self.agents)  # 8
+        self.stack.addWidget(self.limits)  # 9
 
         self.setCentralWidget(central)
 
@@ -119,6 +122,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "Compose",
             "Canvas",
             "History",
+            "Limits",
             "Settings",
         ):
             btn = QtWidgets.QPushButton(label)
@@ -140,8 +144,9 @@ class MainWindow(QtWidgets.QMainWindow):
         return rail
 
     # Map rail button index -> stack widget index.
-    # Home → 0, Chat → 7, Agents → 8, Compose → 1, Canvas → 6, History → 4, Settings → 5
-    _NAV_TO_STACK = {0: 0, 1: 7, 2: 8, 3: 1, 4: 6, 5: 4, 6: 5}
+    # Home → 0, Chat → 7, Agents → 8, Compose → 1, Canvas → 6,
+    # History → 4, Limits → 9, Settings → 5
+    _NAV_TO_STACK = {0: 0, 1: 7, 2: 8, 3: 1, 4: 6, 5: 4, 6: 9, 7: 5}
 
     def _wire_navigation(self) -> None:
         for i, btn in enumerate(self._nav_buttons):

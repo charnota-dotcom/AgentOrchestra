@@ -622,6 +622,121 @@ class Handlers:
             for key, (label, body) in FOLLOWUP_PRESETS.items()
         ]
 
+    async def limits_check(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Probe every locally-installed CLI for whatever subscription
+        / usage info it exposes.  Returns a structured dict the GUI's
+        Limits tab renders as one card per provider.
+
+        Per-message remaining-quota numbers are not reliably available
+        headlessly for either Claude Code or Gemini CLI — both gate
+        that behind their interactive `/status` flow.  We surface
+        whatever each binary returns from its public status commands
+        plus links to the official dashboards so the operator can
+        always drill in.
+        """
+        import shutil
+
+        async def _run(args: list[str], timeout: float = 15.0) -> dict[str, Any]:
+            binary = shutil.which(args[0])
+            if not binary:
+                return {"ok": False, "stdout": "", "stderr": "not found on PATH", "exit": -1}
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    binary,
+                    *args[1:],
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                except TimeoutError:
+                    proc.kill()
+                    return {
+                        "ok": False,
+                        "stdout": "",
+                        "stderr": f"timed out after {timeout}s",
+                        "exit": -2,
+                    }
+            except Exception as exc:
+                return {"ok": False, "stdout": "", "stderr": str(exc), "exit": -3}
+            return {
+                "ok": (proc.returncode or 0) == 0,
+                "stdout": stdout_b.decode("utf-8", errors="replace").strip(),
+                "stderr": stderr_b.decode("utf-8", errors="replace").strip(),
+                "exit": proc.returncode or 0,
+            }
+
+        # Claude Code: try `--version` (always works) then optionally
+        # `status` (newer versions).  We don't try the interactive
+        # `/status` slash command headlessly because it would never
+        # return.
+        claude_version = await _run(["claude", "--version"])
+        claude_status = (
+            await _run(["claude", "status"], timeout=8.0)
+            if claude_version["ok"]
+            else {
+                "ok": False,
+                "stdout": "",
+                "stderr": "claude not on PATH",
+                "exit": -1,
+            }
+        )
+        # Gemini CLI: same pattern.
+        gemini_version = await _run(["gemini", "--version"])
+        gemini_status = (
+            await _run(["gemini", "status"], timeout=8.0)
+            if gemini_version["ok"]
+            else {
+                "ok": False,
+                "stdout": "",
+                "stderr": "gemini not on PATH",
+                "exit": -1,
+            }
+        )
+
+        return {
+            "providers": [
+                {
+                    "id": "claude-cli",
+                    "label": "Claude Code (Pro / Max plan)",
+                    "version": claude_version,
+                    "status": claude_status,
+                    "dashboards": [
+                        {
+                            "label": "Pro / Max usage dashboard",
+                            "url": "https://claude.ai/settings/usage",
+                        },
+                        {"label": "Subscription page", "url": "https://claude.ai/settings"},
+                    ],
+                    "note": (
+                        "Per-message remaining-quota numbers aren't returned "
+                        "headlessly.  For a live readout, run ``claude`` in a "
+                        "terminal and type ``/status``.  The dashboards above "
+                        "show your plan tier, billing and usage history."
+                    ),
+                },
+                {
+                    "id": "gemini-cli",
+                    "label": "Gemini CLI",
+                    "version": gemini_version,
+                    "status": gemini_status,
+                    "dashboards": [
+                        {"label": "Gemini app + plan", "url": "https://gemini.google.com/"},
+                        {
+                            "label": "AI Studio (API keys)",
+                            "url": "https://aistudio.google.com/app/apikey",
+                        },
+                    ],
+                    "note": (
+                        "Headless quota readout isn't documented.  Run "
+                        "``gemini`` interactively for a `/quota` style "
+                        "command if your version supports it; otherwise "
+                        "use the dashboards above."
+                    ),
+                },
+            ],
+        }
+
     async def hooks_status(self, params: dict[str, Any]) -> dict[str, Any]:
         return hook_status()
 
@@ -690,6 +805,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("agents.followup_presets", h.agents_followup_presets)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
+    server.register("limits.check", h.limits_check)
     server.register("hooks.status", h.hooks_status)
     server.register("hooks.install", h.hooks_install)
     server.register("hooks.uninstall", h.hooks_uninstall)

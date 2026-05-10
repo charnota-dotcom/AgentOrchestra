@@ -77,6 +77,7 @@ _SCREEN_TO_STACK_INDEX: dict[str, int] = {
     "CanvasPage": 6,
     "ChatPage": 7,
     "AgentsPage": 8,
+    "LimitsPage": 9,
 }
 
 
