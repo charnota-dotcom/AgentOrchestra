@@ -51,7 +51,9 @@ class CommandCard(QtWidgets.QFrame):
         # Step badge on the left — the manifest's ``step`` field gives
         # the typical first-time-to-running sequence (1=install,
         # 2=verify Claude, 3=verify Gemini, 4=launch, …).  Step 0
-        # entries (the panel itself) get no badge.
+        # entries are pinned utilities (Restart, the panel itself);
+        # they get a green star instead of a number so they read as
+        # "always available" rather than "step in a sequence".
         step = cmd.get("step")
         if isinstance(step, int) and step > 0:
             badge = QtWidgets.QLabel(str(step))
@@ -60,6 +62,15 @@ class CommandCard(QtWidgets.QFrame):
             badge.setStyleSheet(
                 "QLabel{background:#1f6feb;color:#fff;border-radius:14px;"
                 "font-weight:700;font-size:13px;border:none;}"
+            )
+            h.addWidget(badge, alignment=QtCore.Qt.AlignmentFlag.AlignTop)
+        elif step == 0:
+            badge = QtWidgets.QLabel("★")
+            badge.setFixedSize(28, 28)
+            badge.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            badge.setStyleSheet(
+                "QLabel{background:#1f7a3f;color:#fff;border-radius:14px;"
+                "font-weight:700;font-size:14px;border:none;}"
             )
             h.addWidget(badge, alignment=QtCore.Qt.AlignmentFlag.AlignTop)
 

@@ -6,12 +6,22 @@
   "platform": "windows",
   "commands": [
     {
+      "id": "restart",
+      "step": 0,
+      "label": "Restart AgentOrchestra",
+      "file": "restart.cmd",
+      "summary": "Stop everything, free port 8765, then launch a fresh GUI in one click.  Equivalent to clicking Stop then Launch but does both atomically.",
+      "when_to_run": "Pin this at the top — it's the everyday button.  Use after update.cmd, after merging a PR that changed service code, or any time the running service is acting up.",
+      "writes": [],
+      "needs_internet": false
+    },
+    {
       "id": "ops",
       "step": 0,
       "label": "Operator Panel",
       "file": "ops.cmd",
-      "summary": "Tiny GUI window with one button per command in this folder + a live output pane.  Reads this manifest, so any command added here shows up automatically.",
-      "when_to_run": "Make this your everyday desktop shortcut.  All the steps below are reachable from inside this panel.",
+      "summary": "This window itself.  Listed for completeness — reads this manifest, so any command added here shows up automatically.",
+      "when_to_run": "Make this your everyday desktop shortcut.  Every numbered step below is reachable from inside it.",
       "writes": [],
       "needs_internet": false
     },
@@ -61,34 +71,24 @@
       "label": "Step 5 — Stop AgentOrchestra",
       "file": "stop.cmd",
       "summary": "Close the GUI window and any background service (including the headless one the GUI auto-spawned).",
-      "when_to_run": "When you close the laptop or want to free port 8765.",
-      "writes": [],
-      "needs_internet": false
-    },
-    {
-      "id": "restart",
-      "step": 6,
-      "label": "Step 6 — Restart AgentOrchestra",
-      "file": "restart.cmd",
-      "summary": "Stop everything, free port 8765, then launch a fresh GUI in one click.  Equivalent to clicking Stop then Launch but does both atomically.",
-      "when_to_run": "After update.cmd or after merging a PR that changed service code — the running service holds the old code in memory and needs a fresh process.",
+      "when_to_run": "When you close the laptop or want to free port 8765.  For a stop-then-relaunch use the Restart button at the top instead.",
       "writes": [],
       "needs_internet": false
     },
     {
       "id": "update",
-      "step": 7,
-      "label": "Step 7 — Pull latest + refresh deps",
+      "step": 6,
+      "label": "Step 6 — Pull latest + refresh deps",
       "file": "update.cmd",
       "summary": "git pull --ff-only origin main, then pip install -e .[gui] --upgrade.",
-      "when_to_run": "After GitHub Desktop's Pull origin, when you've changed branch, or before reporting a bug.  Follow with restart.cmd so the new code takes effect.",
+      "when_to_run": "After GitHub Desktop's Pull origin, when you've changed branch, or before reporting a bug.  Follow with the Restart button so the new code takes effect.",
       "writes": [".venv/", "<repo>/"],
       "needs_internet": true
     },
     {
       "id": "doctor",
-      "step": 8,
-      "label": "Step 8 — Environment diagnostic",
+      "step": 7,
+      "label": "Step 7 — Environment diagnostic",
       "file": "doctor.cmd",
       "summary": "Print a one-page health report: Python version, .venv status, claude / gemini on PATH, port 8765, local data directory, annotator import, AgentOrchestra version.",
       "when_to_run": "When something's wrong.  Copy/paste the output into a bug report.",
@@ -97,8 +97,8 @@
     },
     {
       "id": "reset",
-      "step": 9,
-      "label": "Step 9 — Wipe local state",
+      "step": 8,
+      "label": "Step 8 — Wipe local state",
       "file": "reset.cmd",
       "summary": "Delete %USERPROFILE%\\.local\\share\\agentorchestra (SQLite store, first-run sentinel, annotation logs).  Does NOT touch the repo, git history, or CLI auth.",
       "when_to_run": "Last resort, when the local DB is wedged and you want a clean slate.  Confirms before deleting.",
