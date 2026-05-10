@@ -62,6 +62,13 @@ class _DragList(QtWidgets.QListWidget):
 
 
 class PalettePanel(QtWidgets.QWidget):
+    # Emitted right after a "+ New conversation" succeeds, so the
+    # canvas page can drop a ConversationNode at the view's centre and
+    # auto-open the chat dialog.  Without this, the new agent was only
+    # added to the palette and the operator stared at an empty canvas
+    # wondering where it went.
+    conversation_created = QtCore.Signal(dict)  # the enriched agent dict
+
     def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
@@ -437,6 +444,14 @@ class PalettePanel(QtWidgets.QWidget):
         first_message: str,
         workspace_id: str = "",
     ) -> None:
+        # Friendlier default than "Unnamed conversation": derive from
+        # the model id + a short timestamp so multiple un-named agents
+        # are distinguishable in the palette.  Operators get a useful
+        # name even when they hit Create without typing one.
+        if not name:
+            from datetime import datetime as _dt
+
+            name = f"{model} · {_dt.now().strftime('%H:%M')}"
         try:
             agent = await self.client.call(
                 "agents.create",
@@ -453,15 +468,23 @@ class PalettePanel(QtWidgets.QWidget):
             return
         if first_message:
             try:
-                await self.client.call(
+                send_res = await self.client.call(
                     "agents.send",
                     {"agent_id": agent["id"], "message": first_message},
                 )
+                # Keep the freshest agent shape (transcript now has the
+                # first turn) for the canvas drop below.
+                agent = send_res.get("agent", agent)
             except Exception as exc:
                 # The agent exists; just the first send failed.  Show
                 # the error but keep the agent in the list.
                 QtWidgets.QMessageBox.warning(self, "First message failed", str(exc))
         await self.reload_agents()
+        # Surface the new agent on the canvas — the empty-canvas-after-
+        # Create UX was the #1 source of "where did my agent go?"
+        # confusion.  Page wires this signal to drop a ConversationNode
+        # at the view centre + auto-open the chat dialog.
+        self.conversation_created.emit(agent)
 
     async def reload_agents(self) -> None:
         try:

@@ -129,16 +129,19 @@ class GeminiCLIChatSession(ChatSession):
         full_message = f"{att_prefix} {message}".strip() if att_prefix else message
         self._history.append({"role": "user", "content": full_message})
         prompt = self._render_prompt()
-        args: list[str] = [self._binary, "-p", prompt, *include_args]
+        # The Gemini CLI refuses to run in an "untrusted" working
+        # directory in headless mode.  The CLI advertises three
+        # bypasses; we set both the env var AND the `--skip-trust`
+        # flag so that whichever the installed CLI version honours,
+        # it lands.  Operators were hitting `gemini CLI exit 55`
+        # ("not running in a trusted directory") with the env-var-only
+        # variant on certain CLI versions / cwd combinations.  See
+        # https://geminicli.com/docs/cli/trusted-folders/#headless-and-automated-environments
+        args: list[str] = [self._binary, "-p", prompt, "--skip-trust", *include_args]
         model = _resolve_model(self.card.model)
         if model:
             args.extend(["--model", model])
 
-        # The Gemini CLI refuses to run in an "untrusted" working
-        # directory in headless mode; instead of asking the operator
-        # to trust each repo manually we set the documented escape
-        # hatch in the subprocess env.  See
-        # https://geminicli.com/docs/cli/trusted-folders/#headless-and-automated-environments
         env = {**os.environ, "GEMINI_CLI_TRUST_WORKSPACE": "true"}
 
         try:
