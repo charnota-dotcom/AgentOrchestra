@@ -27,11 +27,16 @@ from apps.service.types import (
 from apps.service.worktrees.manager import WorktreeManager
 
 
-def test_default_registry_lists_three_providers() -> None:
+def test_default_registry_lists_subscription_only() -> None:
+    # The default install registers ONLY subscription / local providers
+    # so accidental dispatch never bills against a metered API account.
     names = known_providers()
-    assert "anthropic" in names
-    assert "google" in names
+    assert "claude-cli" in names
+    assert "gemini-cli" in names
     assert "ollama" in names
+    # API-keyed adapters are imported but deliberately not registered.
+    assert "anthropic" not in names
+    assert "google" not in names
 
 
 def test_get_unknown_provider_raises() -> None:

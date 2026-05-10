@@ -471,6 +471,15 @@ class EventKind(StrEnum):
     SERVICE_STARTED = "service.started"
     SERVICE_STOPPED = "service.stopped"
     CLEANUP_FAILED = "cleanup.failed"
+    # Flow Canvas
+    FLOW_NODE_QUEUED = "flow.node.queued"
+    FLOW_NODE_STARTED = "flow.node.started"
+    FLOW_NODE_TOKEN_DELTA = "flow.node.token_delta"
+    FLOW_NODE_COMPLETED = "flow.node.completed"
+    FLOW_NODE_FAILED = "flow.node.failed"
+    FLOW_NODE_SKIPPED = "flow.node.skipped"
+    FLOW_NODE_HUMAN_PENDING = "flow.node.human_pending"
+    FLOW_COMPLETED = "flow.completed"
 
 
 class Event(BaseModel):
@@ -520,6 +529,67 @@ def assert_branch_transition(frm: BranchState, to: BranchState) -> None:
 def assert_run_transition(frm: RunState, to: RunState) -> None:
     if to not in RUN_TRANSITIONS[frm]:
         raise IllegalTransitionError(frm.value, to.value)
+
+
+class Agent(BaseModel):
+    """A named, persistent conversation with a model.
+
+    Operators give agents human names ("Agent Smith") and can spawn
+    follow-up agents that reference a parent's transcript via the
+    ``parent_id`` link.  This is deliberately distinct from
+    ``PersonalityCard`` (a template-bound card that drives a Run with
+    cost caps and a state machine).  Agents are the lay-person path:
+    just a name, a model, and a conversation.
+    """
+
+    id: str = Field(default_factory=long_id)
+    name: str
+    provider: str
+    model: str
+    system: str = ""
+    parent_id: str | None = None
+    parent_name: str | None = None  # denormalised for cheap display
+    transcript: list[dict[str, str]] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class FlowState(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    FINISHED = "finished"
+    FAILED = "failed"
+    ABORTED = "aborted"
+
+
+class Flow(BaseModel):
+    """A saved orchestration graph.
+
+    The `payload` is a Pydantic-validated nested structure (nodes +
+    edges) but stored as JSON in SQLite for simplicity — flows are
+    small (~50 KB even for hundred-node graphs) and edits are atomic.
+    """
+
+    id: str = Field(default_factory=long_id)
+    name: str
+    description: str = ""
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+    version: int = 1
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class FlowRun(BaseModel):
+    """A single execution of a Flow."""
+
+    id: str = Field(default_factory=short_id)
+    flow_id: str
+    state: FlowState = FlowState.PENDING
+    started_at: datetime = Field(default_factory=utc_now)
+    ended_at: datetime | None = None
+    node_outputs: dict[str, str] = Field(default_factory=dict)
+    error: str | None = None
 
 
 def is_path_inside(child: Path, parent: Path) -> bool:

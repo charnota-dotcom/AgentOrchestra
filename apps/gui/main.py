@@ -15,6 +15,7 @@ import asyncio
 import logging
 import sys
 
+from apps.gui.service_supervisor import ensure_service_running
 from apps.service.secrets.keyring_store import hook_token
 
 log = logging.getLogger(__name__)
@@ -37,12 +38,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="agentorchestra-gui")
     parser.add_argument("--service-url", default="http://127.0.0.1:8765")
     parser.add_argument("--token", default=None, help="RPC token; falls back to keyring lookup")
+    parser.add_argument(
+        "--no-spawn-service",
+        action="store_true",
+        help="Don't auto-spawn the service if it's not already running",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+    if not args.no_spawn_service:
+        ensure_service_running(args.service_url)
 
     _qt_core, _qt_gui, qt_widgets, qasync = _import_qt()
     from apps.gui.ipc.client import RpcClient  # local import (qasync after Qt)

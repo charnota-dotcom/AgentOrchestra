@@ -207,12 +207,10 @@ class HistoryPage(QtWidgets.QWidget):
         dlg.setWindowTitle(f"Replay run {original['id']}")
         form = QtWidgets.QFormLayout(dlg)
         provider_input = QtWidgets.QComboBox()
-        # Order matches the providers registry; the two CLI-backed
-        # entries appear first so Max-plan / Gemini-CLI users can swap
-        # without typing.
-        provider_input.addItems(
-            ["", "claude-cli", "gemini-cli", "anthropic", "google", "openai", "ollama"]
-        )
+        # Subscription / local providers only — no API-keyed entries
+        # in the dropdown so accidental Replay never bills against
+        # an API account.
+        provider_input.addItems(["", "claude-cli", "gemini-cli", "ollama"])
         model_input = QtWidgets.QLineEdit()
         model_input.setPlaceholderText("(blank to keep original model)")
         form.addRow("Provider override:", provider_input)
