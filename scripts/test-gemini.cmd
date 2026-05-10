@@ -4,6 +4,10 @@ rem test-claude.cmd, applied to the gemini binary.
 rem
 rem If the headless call fails for auth reasons, run `gemini` once
 rem interactively to log in.  Credentials persist after that.
+rem
+rem `gemini` is an npm-installed .cmd shim; bare invocation from a
+rem .cmd file is a tail-call and control never returns.  Every
+rem invocation below is prefixed with `call` for that reason.
 
 echo ================ Gemini CLI test ================
 echo.
@@ -22,13 +26,13 @@ if errorlevel 1 (
 )
 
 echo --- gemini --version ---
-gemini --version
+call gemini --version
 echo.
 
 echo --- gemini -p "say hi in 5 words" ---
 echo (waiting up to 30s for a reply...)
 echo.
-gemini -p "say hi in 5 words"
+call gemini -p "say hi in 5 words"
 set GEMINI_EXIT=%ERRORLEVEL%
 echo.
 

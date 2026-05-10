@@ -34,8 +34,12 @@ if exist "%REPO%\.venv\Scripts\python.exe" (
 echo.
 
 echo --- Subscription CLIs ---
-where claude && claude --version 2>nul || echo claude: NOT FOUND on PATH
-where gemini && gemini --version 2>nul || echo gemini: NOT FOUND on PATH
+rem `claude` and `gemini` are npm-installed .cmd shims; bare
+rem invocation from a .cmd file is a tail-call and control would
+rem never return — the rest of the doctor would be silently
+rem skipped.  Always go through `call`.  Same fix as start.cmd.
+where claude >nul 2>&1 && (call claude --version) || echo claude: NOT FOUND on PATH
+where gemini >nul 2>&1 && (call gemini --version) || echo gemini: NOT FOUND on PATH
 echo.
 
 echo --- Service port (127.0.0.1:8765) ---

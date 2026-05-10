@@ -8,6 +8,10 @@ rem
 rem If you see "Not logged in", run:  claude  → /login
 rem inside any terminal — once is enough; the credentials persist
 rem in ~/.claude/.
+rem
+rem `claude` is an npm-installed .cmd shim; bare invocation from a
+rem .cmd file is a tail-call and control never returns.  Every
+rem invocation below is prefixed with `call` for that reason.
 
 echo ================ Claude Code CLI test ================
 echo.
@@ -26,13 +30,13 @@ if errorlevel 1 (
 )
 
 echo --- claude --version ---
-claude --version
+call claude --version
 echo.
 
 echo --- claude -p "say hi in 5 words" ---
 echo (waiting up to 30s for a reply...)
 echo.
-claude -p "say hi in 5 words"
+call claude -p "say hi in 5 words"
 set CLAUDE_EXIT=%ERRORLEVEL%
 echo.
 
