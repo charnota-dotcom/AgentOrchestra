@@ -187,7 +187,13 @@ async def test_branch_skips_not_taken_path(
     flow = Flow(
         name="branchy",
         nodes=[
-            {"id": "a", "type": "agent", "card_id": "card-1"},
+            # Entry agent with no upstream — has to carry its own goal.
+            {
+                "id": "a",
+                "type": "agent",
+                "card_id": "card-1",
+                "params": {"goal": "kick off"},
+            },
             {"id": "br", "type": "branch", "params": {"pattern": "found:"}},
             {"id": "true_path", "type": "output"},
             {"id": "false_path", "type": "agent", "card_id": "card-2"},
