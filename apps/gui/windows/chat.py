@@ -145,10 +145,16 @@ class ChatPage(QtWidgets.QWidget):
     def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
-        # In-memory turn buffer for the current session.  Cleared on
-        # "New chat".  Each entry is {"role": "user" | "assistant",
-        # "content": ...}.  We fold this into the prompt on every
-        # send so the CLI sees the full conversation.
+        # Each Chat session is automatically persisted as an Agent so
+        # it shows up in the canvas Conversations palette and can be
+        # dragged onto the canvas.  ``self._agent_id`` tracks the
+        # current session: None means "no message sent yet for this
+        # session, agents.create on the first send".  "New chat" /
+        # changing the model preset clears it back to None.
+        self._agent_id: str | None = None
+        # In-memory mirror of the agent's transcript so the GUI shows
+        # the user's message immediately on send (optimistic) and
+        # then reconciles with the service reply.
         self._history: list[dict[str, str]] = []
         self.setStyleSheet("background:#fafbfc;")
 
@@ -181,6 +187,13 @@ class ChatPage(QtWidgets.QWidget):
         self.model_combo = QtWidgets.QComboBox()
         for entry in _MODEL_PRESETS:
             self.model_combo.addItem(entry[0])
+        # Switching model mid-thread would require a model swap on
+        # the existing Agent, which our backend doesn't support.
+        # Treat a model change as "start a new chat" so the operator
+        # gets a fresh, correctly-modelled Agent.
+        self.model_combo.currentIndexChanged.connect(  # type: ignore[arg-type]
+            lambda _i: self._new_chat()
+        )
         top.addWidget(self.model_combo, stretch=1)
 
         thinking_label = QtWidgets.QLabel("Thinking:")
@@ -283,7 +296,7 @@ class ChatPage(QtWidgets.QWidget):
 
     async def _send_async(self, message: str) -> None:
         idx = self.model_combo.currentIndex()
-        _label, provider, model, mode_system = _MODEL_PRESETS[idx]
+        label, provider, model, mode_system = _MODEL_PRESETS[idx]
         thinking_idx = self.thinking_combo.currentIndex()
         _t_label, system_thinking = _THINKING_PRESETS[thinking_idx]
 
@@ -296,17 +309,50 @@ class ChatPage(QtWidgets.QWidget):
         system_parts = [p for p in (mode_system, system_thinking, _skills_to_system(skills)) if p]
         system = "\n\n".join(system_parts)
 
-        full_prompt = self._render_for_send()
+        # First message of the session: mint a persistent Agent so
+        # this conversation shows up in the canvas Conversations
+        # palette and can be dragged onto the canvas.  Subsequent
+        # messages route through agents.send so the transcript stays
+        # in one place.  Auto-name = first ~40 chars of the user's
+        # opening message so the palette is browsable.
+        if self._agent_id is None:
+            try:
+                created = await self.client.call(
+                    "agents.create",
+                    {
+                        "name": _auto_name_from(message, label),
+                        "provider": provider,
+                        "model": model,
+                        "system": system,
+                    },
+                )
+                self._agent_id = created["id"]
+            except Exception as exc:
+                self._append("Error", f"could not create agent: {exc}")
+                self.send_btn.setEnabled(True)
+                return
+            try:
+                res = await self.client.call(
+                    "agents.send",
+                    {"agent_id": self._agent_id, "message": message},
+                )
+                reply = res.get("reply", "")
+            except Exception as exc:
+                self._append("Error", str(exc))
+                self.send_btn.setEnabled(True)
+                return
+            self._history.append({"role": "assistant", "content": reply})
+            self._append(_label_for(provider, model), reply or "(empty reply)")
+            self.send_btn.setEnabled(True)
+            return
 
+        # Subsequent messages: just extend the existing agent's
+        # transcript.  agents.send already folds the full prior
+        # transcript into the prompt server-side.
         try:
             res = await self.client.call(
-                "chat.send",
-                {
-                    "provider": provider,
-                    "model": model,
-                    "message": full_prompt,
-                    "system": system,
-                },
+                "agents.send",
+                {"agent_id": self._agent_id, "message": message},
             )
             reply = res.get("reply", "")
         except Exception as exc:
@@ -318,6 +364,11 @@ class ChatPage(QtWidgets.QWidget):
         self.send_btn.setEnabled(True)
 
     def _new_chat(self) -> None:
+        # Clearing the in-memory mirror is enough — the previous
+        # session's Agent stays in the Conversations palette so it
+        # can still be resumed from the canvas or the Agents tab.
+        # The next send mints a fresh Agent.
+        self._agent_id = None
         self._history.clear()
         self.transcript.clear()
         self.message_input.clear()
@@ -398,6 +449,21 @@ class ChatPage(QtWidgets.QWidget):
 
 def _label_for(provider: str, model: str) -> str:
     return f"{model} ({provider})"
+
+
+def _auto_name_from(message: str, model_label: str) -> str:
+    """Produce a short browsable name from the user's first message.
+
+    Truncates to ~50 chars and strips newlines so the Conversations
+    palette stays scannable.  Falls back to the model label when the
+    first message is essentially empty.
+    """
+    one_line = " ".join(message.split())
+    if not one_line:
+        return model_label
+    if len(one_line) <= 50:
+        return one_line
+    return one_line[:47] + "…"
 
 
 def _skills_to_system(skills: str) -> str:

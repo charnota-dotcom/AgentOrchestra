@@ -11,6 +11,7 @@ or type any of it.
 | 1 | **`setup.cmd`** | First-time install: creates `.venv`, installs the project + `[gui]` extras, optionally installs `pyside6_annotator` if it lives at `..\Annotator\pyside6_annotator_pkg`. | Once, after cloning. Re-run any time `.venv` goes missing. |
 | 2 | **`test-claude.cmd`** | Smoke-test the local `claude` CLI: PATH check + `claude -p "..."` headless call. Surfaces "Not logged in" if your Max-plan auth lapsed. | Right after Step 1, or when Claude cards stop replying. |
 | 3 | **`test-gemini.cmd`** | Smoke-test the local `gemini` CLI: PATH check + `gemini -p "..."` headless call. | Right after Step 2. Skip if you only use Claude. |
+| ★ | **`limits.cmd`** | Print whatever usage / subscription info the local CLIs expose plus links to the Pro/Max and Gemini dashboards. | Before a big batch run, or whenever you're worried about hitting a cap. |
 | 4 | **`launch.cmd`** | Opens the main AgentOrchestra GUI. The service is auto-spawned in the background; no separate window. | Every session — also reachable from the Ops Panel. |
 | 5 | **`stop.cmd`** | Closes the GUI window and any background service (including the headless supervisor child). Three-pass kill: window-title match, then port-listening match. | When you close the laptop. For a stop-then-relaunch use the Restart button (★) instead. |
 | 6 | **`update.cmd`** | `git pull --ff-only origin main` + `pip install -e .[gui] --upgrade`. | After GitHub Desktop's "Pull origin". Follow with `restart.cmd`. |

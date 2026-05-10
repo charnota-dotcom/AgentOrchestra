@@ -56,6 +56,16 @@
       "needs_internet": true
     },
     {
+      "id": "limits",
+      "step": 0,
+      "label": "Subscription / usage limits",
+      "file": "limits.cmd",
+      "summary": "Print whatever usage info the local CLIs expose: `claude --version`, `claude status`, `gemini --version`, `gemini status`, plus links to the Pro/Max + Gemini dashboards.  Per-message remaining-quota numbers aren't accessible headlessly — the interactive `/status` flow or the dashboards are the source of truth.",
+      "when_to_run": "When you're worried about hitting a cap, before kicking off a big batch run, or just to see what tier you're on.",
+      "writes": [],
+      "needs_internet": true
+    },
+    {
       "id": "launch",
       "step": 4,
       "label": "Step 4 — Start AgentOrchestra",
