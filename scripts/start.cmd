@@ -21,6 +21,12 @@ rem     immediately after the call.
 rem   * The headless `-p` probe is wrapped in PowerShell with a
 rem     hard 20-second timeout so a hung CLI can't freeze the
 rem     script forever.
+rem   * `claude` and `gemini` are npm-installed `.cmd` shims, so
+rem     calling them from a `.cmd` file MUST go through `call …` —
+rem     a bare invocation is a tail-call and control never returns
+rem     to this script (operator hit this: pre-flight printed
+rem     `claude --version` then exited without ever probing Gemini
+rem     or launching the GUI).
 rem
 rem Belt-and-braces — `.gitattributes` pins these files to CRLF on
 rem checkout, but if a stale local copy survives, this script still
@@ -53,7 +59,7 @@ if "!CLAUDE_PATH_RC!"=="0" set CLAUDE_PRESENT=1
 if "!CLAUDE_PRESENT!"=="0" echo   claude: NOT FOUND on PATH.
 if "!CLAUDE_PRESENT!"=="0" echo           Install with:  npm install -g @anthropic-ai/claude-code
 
-if "!CLAUDE_PRESENT!"=="1" claude --version
+if "!CLAUDE_PRESENT!"=="1" call claude --version
 if "!CLAUDE_PRESENT!"=="1" echo   probing 'claude -p ping' with a hard 20-second timeout...
 if "!CLAUDE_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p = Start-Process -FilePath 'claude' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput 'NUL' -RedirectStandardError 'NUL'; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 }"
 if "!CLAUDE_PRESENT!"=="1" set CLAUDE_PROBE_RC=!errorlevel!
@@ -79,7 +85,7 @@ if "!GEMINI_PATH_RC!"=="0" set GEMINI_PRESENT=1
 if "!GEMINI_PRESENT!"=="0" echo   gemini: NOT FOUND on PATH.
 if "!GEMINI_PRESENT!"=="0" echo           Install with:  npm install -g @google/gemini-cli
 
-if "!GEMINI_PRESENT!"=="1" gemini --version
+if "!GEMINI_PRESENT!"=="1" call gemini --version
 if "!GEMINI_PRESENT!"=="1" echo   probing 'gemini -p ping' with a hard 20-second timeout...
 if "!GEMINI_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p = Start-Process -FilePath 'gemini' -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput 'NUL' -RedirectStandardError 'NUL'; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 }"
 if "!GEMINI_PRESENT!"=="1" set GEMINI_PROBE_RC=!errorlevel!
