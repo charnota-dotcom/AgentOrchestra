@@ -88,11 +88,17 @@ _CARD_DEFAULTS: dict[str, dict] = {
         description=(
             "Tool-using agent that edits files in an isolated worktree "
             "branch.  Changes are committed per turn and merged into "
-            "the base branch only when you approve."
+            "the base branch only when you approve.  Routes through "
+            "Claude Code on your subscription — no API key required."
         ),
-        provider="anthropic",
-        model="claude-sonnet-4-5",
-        mode=CardMode.AGENTIC,
+        provider="claude-cli",
+        model="claude-sonnet-4-6",
+        # Forced to chat for now: agentic dispatch through the
+        # Claude Code CLI's own tool loop is V5 work and surfaces a
+        # clear deferred-feature error today.  Switching to chat
+        # mode keeps the card usable as a "describe the change you
+        # want" assistant until the agentic CLI bridge lands.
+        mode=CardMode.CHAT,
         cost=CostPolicy(
             soft_cap_usd=0.75, hard_cap_usd=3.00, soft_cap_tokens=300_000, hard_cap_tokens=900_000
         ),

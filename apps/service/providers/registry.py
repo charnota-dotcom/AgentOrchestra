@@ -1,8 +1,21 @@
 """Provider registry.
 
-Service code calls `get_provider("anthropic").open_chat(card)` rather
-than instantiating adapters directly.  This makes adding Gemini /
-OpenAI / Ollama a one-line change.
+Service code calls `get_provider("claude-cli").open_chat(card)` rather
+than instantiating adapters directly.  Adding new providers is a
+one-line change.
+
+Default install (this module) registers ONLY subscription-backed
+routes:
+
+* claude-cli — Claude Code on the user's Max / Pro plan
+* gemini-cli — Google Gemini CLI on the user's existing auth
+* ollama    — local models, no network calls
+
+The API-keyed adapters (`anthropic`, `google`, eventually `openai`)
+are imported but deliberately **not** registered.  An operator who
+wants metered API calls can opt in via
+``register_api_providers()``; the GUI doesn't surface that path so
+the no-usage-fees default is the only thing reachable from the UI.
 """
 
 from __future__ import annotations
@@ -33,14 +46,22 @@ def known_providers() -> list[str]:
 
 
 def install_default_providers() -> None:
-    # CLI-backed providers first so subscription-using operators get
-    # zero-friction defaults.
+    # Subscription / local only — no API-keyed paths in the default
+    # set so accidental dispatch never bills against an API account.
     register("claude-cli", ClaudeCLIProvider())
     register("gemini-cli", GeminiCLIProvider())
+    register("ollama", OllamaProvider())
+
+
+def register_api_providers() -> None:
+    """Opt-in: install the metered API adapters.
+
+    Not called from any code path today.  Reserved for a future
+    "advanced mode" toggle so operators who explicitly want to spend
+    on the API can flip it on without editing the registry.
+    """
     register("anthropic", AnthropicProvider())
     register("google", GoogleProvider())
-    register("ollama", OllamaProvider())
-    # OpenAI: register when its adapter lands.
 
 
 install_default_providers()

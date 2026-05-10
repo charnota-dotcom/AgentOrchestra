@@ -15,17 +15,17 @@ Skipping any page is allowed; users can return to Settings at any time.
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtWidgets
 
-from apps.service.secrets.keyring_store import (
-    anthropic_key,
-    google_key,
-    openai_key,
-    set_secret,
-)
+from apps.service.secrets.keyring_store import set_secret
+
+
+def _which(binary: str) -> str | None:
+    return shutil.which(binary)
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
@@ -98,30 +98,43 @@ class FirstRunWizard(QtWidgets.QWizard):
     # --- Page 2 -------------------------------------------------------
 
     def _keys_page(self) -> QtWidgets.QWizardPage:
+        # Subscription / local routes only — no metered API keys are
+        # collected during onboarding so the default user can never
+        # accidentally bill against an API account.  The page is kept
+        # in place (rather than removed) so the wizard's page index
+        # numbering stays stable for any downstream code that
+        # references it.
         page = QtWidgets.QWizardPage()
-        page.setTitle("Provider keys")
+        page.setTitle("Subscriptions")
         page.setSubTitle(
-            "If you already use Claude Code on a Pro / Max subscription, "
-            "you can skip every key here — the bundled cards default to "
-            "the local `claude` CLI and use that subscription's auth.  "
-            "Add API keys only if you want to call providers directly."
+            "AgentOrchestra runs on the Claude Code and Gemini CLIs "
+            "you already pay for through your subscription — no API "
+            "keys, no usage fees.  If neither is installed yet, do "
+            "that now (one-time): "
+            "https://docs.claude.com/en/docs/claude-code  •  "
+            "https://github.com/google-gemini/gemini-cli"
         )
-        form = QtWidgets.QFormLayout(page)
+        layout = QtWidgets.QVBoxLayout(page)
 
+        info = QtWidgets.QLabel(
+            "Detected on PATH:\n\n"
+            f"  • claude — {'yes' if _which('claude') else 'no'}\n"
+            f"  • gemini — {'yes' if _which('gemini') else 'no'}\n\n"
+            "Click Next either way; you can install them later."
+        )
+        info.setStyleSheet("color:#0f1115;")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        # Hidden no-op placeholders so the existing accept() loop
+        # that walks (slot, widget) tuples keeps working without
+        # re-validation.  Their text is always empty → set_secret is
+        # never called.
         self._anth = QtWidgets.QLineEdit()
-        self._anth.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-        self._anth.setPlaceholderText("(set)" if anthropic_key() else "sk-ant-…")
-        form.addRow("Anthropic API key:", self._anth)
-
         self._google = QtWidgets.QLineEdit()
-        self._google.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-        self._google.setPlaceholderText("(set)" if google_key() else "AIza…")
-        form.addRow("Google API key:", self._google)
-
         self._openai = QtWidgets.QLineEdit()
-        self._openai.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-        self._openai.setPlaceholderText("(set)" if openai_key() else "sk-…")
-        form.addRow("OpenAI API key:", self._openai)
+        for w in (self._anth, self._google, self._openai):
+            w.hide()
 
         return page
 
