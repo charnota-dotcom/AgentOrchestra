@@ -177,9 +177,14 @@ class FlowExecutor:
         ready: list[str] = [nid for nid, deg in indegree.items() if deg == 0]
         completed: set[str] = set()
 
-        # Cards loaded once — keep a tiny cache so we don't roundtrip
-        # the store for every agent node.
-        card_cache: dict[str, PersonalityCard] = {}
+        # Cards loaded once — pre-populate so concurrent agent nodes
+        # in the same wave don't all stampede self.store.list_cards().
+        all_cards = await self.store.list_cards()
+        card_cache: dict[str, PersonalityCard] = {c.id: c for c in all_cards}
+        # Serialise concurrent node-completion writes: outputs / run.node_outputs /
+        # update_flow_run() all share state across asyncio.gather'd tasks
+        # in the same wave.
+        outputs_lock = asyncio.Lock()
 
         async def execute(node_id: str) -> None:
             node = nodes[node_id]
@@ -245,9 +250,10 @@ class FlowExecutor:
                 )
                 raise
 
-            outputs[node_id] = output
-            run.node_outputs[node_id] = output
-            await self.store.update_flow_run(run)
+            async with outputs_lock:
+                outputs[node_id] = output
+                run.node_outputs[node_id] = output
+                await self.store.update_flow_run(run)
             await self._emit(
                 run.id,
                 "flow.node.completed",
@@ -304,15 +310,11 @@ class FlowExecutor:
         card_id = node.get("card_id")
         if not card_id:
             raise FlowValidationError(f"agent node {node['id']} has no card_id")
-        if card_id not in card_cache:
-            cards = await self.store.list_cards()
-            for c in cards:
-                if c.id == card_id:
-                    card_cache[card_id] = c
-                    break
-            else:
-                raise FlowValidationError(f"card not found: {card_id}")
-        card = card_cache[card_id]
+        # card_cache is pre-populated in _run_graph; missing means a
+        # node references a card that was deleted between save + run.
+        card = card_cache.get(card_id)
+        if card is None:
+            raise FlowValidationError(f"card not found: {card_id}")
 
         params = node.get("params") or {}
         goal_override = (params.get("goal") or "").strip()

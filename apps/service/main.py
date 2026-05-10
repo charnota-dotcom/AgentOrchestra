@@ -135,6 +135,21 @@ class Handlers:
         self.manager = manager
         self.dispatcher = dispatcher
         self.flow_executor = flow_executor or FlowExecutor(store)
+        # Per-agent serialisation: two concurrent agents.send for the
+        # same agent_id used to fetch v1, both append, and the later
+        # writer would overwrite the earlier turn (lost-update).  Each
+        # send now takes the agent's own lock for the full
+        # fetch->mutate->LLM->store cycle.
+        self._agent_send_locks: dict[str, asyncio.Lock] = {}
+        self._agent_send_locks_guard = asyncio.Lock()
+
+    async def _lock_for_agent(self, agent_id: str) -> asyncio.Lock:
+        async with self._agent_send_locks_guard:
+            lock = self._agent_send_locks.get(agent_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._agent_send_locks[agent_id] = lock
+            return lock
 
     async def workspaces_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return [w.model_dump(mode="json") for w in await self.store.list_workspaces()]
@@ -430,9 +445,15 @@ class Handlers:
         return {"id": flow.id}
 
     async def flows_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        from apps.service.store.events import FlowVersionConflict
+
         flow = await self.store.get_flow(params["id"])
         if not flow:
             raise ValueError(f"unknown flow: {params['id']}")
+        # Optional optimistic-concurrency token.  GUI passes the version
+        # it last fetched; if another writer has bumped the row in the
+        # meantime, the update is rejected and the GUI should re-fetch.
+        expected_version = params.get("expected_version")
         flow.name = params.get("name", flow.name)
         flow.description = params.get("description", flow.description)
         flow.nodes = params.get("nodes", flow.nodes)
@@ -440,8 +461,13 @@ class Handlers:
         if "is_draft" in params:
             flow.is_draft = bool(params["is_draft"])
         flow.updated_at = utc_now()
-        await self.store.update_flow(flow)
-        return {"id": flow.id, "version": flow.version}
+        try:
+            await self.store.update_flow(flow, expected_version=expected_version)
+        except FlowVersionConflict as exc:
+            raise ValueError(
+                f"flow {flow.id} has been modified by another writer; reload before saving"
+            ) from exc
+        return {"id": flow.id, "version": flow.version + 1}
 
     async def flows_delete(self, params: dict[str, Any]) -> dict[str, Any]:
         ok = await self.store.delete_flow(params["id"])
@@ -585,73 +611,77 @@ class Handlers:
         """
         from apps.service.providers.registry import get_provider
 
-        agent = await self.store.get_agent(params["agent_id"])
-        if not agent:
-            raise ValueError(f"unknown agent: {params['agent_id']}")
+        agent_id = params["agent_id"]
         message = params["message"]
-        agent.transcript.append({"role": "user", "content": message})
+        # Serialise sends per agent — without this lock two concurrent
+        # turns lose one user/assistant pair (last writer wins).
+        async with await self._lock_for_agent(agent_id):
+            agent = await self.store.get_agent(agent_id)
+            if not agent:
+                raise ValueError(f"unknown agent: {agent_id}")
+            agent.transcript.append({"role": "user", "content": message})
 
-        # Fold transcript + system into a single prompt for the CLI
-        # adapter (which doesn't accept structured messages in
-        # headless mode).  Fresh providers keep their own session
-        # state per call; persisting it in our store is the
-        # source-of-truth.
-        # Pull every referenced agent the operator wired up and
-        # prepend their transcripts as a context preamble.  Cross-
-        # provider safe: Gemini reading a Claude transcript or vice
-        # versa just sees plain text, so no special-casing.
-        refs: list[Agent] = []
-        for ref_id in agent.reference_agent_ids or []:
-            ref = await self.store.get_agent(ref_id)
-            if ref is not None:
-                refs.append(ref)
-        reference_block = _render_references(refs)
-        prompt = _render_transcript(agent)
-        if reference_block:
-            prompt = reference_block + "\n\n" + prompt
+            # Fold transcript + system into a single prompt for the CLI
+            # adapter (which doesn't accept structured messages in
+            # headless mode).  Fresh providers keep their own session
+            # state per call; persisting it in our store is the
+            # source-of-truth.
+            # Pull every referenced agent the operator wired up and
+            # prepend their transcripts as a context preamble.  Cross-
+            # provider safe: Gemini reading a Claude transcript or vice
+            # versa just sees plain text, so no special-casing.
+            refs: list[Agent] = []
+            for ref_id in agent.reference_agent_ids or []:
+                ref = await self.store.get_agent(ref_id)
+                if ref is not None:
+                    refs.append(ref)
+            reference_block = _render_references(refs)
+            prompt = _render_transcript(agent)
+            if reference_block:
+                prompt = reference_block + "\n\n" + prompt
 
-        provider = get_provider(agent.provider)
-        # Use an ephemeral card to reuse the existing provider auth.
-        from apps.service.types import (
-            BlastRadiusPolicy,
-            CardMode,
-            CostPolicy,
-            PersonalityCard,
-            SandboxTier,
-        )
+            provider = get_provider(agent.provider)
+            # Use an ephemeral card to reuse the existing provider auth.
+            from apps.service.types import (
+                BlastRadiusPolicy,
+                CardMode,
+                CostPolicy,
+                PersonalityCard,
+                SandboxTier,
+            )
 
-        card = PersonalityCard(
-            name=f"(agent {agent.name})",
-            archetype="agent",
-            description="ephemeral card for a named agent",
-            template_id="agent",
-            provider=agent.provider,
-            model=agent.model,
-            mode=CardMode.CHAT,
-            cost=CostPolicy(),
-            blast_radius=BlastRadiusPolicy(),
-            sandbox_tier=SandboxTier.DEVCONTAINER,
-        )
-        session = await provider.open_chat(card, system=agent.system or None)
-        chunks: list[str] = []
-        try:
-            async for ev in session.send(prompt):
-                if ev.kind == "text_delta":
-                    chunks.append(ev.text)
-                elif ev.kind == "error":
-                    raise RuntimeError(ev.text or "provider error")
-                elif ev.kind == "finish":
-                    break
-        finally:
-            await session.close()
-        reply = "".join(chunks)
-        agent.transcript.append({"role": "assistant", "content": reply})
-        await self.store.update_agent(agent)
-        # Record the send for the in-app message-tally counter so the
-        # Limits tab can show "X / cap" against the published plan
-        # caps without having to ask the CLI.
-        await self.store.record_provider_message(agent.provider, agent.model)
-        return {"reply": reply, "agent": agent.model_dump(mode="json")}
+            card = PersonalityCard(
+                name=f"(agent {agent.name})",
+                archetype="agent",
+                description="ephemeral card for a named agent",
+                template_id="agent",
+                provider=agent.provider,
+                model=agent.model,
+                mode=CardMode.CHAT,
+                cost=CostPolicy(),
+                blast_radius=BlastRadiusPolicy(),
+                sandbox_tier=SandboxTier.DEVCONTAINER,
+            )
+            session = await provider.open_chat(card, system=agent.system or None)
+            chunks: list[str] = []
+            try:
+                async for ev in session.send(prompt):
+                    if ev.kind == "text_delta":
+                        chunks.append(ev.text)
+                    elif ev.kind == "error":
+                        raise RuntimeError(ev.text or "provider error")
+                    elif ev.kind == "finish":
+                        break
+            finally:
+                await session.close()
+            reply = "".join(chunks)
+            agent.transcript.append({"role": "assistant", "content": reply})
+            await self.store.update_agent(agent)
+            # Record the send for the in-app message-tally counter so the
+            # Limits tab can show "X / cap" against the published plan
+            # caps without having to ask the CLI.
+            await self.store.record_provider_message(agent.provider, agent.model)
+            return {"reply": reply, "agent": agent.model_dump(mode="json")}
 
     async def agents_spawn_followup(self, params: dict[str, Any]) -> dict[str, Any]:
         """Spawn a new agent that builds on a parent's transcript.
@@ -705,7 +735,11 @@ class Handlers:
         return {"agent": agent.model_dump(mode="json")}
 
     async def agents_delete(self, params: dict[str, Any]) -> dict[str, Any]:
-        ok = await self.store.delete_agent(params["id"])
+        agent_id = params["id"]
+        ok = await self.store.delete_agent(agent_id)
+        # Drop the per-agent send lock so the dict doesn't grow forever.
+        async with self._agent_send_locks_guard:
+            self._agent_send_locks.pop(agent_id, None)
         return {"deleted": bool(ok)}
 
     async def agents_followup_presets(self, params: dict[str, Any]) -> list[dict[str, str]]:

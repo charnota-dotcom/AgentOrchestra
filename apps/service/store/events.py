@@ -52,6 +52,11 @@ def _row_to_dict(row: aiosqlite.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 
 
+class FlowVersionConflict(Exception):
+    """Raised when an optimistic update_flow lost the race; the caller
+    needs to re-fetch the flow and reapply their edits."""
+
+
 class EventStore:
     """Owns the SQLite database for one running service.
 
@@ -191,11 +196,12 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def insert_workspace(self, ws: Workspace) -> Workspace:
-        await self.db.execute(
-            "INSERT INTO workspaces VALUES (?, ?, ?, ?, ?)",
-            (ws.id, ws.name, ws.repo_path, ws.default_base_branch, ws.created_at.isoformat()),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO workspaces VALUES (?, ?, ?, ?, ?)",
+                (ws.id, ws.name, ws.repo_path, ws.default_base_branch, ws.created_at.isoformat()),
+            )
+            await self.db.commit()
         return ws
 
     async def get_workspace(self, workspace_id: str) -> Workspace | None:
@@ -213,37 +219,62 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def insert_flow(self, flow: Flow) -> Flow:
-        await self.db.execute(
-            "INSERT INTO flows VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                flow.id,
-                flow.name,
-                flow.description,
-                json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
-                flow.version,
-                flow.created_at.isoformat(),
-                flow.updated_at.isoformat(),
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO flows VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    flow.id,
+                    flow.name,
+                    flow.description,
+                    json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
+                    flow.version,
+                    flow.created_at.isoformat(),
+                    flow.updated_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
         return flow
 
-    async def update_flow(self, flow: Flow) -> Flow:
-        await self.db.execute(
-            """
-            UPDATE flows
-               SET name = ?, description = ?, payload = ?, version = version + 1, updated_at = ?
-             WHERE id = ?
-            """,
-            (
-                flow.name,
-                flow.description,
-                json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
-                flow.updated_at.isoformat(),
-                flow.id,
-            ),
-        )
-        await self.db.commit()
+    async def update_flow(self, flow: Flow, *, expected_version: int | None = None) -> Flow:
+        # Optimistic concurrency: if the caller passes the version they
+        # read, we only commit when the row's current version still
+        # matches.  Two canvases saving the same flow concurrently used
+        # to silently overwrite each other.
+        async with self._lock:
+            if expected_version is not None:
+                cur = await self.db.execute(
+                    "UPDATE flows SET name = ?, description = ?, payload = ?, "
+                    "version = version + 1, updated_at = ? "
+                    "WHERE id = ? AND version = ?",
+                    (
+                        flow.name,
+                        flow.description,
+                        json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
+                        flow.updated_at.isoformat(),
+                        flow.id,
+                        expected_version,
+                    ),
+                )
+                if (cur.rowcount or 0) == 0:
+                    raise FlowVersionConflict(
+                        f"flow {flow.id} version {expected_version} no longer current"
+                    )
+            else:
+                await self.db.execute(
+                    """
+                    UPDATE flows
+                       SET name = ?, description = ?, payload = ?, version = version + 1, updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (
+                        flow.name,
+                        flow.description,
+                        json.dumps({"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}),
+                        flow.updated_at.isoformat(),
+                        flow.id,
+                    ),
+                )
+            await self.db.commit()
         return flow
 
     async def get_flow(self, flow_id: str) -> Flow | None:
@@ -278,11 +309,12 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def record_provider_message(self, provider: str, model: str = "") -> None:
-        await self.db.execute(
-            "INSERT INTO provider_messages (provider, model, sent_at) VALUES (?, ?, ?)",
-            (provider, model, utc_now().isoformat()),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO provider_messages (provider, model, sent_at) VALUES (?, ?, ?)",
+                (provider, model, utc_now().isoformat()),
+            )
+            await self.db.commit()
 
     async def count_provider_messages(self, provider: str, since_iso: str) -> int:
         cur = await self.db.execute(
@@ -293,42 +325,47 @@ class EventStore:
         return int(row["n"]) if row else 0
 
     async def delete_flow(self, flow_id: str) -> bool:
-        # Cascade to runs first so the foreign key check passes.
-        await self.db.execute("DELETE FROM flow_runs WHERE flow_id = ?", (flow_id,))
-        cur = await self.db.execute("DELETE FROM flows WHERE id = ?", (flow_id,))
-        await self.db.commit()
+        # Cascade to runs first so the foreign key check passes.  Hold
+        # the write lock for both DELETEs so a concurrent insert_flow_run
+        # can't sneak in between them.
+        async with self._lock:
+            await self.db.execute("DELETE FROM flow_runs WHERE flow_id = ?", (flow_id,))
+            cur = await self.db.execute("DELETE FROM flows WHERE id = ?", (flow_id,))
+            await self.db.commit()
         return (cur.rowcount or 0) > 0
 
     async def insert_flow_run(self, run: FlowRun) -> FlowRun:
-        await self.db.execute(
-            "INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                run.id,
-                run.flow_id,
-                run.state.value,
-                run.started_at.isoformat(),
-                run.ended_at.isoformat() if run.ended_at else None,
-                json.dumps({"node_outputs": run.node_outputs, "error": run.error}),
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    run.id,
+                    run.flow_id,
+                    run.state.value,
+                    run.started_at.isoformat(),
+                    run.ended_at.isoformat() if run.ended_at else None,
+                    json.dumps({"node_outputs": run.node_outputs, "error": run.error}),
+                ),
+            )
+            await self.db.commit()
         return run
 
     async def update_flow_run(self, run: FlowRun) -> FlowRun:
-        await self.db.execute(
-            """
-            UPDATE flow_runs
-               SET state = ?, ended_at = ?, payload = ?
-             WHERE id = ?
-            """,
-            (
-                run.state.value,
-                run.ended_at.isoformat() if run.ended_at else None,
-                json.dumps({"node_outputs": run.node_outputs, "error": run.error}),
-                run.id,
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                """
+                UPDATE flow_runs
+                   SET state = ?, ended_at = ?, payload = ?
+                 WHERE id = ?
+                """,
+                (
+                    run.state.value,
+                    run.ended_at.isoformat() if run.ended_at else None,
+                    json.dumps({"node_outputs": run.node_outputs, "error": run.error}),
+                    run.id,
+                ),
+            )
+            await self.db.commit()
         return run
 
     async def get_flow_run(self, run_id: str) -> FlowRun | None:
@@ -351,55 +388,57 @@ class EventStore:
         # Explicit column list (rather than VALUES (?, ?, ?...)) so
         # adding new columns via the code-side migration doesn't break
         # this insert when schema column order shifts.
-        await self.db.execute(
-            """
-            INSERT INTO agents (
-                id, name, provider, model, system,
-                parent_id, parent_name, parent_preset,
-                reference_agent_ids,
-                transcript, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                agent.id,
-                agent.name,
-                agent.provider,
-                agent.model,
-                agent.system,
-                agent.parent_id,
-                agent.parent_name,
-                agent.parent_preset,
-                json.dumps(agent.reference_agent_ids),
-                json.dumps(agent.transcript),
-                agent.created_at.isoformat(),
-                agent.updated_at.isoformat(),
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO agents (
+                    id, name, provider, model, system,
+                    parent_id, parent_name, parent_preset,
+                    reference_agent_ids,
+                    transcript, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    agent.id,
+                    agent.name,
+                    agent.provider,
+                    agent.model,
+                    agent.system,
+                    agent.parent_id,
+                    agent.parent_name,
+                    agent.parent_preset,
+                    json.dumps(agent.reference_agent_ids),
+                    json.dumps(agent.transcript),
+                    agent.created_at.isoformat(),
+                    agent.updated_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
         return agent
 
     async def update_agent(self, agent: Agent) -> Agent:
         agent.updated_at = utc_now()
-        await self.db.execute(
-            """
-            UPDATE agents
-               SET name = ?,
-                   system = ?,
-                   reference_agent_ids = ?,
-                   transcript = ?,
-                   updated_at = ?
-             WHERE id = ?
-            """,
-            (
-                agent.name,
-                agent.system,
-                json.dumps(agent.reference_agent_ids),
-                json.dumps(agent.transcript),
-                agent.updated_at.isoformat(),
-                agent.id,
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                """
+                UPDATE agents
+                   SET name = ?,
+                       system = ?,
+                       reference_agent_ids = ?,
+                       transcript = ?,
+                       updated_at = ?
+                 WHERE id = ?
+                """,
+                (
+                    agent.name,
+                    agent.system,
+                    json.dumps(agent.reference_agent_ids),
+                    json.dumps(agent.transcript),
+                    agent.updated_at.isoformat(),
+                    agent.id,
+                ),
+            )
+            await self.db.commit()
         return agent
 
     @staticmethod
@@ -428,9 +467,12 @@ class EventStore:
     async def delete_agent(self, agent_id: str) -> bool:
         # Detach children — keep their history but null out the
         # parent ref so cascading deletes don't take a whole tree.
-        await self.db.execute("UPDATE agents SET parent_id = NULL WHERE parent_id = ?", (agent_id,))
-        cur = await self.db.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "UPDATE agents SET parent_id = NULL WHERE parent_id = ?", (agent_id,)
+            )
+            cur = await self.db.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
+            await self.db.commit()
         return (cur.rowcount or 0) > 0
 
     async def delete_workspace(self, workspace_id: str) -> bool:
@@ -438,8 +480,11 @@ class EventStore:
         so historical context isn't lost; only the workspace row goes
         away.  Returns True if a row was removed.
         """
-        cur = await self.db.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
-        await self.db.commit()
+        async with self._lock:
+            cur = await self.db.execute(
+                "DELETE FROM workspaces WHERE id = ?", (workspace_id,)
+            )
+            await self.db.commit()
         return (cur.rowcount or 0) > 0
 
     # ------------------------------------------------------------------
@@ -447,24 +492,25 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def insert_template(self, t: InstructionTemplate) -> InstructionTemplate:
-        await self.db.execute(
-            """
-            INSERT INTO templates (id, name, archetype, body, variables,
-                version, content_hash, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                t.id,
-                t.name,
-                t.archetype,
-                t.body,
-                json.dumps([v.model_dump() for v in t.variables]),
-                t.version,
-                t.content_hash,
-                t.created_at.isoformat(),
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO templates (id, name, archetype, body, variables,
+                    version, content_hash, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    t.id,
+                    t.name,
+                    t.archetype,
+                    t.body,
+                    json.dumps([v.model_dump() for v in t.variables]),
+                    t.version,
+                    t.content_hash,
+                    t.created_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
         return t
 
     async def get_template(self, template_id: str) -> InstructionTemplate | None:
@@ -477,41 +523,42 @@ class EventStore:
         return InstructionTemplate.model_validate(d)
 
     async def insert_card(self, c: PersonalityCard) -> PersonalityCard:
-        await self.db.execute(
-            """
-            INSERT INTO cards (id, name, archetype, description, template_id,
-                provider, model, mode, cost, blast_radius, sandbox_tier,
-                tool_allowlist, fallbacks, auto_qa, requires_plan,
-                stale_minutes, max_commits_per_run, max_turns,
-                skip_pre_commit_hooks, version, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                c.id,
-                c.name,
-                c.archetype,
-                c.description,
-                c.template_id,
-                c.provider,
-                c.model,
-                c.mode.value,
-                c.cost.model_dump_json(),
-                c.blast_radius.model_dump_json(),
-                c.sandbox_tier.value,
-                json.dumps(c.tool_allowlist),
-                json.dumps(c.fallbacks),
-                int(c.auto_qa),
-                int(c.requires_plan),
-                c.stale_minutes,
-                c.max_commits_per_run,
-                c.max_turns,
-                int(c.skip_pre_commit_hooks),
-                c.version,
-                c.created_at.isoformat(),
-                c.updated_at.isoformat(),
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO cards (id, name, archetype, description, template_id,
+                    provider, model, mode, cost, blast_radius, sandbox_tier,
+                    tool_allowlist, fallbacks, auto_qa, requires_plan,
+                    stale_minutes, max_commits_per_run, max_turns,
+                    skip_pre_commit_hooks, version, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    c.id,
+                    c.name,
+                    c.archetype,
+                    c.description,
+                    c.template_id,
+                    c.provider,
+                    c.model,
+                    c.mode.value,
+                    c.cost.model_dump_json(),
+                    c.blast_radius.model_dump_json(),
+                    c.sandbox_tier.value,
+                    json.dumps(c.tool_allowlist),
+                    json.dumps(c.fallbacks),
+                    int(c.auto_qa),
+                    int(c.requires_plan),
+                    c.stale_minutes,
+                    c.max_commits_per_run,
+                    c.max_turns,
+                    int(c.skip_pre_commit_hooks),
+                    c.version,
+                    c.created_at.isoformat(),
+                    c.updated_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
         return c
 
     @staticmethod
@@ -547,20 +594,21 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def insert_instruction(self, ins: Instruction) -> Instruction:
-        await self.db.execute(
-            "INSERT INTO instructions VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                ins.id,
-                ins.template_id,
-                ins.template_version,
-                ins.card_id,
-                ins.rendered_text,
-                json.dumps(ins.variables),
-                ins.created_at.isoformat(),
-            ),
-        )
-        await self._fts_insert("instruction", ins.id, "instruction", ins.rendered_text)
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO instructions VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ins.id,
+                    ins.template_id,
+                    ins.template_version,
+                    ins.card_id,
+                    ins.rendered_text,
+                    json.dumps(ins.variables),
+                    ins.created_at.isoformat(),
+                ),
+            )
+            await self._fts_insert("instruction", ins.id, "instruction", ins.rendered_text)
+            await self.db.commit()
         return ins
 
     # ------------------------------------------------------------------
@@ -568,37 +616,39 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def insert_run(self, run: Run) -> Run:
-        await self.db.execute(
-            """
-            INSERT INTO runs (id, workspace_id, card_id, instruction_id,
-                branch_id, state, state_changed_at, created_at,
-                completed_at, cost_usd, cost_tokens, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                run.id,
-                run.workspace_id,
-                run.card_id,
-                run.instruction_id,
-                run.branch_id,
-                run.state.value,
-                run.state_changed_at.isoformat(),
-                run.created_at.isoformat(),
-                run.completed_at.isoformat() if run.completed_at else None,
-                run.cost_usd,
-                run.cost_tokens,
-                run.error,
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO runs (id, workspace_id, card_id, instruction_id,
+                    branch_id, state, state_changed_at, created_at,
+                    completed_at, cost_usd, cost_tokens, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run.id,
+                    run.workspace_id,
+                    run.card_id,
+                    run.instruction_id,
+                    run.branch_id,
+                    run.state.value,
+                    run.state_changed_at.isoformat(),
+                    run.created_at.isoformat(),
+                    run.completed_at.isoformat() if run.completed_at else None,
+                    run.cost_usd,
+                    run.cost_tokens,
+                    run.error,
+                ),
+            )
+            await self.db.commit()
         return run
 
     async def update_run_state(self, run_id: str, state: RunState) -> None:
-        await self.db.execute(
-            "UPDATE runs SET state = ?, state_changed_at = ? WHERE id = ?",
-            (state.value, utc_now().isoformat(), run_id),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "UPDATE runs SET state = ?, state_changed_at = ? WHERE id = ?",
+                (state.value, utc_now().isoformat(), run_id),
+            )
+            await self.db.commit()
 
     async def get_run(self, run_id: str) -> Run | None:
         cur = await self.db.execute("SELECT * FROM runs WHERE id = ?", (run_id,))
@@ -624,57 +674,59 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def insert_branch(self, b: Branch) -> Branch:
-        await self.db.execute(
-            """
-            INSERT INTO branches (id, run_id, workspace_id, base_ref,
-                base_branch_name, agent_branch_name, worktree_path,
-                state, state_changed_at, created_at,
-                last_commit_sha, last_commit_at, process_pid,
-                include_uncommitted, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                b.id,
-                b.run_id,
-                b.workspace_id,
-                b.base_ref,
-                b.base_branch_name,
-                b.agent_branch_name,
-                b.worktree_path,
-                b.state.value,
-                b.state_changed_at.isoformat(),
-                b.created_at.isoformat(),
-                b.last_commit_sha,
-                b.last_commit_at.isoformat() if b.last_commit_at else None,
-                b.process_pid,
-                int(b.include_uncommitted),
-                b.notes,
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO branches (id, run_id, workspace_id, base_ref,
+                    base_branch_name, agent_branch_name, worktree_path,
+                    state, state_changed_at, created_at,
+                    last_commit_sha, last_commit_at, process_pid,
+                    include_uncommitted, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    b.id,
+                    b.run_id,
+                    b.workspace_id,
+                    b.base_ref,
+                    b.base_branch_name,
+                    b.agent_branch_name,
+                    b.worktree_path,
+                    b.state.value,
+                    b.state_changed_at.isoformat(),
+                    b.created_at.isoformat(),
+                    b.last_commit_sha,
+                    b.last_commit_at.isoformat() if b.last_commit_at else None,
+                    b.process_pid,
+                    int(b.include_uncommitted),
+                    b.notes,
+                ),
+            )
+            await self.db.commit()
         return b
 
     async def update_branch_state(
         self, branch_id: str, state: BranchState, *, last_commit_sha: str | None = None
     ) -> None:
-        if last_commit_sha is not None:
-            await self.db.execute(
-                """UPDATE branches SET state = ?, state_changed_at = ?,
-                   last_commit_sha = ?, last_commit_at = ? WHERE id = ?""",
-                (
-                    state.value,
-                    utc_now().isoformat(),
-                    last_commit_sha,
-                    utc_now().isoformat(),
-                    branch_id,
-                ),
-            )
-        else:
-            await self.db.execute(
-                "UPDATE branches SET state = ?, state_changed_at = ? WHERE id = ?",
-                (state.value, utc_now().isoformat(), branch_id),
-            )
-        await self.db.commit()
+        async with self._lock:
+            if last_commit_sha is not None:
+                await self.db.execute(
+                    """UPDATE branches SET state = ?, state_changed_at = ?,
+                       last_commit_sha = ?, last_commit_at = ? WHERE id = ?""",
+                    (
+                        state.value,
+                        utc_now().isoformat(),
+                        last_commit_sha,
+                        utc_now().isoformat(),
+                        branch_id,
+                    ),
+                )
+            else:
+                await self.db.execute(
+                    "UPDATE branches SET state = ?, state_changed_at = ? WHERE id = ?",
+                    (state.value, utc_now().isoformat(), branch_id),
+                )
+            await self.db.commit()
 
     async def get_branch(self, branch_id: str) -> Branch | None:
         cur = await self.db.execute("SELECT * FROM branches WHERE id = ?", (branch_id,))
@@ -715,44 +767,46 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def insert_step(self, s: Step) -> Step:
-        await self.db.execute(
-            """
-            INSERT INTO steps (id, run_id, seq, kind, started_at,
-                completed_at, tokens_in, tokens_out, cost_usd, latency_ms, payload)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                s.id,
-                s.run_id,
-                s.seq,
-                s.kind.value,
-                s.started_at.isoformat(),
-                s.completed_at.isoformat() if s.completed_at else None,
-                s.tokens_in,
-                s.tokens_out,
-                s.cost_usd,
-                s.latency_ms,
-                json.dumps(s.payload),
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO steps (id, run_id, seq, kind, started_at,
+                    completed_at, tokens_in, tokens_out, cost_usd, latency_ms, payload)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    s.id,
+                    s.run_id,
+                    s.seq,
+                    s.kind.value,
+                    s.started_at.isoformat(),
+                    s.completed_at.isoformat() if s.completed_at else None,
+                    s.tokens_in,
+                    s.tokens_out,
+                    s.cost_usd,
+                    s.latency_ms,
+                    json.dumps(s.payload),
+                ),
+            )
+            await self.db.commit()
         return s
 
     async def insert_artifact(self, a: Artifact) -> Artifact:
-        await self.db.execute(
-            "INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                a.id,
-                a.run_id,
-                a.step_id,
-                a.kind.value,
-                a.title,
-                a.body,
-                a.created_at.isoformat(),
-            ),
-        )
-        await self._fts_insert("artifact", a.id, a.title, a.body)
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    a.id,
+                    a.run_id,
+                    a.step_id,
+                    a.kind.value,
+                    a.title,
+                    a.body,
+                    a.created_at.isoformat(),
+                ),
+            )
+            await self._fts_insert("artifact", a.id, a.title, a.body)
+            await self.db.commit()
         return a
 
     # ------------------------------------------------------------------
@@ -760,38 +814,40 @@ class EventStore:
     # ------------------------------------------------------------------
 
     async def insert_approval(self, ap: Approval) -> Approval:
-        await self.db.execute(
-            "INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                ap.id,
-                ap.run_id,
-                ap.reason,
-                json.dumps(ap.risk_signals),
-                ap.decision.value,
-                ap.requested_at.isoformat(),
-                ap.decided_at.isoformat() if ap.decided_at else None,
-                ap.decided_by,
-                ap.note,
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ap.id,
+                    ap.run_id,
+                    ap.reason,
+                    json.dumps(ap.risk_signals),
+                    ap.decision.value,
+                    ap.requested_at.isoformat(),
+                    ap.decided_at.isoformat() if ap.decided_at else None,
+                    ap.decided_by,
+                    ap.note,
+                ),
+            )
+            await self.db.commit()
         return ap
 
     async def insert_outcome(self, o: Outcome) -> Outcome:
-        await self.db.execute(
-            "INSERT INTO outcomes VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                o.id,
-                o.run_id,
-                o.kind.value,
-                o.rationale,
-                o.final_cost_usd,
-                o.final_cost_tokens,
-                o.duration_seconds,
-                o.created_at.isoformat(),
-            ),
-        )
-        await self.db.commit()
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO outcomes VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    o.id,
+                    o.run_id,
+                    o.kind.value,
+                    o.rationale,
+                    o.final_cost_usd,
+                    o.final_cost_tokens,
+                    o.duration_seconds,
+                    o.created_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
         return o
 
     # ------------------------------------------------------------------
@@ -800,14 +856,18 @@ class EventStore:
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
-        await self.db.execute("BEGIN")
-        try:
-            yield
-        except Exception:
-            await self.db.execute("ROLLBACK")
-            raise
-        else:
-            await self.db.commit()
+        # Hold the write lock for the whole transaction so concurrent
+        # writers can't smuggle their statements into our BEGIN..COMMIT
+        # window on the shared aiosqlite connection.
+        async with self._lock:
+            await self.db.execute("BEGIN")
+            try:
+                yield
+            except Exception:
+                await self.db.execute("ROLLBACK")
+                raise
+            else:
+                await self.db.commit()
 
 
 def _ensure_resources_available() -> Path:
