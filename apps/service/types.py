@@ -603,6 +603,140 @@ class Agent(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+# ---------------------------------------------------------------------------
+# Drones — the new model.  See docs/DRONE_MODEL.md for the full design.
+#
+# A *drone* is a messenger our app dispatches.  It carries a frozen
+# blueprint config + an action's live state to whichever external AI
+# endpoint it's pointed at — Claude, Gemini, Ollama, future MCP
+# surfaces.  We don't classify the endpoint as agent-or-not; it's just
+# a target the drone messages.
+#
+# Blueprint  = template (operator-only writes; repo-portable).
+# Action     = deployed instance (carries transcript, attachments,
+#              optional workspace, one-off skill / reference layers).
+# ---------------------------------------------------------------------------
+
+
+class DroneRole(StrEnum):
+    """Authority role on a blueprint, frozen with the action snapshot
+    at deploy time.  The orchestrator's ``_check_authority`` helper
+    gates cross-action mutation RPCs against this matrix:
+
+    | Role       | Self | Append refs to peer | Append atts to peer | Append skills to peer | Read peer |
+    |------------|------|---------------------|---------------------|------------------------|-----------|
+    | worker     | ✅   | ❌                  | ❌                  | ❌                     | ✅        |
+    | supervisor | ✅   | ✅                  | ✅                  | ✅                     | ✅        |
+    | courier    | ✅   | ✅                  | ❌                  | ❌                     | ✅        |
+    | auditor    | ❌   | ❌                  | ❌                  | ❌                     | ✅        |
+
+    Auditor cannot mutate even its OWN action — it's read-only by
+    construction.  Suitable for "watch-only" drones that summarise
+    what's happening across other actions without participating.
+
+    Operators don't define new roles in v1; the four above ship and
+    we extend later if a real need arises.
+    """
+
+    WORKER = "worker"
+    SUPERVISOR = "supervisor"
+    COURIER = "courier"
+    AUDITOR = "auditor"
+
+
+class DroneBlueprint(BaseModel):
+    """Frozen template for deploying drones.
+
+    The operator (human) is the sole creator and editor; drones
+    themselves never modify their own blueprint.  Blueprints are
+    repo-portable — workspace binding is action-only, picked at
+    deploy time, so one blueprint deploys against many repos.
+    """
+
+    id: str = Field(default_factory=long_id)
+    name: str
+    description: str = ""
+    role: DroneRole = DroneRole.WORKER
+    provider: str  # 'claude-cli' / 'gemini-cli' / 'anthropic' / 'google' / 'ollama'
+    model: str
+    # Operator-typed persona / tone / role description.  Goes into
+    # the system prompt verbatim.  The mode prompts (Coding / General
+    # Chat / File / Image) from apps/gui/presets stack on top of this.
+    system_persona: str = ""
+    # Default skill tokens (e.g. "/research-deep").  Action can layer
+    # additional one-off tokens; cannot remove these defaults.
+    skills: list[str] = Field(default_factory=list)
+    # Default reference blueprint ids — every action deployed from
+    # this blueprint inherits a reference to whatever the latest
+    # action of each listed blueprint was.  Empty for most blueprints.
+    reference_blueprint_ids: list[str] = Field(default_factory=list)
+    # Optimistic-concurrency token; bumped on every update.  The
+    # blueprints.update RPC can take an ``expected_version`` to detect
+    # racing edits the same way ``flows.update`` does.
+    version: int = 1
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class DroneAction(BaseModel):
+    """A deployed drone — instance of a blueprint, ready to chat.
+
+    Holds runtime state: transcript, attachments, workspace binding,
+    one-off skill / reference layers.  Inherits everything else from
+    the blueprint snapshot stored at deploy time.
+    """
+
+    id: str = Field(default_factory=long_id)
+    blueprint_id: str
+    # Frozen copy of the blueprint at deploy time.  Edits to the
+    # blueprint AFTER this action was deployed never reach this
+    # action — operator gets predictable behaviour and any in-flight
+    # conversations stay coherent with what they were started with.
+    blueprint_snapshot: dict[str, Any] = Field(default_factory=dict)
+    # Optional workspace binding — operator picks at deploy.  Same
+    # blueprint deploys against many repos.  None = chat-only.
+    workspace_id: str | None = None
+    # Layered on top of the blueprint snapshot's skills.  Action can
+    # ADD a one-off /token for this conversation only; cannot remove
+    # blueprint defaults.
+    additional_skills: list[str] = Field(default_factory=list)
+    # One-off cross-action references.  Populated by the operator (or
+    # by a Supervisor/Courier drone via append_reference).
+    additional_reference_action_ids: list[str] = Field(default_factory=list)
+    transcript: list[dict[str, str]] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    @property
+    def effective_role(self) -> DroneRole:
+        """Role inherited from the snapshotted blueprint.
+
+        Falls back to ``WORKER`` when the snapshot lacks a role (e.g.
+        an action seeded from a future-format blueprint we don't fully
+        understand).  Better to default to the most-restricted role
+        than to escalate accidentally.
+        """
+        raw = (self.blueprint_snapshot or {}).get("role")
+        try:
+            return DroneRole(raw) if raw else DroneRole.WORKER
+        except ValueError:
+            return DroneRole.WORKER
+
+    @property
+    def effective_skills(self) -> list[str]:
+        """Concatenation of blueprint skills + action's one-off layer."""
+        bp_skills = list((self.blueprint_snapshot or {}).get("skills") or [])
+        return bp_skills + list(self.additional_skills)
+
+
+class BlueprintVersionConflict(Exception):
+    """Raised when an optimistic update_blueprint lost the race.
+
+    The caller should re-fetch the blueprint and reapply edits — same
+    pattern as ``FlowVersionConflict`` for flows.
+    """
+
+
 class FlowState(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
