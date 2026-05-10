@@ -48,6 +48,21 @@ class CommandCard(QtWidgets.QFrame):
         h.setContentsMargins(14, 12, 14, 12)
         h.setSpacing(12)
 
+        # Step badge on the left — the manifest's ``step`` field gives
+        # the typical first-time-to-running sequence (1=install,
+        # 2=verify Claude, 3=verify Gemini, 4=launch, …).  Step 0
+        # entries (the panel itself) get no badge.
+        step = cmd.get("step")
+        if isinstance(step, int) and step > 0:
+            badge = QtWidgets.QLabel(str(step))
+            badge.setFixedSize(28, 28)
+            badge.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            badge.setStyleSheet(
+                "QLabel{background:#1f6feb;color:#fff;border-radius:14px;"
+                "font-weight:700;font-size:13px;border:none;}"
+            )
+            h.addWidget(badge, alignment=QtCore.Qt.AlignmentFlag.AlignTop)
+
         text = QtWidgets.QVBoxLayout()
         text.setSpacing(2)
 
