@@ -10,12 +10,22 @@ ConversationNode auto-refreshes on next open.
 from __future__ import annotations
 
 import asyncio
+import base64
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
+
+
+_ATTACHMENT_FILTER = (
+    "Supported files (*.png *.jpg *.jpeg *.gif *.webp *.xlsx *.xls *.csv);;"
+    "Images (*.png *.jpg *.jpeg *.gif *.webp);;"
+    "Spreadsheets (*.xlsx *.xls *.csv);;"
+    "All files (*)"
+)
 
 
 class AgentChatDialog(QtWidgets.QDialog):
@@ -89,7 +99,33 @@ class AgentChatDialog(QtWidgets.QDialog):
         )
         v.addWidget(self.transcript, stretch=1)
 
+        # Pending attachments — files the operator picked but hasn't
+        # sent yet.  Each is a dict {id, original_name, kind, bytes}.
+        self._pending_attachments: list[dict[str, Any]] = []
+        self.attachments_row = QtWidgets.QHBoxLayout()
+        self.attachments_row.setSpacing(6)
+        self.attachments_row.addStretch(1)
+        att_wrap = QtWidgets.QWidget()
+        att_wrap.setLayout(self.attachments_row)
+        att_wrap.setVisible(False)
+        self._attachments_wrap = att_wrap
+        v.addWidget(att_wrap)
+
         bottom = QtWidgets.QHBoxLayout()
+        self.attach_btn = QtWidgets.QPushButton("📎")
+        self.attach_btn.setToolTip(
+            "Attach an image (.png/.jpg/.gif/.webp) or a spreadsheet "
+            "(.xlsx/.xls/.csv) to the next message.  Spreadsheets are "
+            "rendered as a markdown table; images pass through to the CLI."
+        )
+        self.attach_btn.setStyleSheet(
+            "QPushButton{padding:10px 12px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:14px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        self.attach_btn.clicked.connect(self._attach_file)  # type: ignore[arg-type]
+        bottom.addWidget(self.attach_btn)
+
         self.input = QtWidgets.QPlainTextEdit()
         self.input.setPlaceholderText("Continue the conversation.  Ctrl+Enter to send.")
         self.input.setFixedHeight(80)
@@ -205,21 +241,125 @@ class AgentChatDialog(QtWidgets.QDialog):
         self.agent = updated
         self.refs_label.setText(self._format_refs_label(self.agent))
 
+    def _attach_file(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Attach a file to this conversation",
+            "",
+            _ATTACHMENT_FILTER,
+        )
+        if not path:
+            return
+        asyncio.ensure_future(self._upload_attachment(Path(path)))
+
+    async def _upload_attachment(self, path: Path) -> None:
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't read file", str(exc))
+            return
+        self.attach_btn.setEnabled(False)
+        try:
+            res = await self.client.call(
+                "attachments.upload",
+                {
+                    "agent_id": self.agent["id"],
+                    "original_name": path.name,
+                    "content_b64": base64.b64encode(data).decode("ascii"),
+                },
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't attach file", str(exc))
+            return
+        finally:
+            self.attach_btn.setEnabled(True)
+        if res.get("warning"):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Attached with warning",
+                f"{path.name}: {res['warning']}",
+            )
+        self._pending_attachments.append(res)
+        self._render_pending_attachments()
+
+    def _render_pending_attachments(self) -> None:
+        # Wipe old chip widgets (keeping the trailing stretch).
+        while self.attachments_row.count() > 1:
+            item = self.attachments_row.takeAt(0)
+            w = item.widget() if item else None
+            if w is not None:
+                w.deleteLater()
+        for att in self._pending_attachments:
+            chip = self._build_chip(att)
+            self.attachments_row.insertWidget(self.attachments_row.count() - 1, chip)
+        self._attachments_wrap.setVisible(bool(self._pending_attachments))
+
+    def _build_chip(self, att: dict[str, Any]) -> QtWidgets.QWidget:
+        chip = QtWidgets.QFrame()
+        chip.setStyleSheet(
+            "QFrame{background:#eef4ff;border:1px solid #c8d6f0;border-radius:10px;}"
+            "QLabel{color:#1f3a6a;font-size:11px;}"
+            "QPushButton{border:none;color:#5b6068;background:transparent;font-size:14px;}"
+            "QPushButton:hover{color:#c0392b;}"
+        )
+        layout = QtWidgets.QHBoxLayout(chip)
+        layout.setContentsMargins(8, 2, 4, 2)
+        layout.setSpacing(4)
+        icon = "🖼" if att.get("kind") == "image" else "📊"
+        kb = max(1, int(att.get("bytes", 0)) // 1024)
+        layout.addWidget(QtWidgets.QLabel(f"{icon} {att.get('original_name', '?')} · {kb} KB"))
+        rm = QtWidgets.QPushButton("✕")
+        rm.setToolTip("Remove attachment")
+        rm.setFixedSize(18, 18)
+        rm.clicked.connect(lambda _=False, a=att: self._remove_attachment(a))  # type: ignore[arg-type]
+        layout.addWidget(rm)
+        return chip
+
+    def _remove_attachment(self, att: dict[str, Any]) -> None:
+        # Drop locally, schedule server-side delete.
+        self._pending_attachments = [
+            a for a in self._pending_attachments if a.get("id") != att.get("id")
+        ]
+        self._render_pending_attachments()
+        asyncio.ensure_future(self._delete_attachment(att.get("id", "")))
+
+    async def _delete_attachment(self, attachment_id: str) -> None:
+        if not attachment_id:
+            return
+        try:
+            await self.client.call("attachments.delete", {"id": attachment_id})
+        except Exception:
+            # Worst case it stays in the agent's folder; the cleanup
+            # button on the Limits tab can sweep it later.
+            pass
+
     def _send(self) -> None:
         text = self.input.toPlainText().strip()
         if not text:
             return
+        attachment_ids = [a.get("id") for a in self._pending_attachments if a.get("id")]
         self.input.clear()
         self.send_btn.setEnabled(False)
         # Optimistic: show the user's message immediately.
-        self.transcript.appendPlainText(f"You:\n{text}\n")
-        asyncio.ensure_future(self._send_async(text))
+        att_summary = ""
+        if attachment_ids:
+            names = [a.get("original_name", "?") for a in self._pending_attachments]
+            att_summary = f"\n[attached: {', '.join(names)}]"
+        self.transcript.appendPlainText(f"You:\n{text}{att_summary}\n")
+        # Clear the chip row — these are bound to the just-sent turn now.
+        self._pending_attachments = []
+        self._render_pending_attachments()
+        asyncio.ensure_future(self._send_async(text, attachment_ids))
 
-    async def _send_async(self, message: str) -> None:
+    async def _send_async(self, message: str, attachment_ids: list[str]) -> None:
         try:
             res = await self.client.call(
                 "agents.send",
-                {"agent_id": self.agent["id"], "message": message},
+                {
+                    "agent_id": self.agent["id"],
+                    "message": message,
+                    "attachment_ids": attachment_ids,
+                },
             )
         except Exception as exc:
             self.transcript.appendPlainText(f"Error:\n{exc}\n")

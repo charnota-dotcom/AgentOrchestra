@@ -45,6 +45,8 @@ from apps.service.store.events import EventStore
 from apps.service.templates.engine import render
 from apps.service.types import (
     Agent,
+    Attachment,
+    AttachmentKind,
     Event,
     EventKind,
     EventSource,
@@ -80,7 +82,9 @@ def _render_transcript(agent: Agent) -> str:
     return "\n\n".join(parts)
 
 
-def _render_references(refs: list[Agent]) -> str:
+def _render_references(
+    refs: list[Agent], ref_attachments: dict[str, list[Attachment]] | None = None
+) -> str:
     """Format referenced agents' transcripts as a context preamble.
 
     Each reference is wrapped in clearly-delimited markers so the
@@ -88,6 +92,14 @@ def _render_references(refs: list[Agent]) -> str:
     conversation begins.  Cross-provider safe: works the same whether
     Claude is reading a Gemini transcript or vice versa, since both
     just see plain text.
+
+    ``ref_attachments`` is an optional ``{agent_id: [Attachment]}``
+    map; spreadsheet attachments on a referenced agent get folded in
+    as inlined markdown tables so the receiving agent can reason
+    about the file contents.  Image attachments are noted by name
+    only — the receiving model can't actually see them via the text
+    preamble (they need to be re-attached if the operator wants the
+    new agent to view them).
     """
     if not refs:
         return ""
@@ -97,10 +109,25 @@ def _render_references(refs: list[Agent]) -> str:
             f"{('User' if m.get('role') == 'user' else 'Assistant')}: {m.get('content', '')}"
             for m in ref.transcript
         )
+        atts = (ref_attachments or {}).get(ref.id, [])
+        att_block = ""
+        if atts:
+            sections: list[str] = []
+            for a in atts:
+                if a.kind == AttachmentKind.SPREADSHEET and a.rendered_text:
+                    sections.append(
+                        f"[attachment: {a.original_name}]\n{a.rendered_text}"
+                    )
+                else:
+                    sections.append(
+                        f"[attachment: {a.original_name} ({a.kind.value}, {a.bytes} bytes) — "
+                        f"not inlined; re-attach if needed]"
+                    )
+            att_block = "\n\nAttached files:\n" + "\n\n".join(sections)
         blocks.append(
             f"--- Reference: {ref.name}  "
             f"({ref.provider} {ref.model}, {len(ref.transcript)} turns) ---\n"
-            f"{body}\n"
+            f"{body}{att_block}\n"
             f"--- End reference: {ref.name} ---"
         )
     return (
@@ -109,6 +136,26 @@ def _render_references(refs: list[Agent]) -> str:
         + "\n\n=== End context ===\n\n"
         "(The references above are read-only context.  Continue the "
         "conversation below using them as background.)"
+    )
+
+
+def _inline_spreadsheet_attachments(prompt: str, attachments: list[Attachment]) -> str:
+    """Append rendered-text views of spreadsheet attachments to the
+    prompt.  Images are deliberately *not* inlined here — their bytes
+    are passed through ``ChatSession.send(attachments=...)`` so the
+    CLI can hand the actual file to the model.
+    """
+    sheets = [a for a in attachments if a.kind == AttachmentKind.SPREADSHEET and a.rendered_text]
+    if not sheets:
+        return prompt
+    blocks = [
+        f"[attachment: {a.original_name}]\n{a.rendered_text}" for a in sheets
+    ]
+    return (
+        prompt
+        + "\n\n=== Attached spreadsheets ===\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n=== End attachments ==="
     )
 
 
@@ -130,11 +177,15 @@ class Handlers:
         manager: WorktreeManager,
         dispatcher: RunDispatcher,
         flow_executor: FlowExecutor | None = None,
+        data_dir: Path | None = None,
     ) -> None:
         self.store = store
         self.manager = manager
         self.dispatcher = dispatcher
         self.flow_executor = flow_executor or FlowExecutor(store)
+        self.data_dir = data_dir or _data_dir()
+        self.attachments_dir = self.data_dir / "attachments"
+        self.attachments_dir.mkdir(parents=True, exist_ok=True)
         # Per-agent serialisation: two concurrent agents.send for the
         # same agent_id used to fetch v1, both append, and the later
         # writer would overwrite the earlier turn (lost-update).  Each
@@ -608,18 +659,38 @@ class Handlers:
         """Append the user's message to the agent's transcript and
         get a reply.  Multi-turn — every turn after the first builds
         on the prior transcript.
+
+        Optional ``attachment_ids`` selects previously-uploaded files
+        to attach to this turn; spreadsheets get inlined as markdown
+        tables and images get passed through to the CLI as path refs
+        (handled inside each provider).
         """
         from apps.service.providers.registry import get_provider
 
         agent_id = params["agent_id"]
         message = params["message"]
+        attachment_ids = list(params.get("attachment_ids") or [])
         # Serialise sends per agent — without this lock two concurrent
         # turns lose one user/assistant pair (last writer wins).
         async with await self._lock_for_agent(agent_id):
             agent = await self.store.get_agent(agent_id)
             if not agent:
                 raise ValueError(f"unknown agent: {agent_id}")
+            new_turn_index = len(agent.transcript)
             agent.transcript.append({"role": "user", "content": message})
+
+            # Resolve any attachments the operator picked for this turn.
+            attachments: list[Attachment] = []
+            if attachment_ids:
+                attachments = await self.store.get_attachments_by_ids(attachment_ids)
+                # Reject foreign attachments — every id must belong to
+                # this agent so we can't be tricked into reading another
+                # agent's files.
+                for a in attachments:
+                    if a.agent_id != agent_id:
+                        raise ValueError(
+                            f"attachment {a.id} belongs to a different agent"
+                        )
 
             # Fold transcript + system into a single prompt for the CLI
             # adapter (which doesn't accept structured messages in
@@ -631,11 +702,13 @@ class Handlers:
             # provider safe: Gemini reading a Claude transcript or vice
             # versa just sees plain text, so no special-casing.
             refs: list[Agent] = []
+            ref_attachments: dict[str, list[Attachment]] = {}
             for ref_id in agent.reference_agent_ids or []:
                 ref = await self.store.get_agent(ref_id)
                 if ref is not None:
                     refs.append(ref)
-            reference_block = _render_references(refs)
+                    ref_attachments[ref.id] = await self.store.list_attachments(ref.id)
+            reference_block = _render_references(refs, ref_attachments)
             prompt = _render_transcript(agent)
             if reference_block:
                 prompt = reference_block + "\n\n" + prompt
@@ -664,8 +737,17 @@ class Handlers:
             )
             session = await provider.open_chat(card, system=agent.system or None)
             chunks: list[str] = []
+            # Fold spreadsheet attachments into the prompt body (the CLI
+            # adapter has no path concept for tabular data); images
+            # remain as Attachment objects passed via send(...).
+            prompt_with_sheets = _inline_spreadsheet_attachments(prompt, attachments)
+            image_attachments = [
+                a for a in attachments if a.kind == AttachmentKind.IMAGE
+            ]
             try:
-                async for ev in session.send(prompt):
+                async for ev in session.send(
+                    prompt_with_sheets, attachments=image_attachments
+                ):
                     if ev.kind == "text_delta":
                         chunks.append(ev.text)
                     elif ev.kind == "error":
@@ -677,6 +759,10 @@ class Handlers:
             reply = "".join(chunks)
             agent.transcript.append({"role": "assistant", "content": reply})
             await self.store.update_agent(agent)
+            # Bind each attachment to the user-turn we just appended so
+            # the GUI can show "this turn had X attached".
+            for a in attachments:
+                await self.store.update_attachment_turn(a.id, new_turn_index)
             # Record the send for the in-app message-tally counter so the
             # Limits tab can show "X / cap" against the published plan
             # caps without having to ask the CLI.
@@ -747,6 +833,122 @@ class Handlers:
             {"key": key, "label": label, "instruction": body}
             for key, (label, body) in FOLLOWUP_PRESETS.items()
         ]
+
+    # ------------------------------------------------------------------
+    # Attachments — file uploads bound to an Agent
+    # ------------------------------------------------------------------
+
+    async def attachments_upload(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Persist an uploaded file, render it (markdown table for
+        spreadsheets, optional resize for images) and index a row.
+
+        Params:
+            agent_id:      target agent (must already exist)
+            original_name: filename the user chose
+            content_b64:   base64-encoded bytes
+        """
+        import base64
+        import tempfile
+
+        from apps.service.attachments import (
+            AttachmentRenderError,
+            classify_kind,
+            render_attachment,
+            sanitize_filename,
+        )
+
+        agent_id = params["agent_id"]
+        agent = await self.store.get_agent(agent_id)
+        if not agent:
+            raise ValueError(f"unknown agent: {agent_id}")
+
+        original_name = str(params.get("original_name") or "upload")
+        try:
+            raw = base64.b64decode(params["content_b64"], validate=True)
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"content_b64 missing or not valid base64: {exc}") from exc
+        if not raw:
+            raise ValueError("attachment is empty")
+
+        # Decide kind from extension; reject unknown types up front so
+        # the operator gets a useful error.
+        kind = classify_kind(Path(original_name))
+        if not kind:
+            raise ValueError(
+                f"unsupported file type {Path(original_name).suffix!r}; "
+                "supported: images (.png/.jpg/.gif/.webp) and spreadsheets (.xlsx/.xls/.csv)"
+            )
+
+        attachment_id = long_id()
+        agent_dir = self.attachments_dir / agent_id
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = sanitize_filename(original_name)
+        stored_path = agent_dir / f"{attachment_id}__{safe_name}"
+
+        # Render goes via a temp file so we get a uniform read-from-Path
+        # API even though the caller hands us bytes.  Cleanup is by
+        # context.
+        with tempfile.NamedTemporaryFile(
+            "wb", delete=False, suffix=Path(safe_name).suffix
+        ) as tmp:
+            tmp.write(raw)
+            tmp_path = Path(tmp.name)
+        render_warning: str | None = None
+        try:
+            try:
+                result = render_attachment(tmp_path, dest=stored_path, kind=kind)
+            except AttachmentRenderError as exc:
+                # Render failed but we still want the bytes available so
+                # the operator can retry with another tool.  Persist raw
+                # and surface a warning in the response.
+                stored_path.write_bytes(raw)
+                render_warning = str(exc)
+                from apps.service.attachments.render import RenderResult
+
+                result = RenderResult(
+                    rendered_text=None,
+                    mime_type="application/octet-stream",
+                    bytes_written=len(raw),
+                )
+        finally:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+        attachment = Attachment(
+            id=attachment_id,
+            agent_id=agent_id,
+            kind=AttachmentKind(kind),
+            original_name=original_name,
+            stored_path=str(stored_path),
+            mime_type=result.mime_type,
+            bytes=result.bytes_written,
+            rendered_text=result.rendered_text,
+        )
+        await self.store.insert_attachment(attachment)
+        out = attachment.model_dump(mode="json")
+        if render_warning:
+            out["warning"] = render_warning
+        return out
+
+    async def attachments_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        agent_id = params["agent_id"]
+        rows = await self.store.list_attachments(agent_id)
+        return [a.model_dump(mode="json") for a in rows]
+
+    async def attachments_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        attachment_id = params["id"]
+        attachment = await self.store.delete_attachment(attachment_id)
+        if attachment is None:
+            return {"deleted": False}
+        # Best-effort filesystem cleanup; missing file is fine (operator
+        # may have wiped the data dir).
+        try:
+            Path(attachment.stored_path).unlink()
+        except OSError:
+            log.debug("attachment file already gone: %s", attachment.stored_path)
+        return {"deleted": True}
 
     async def limits_check(self, params: dict[str, Any]) -> dict[str, Any]:
         """Probe every locally-installed CLI for whatever subscription
@@ -973,6 +1175,9 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("agents.set_references", h.agents_set_references)
     server.register("agents.delete", h.agents_delete)
     server.register("agents.followup_presets", h.agents_followup_presets)
+    server.register("attachments.upload", h.attachments_upload)
+    server.register("attachments.list", h.attachments_list)
+    server.register("attachments.delete", h.attachments_delete)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
     server.register("limits.check", h.limits_check)
@@ -1012,7 +1217,7 @@ async def serve(args: argparse.Namespace) -> int:
 
     manager = WorktreeManager(store)
     dispatcher = RunDispatcher(store, manager, bus)
-    handlers = Handlers(store, manager, dispatcher)
+    handlers = Handlers(store, manager, dispatcher, data_dir=data_dir)
 
     watcher = JSONLWatcher(store)
     await watcher.start()

@@ -28,7 +28,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from apps.service.providers.protocol import ChatSession, StreamEvent
-from apps.service.types import PersonalityCard, ProviderError, utc_now
+from apps.service.types import Attachment, PersonalityCard, ProviderError, utc_now
 
 log = logging.getLogger(__name__)
 
@@ -85,10 +85,27 @@ class GeminiCLIChatSession(ChatSession):
                 "(https://github.com/google-gemini/gemini-cli)"
             )
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
-        self._history.append({"role": "user", "content": message})
+    async def send(
+        self,
+        message: str,
+        *,
+        attachments: list[Attachment] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        # Image attachments: reference each path inline with the @-syntax
+        # the CLI accepts, plus pass --include-files so the bytes are
+        # available to the model.  Spreadsheets are inlined upstream
+        # (rendered_text in the prompt body), not via this path.
+        att_prefix = ""
+        include_args: list[str] = []
+        if attachments:
+            paths = [a.stored_path for a in attachments]
+            att_prefix = " ".join(f"@{p}" for p in paths)
+            for p in paths:
+                include_args.extend(["--include-files", p])
+        full_message = f"{att_prefix} {message}".strip() if att_prefix else message
+        self._history.append({"role": "user", "content": full_message})
         prompt = self._render_prompt()
-        args: list[str] = [self._binary, "-p", prompt]
+        args: list[str] = [self._binary, "-p", prompt, *include_args]
         model = _resolve_model(self.card.model)
         if model:
             args.extend(["--model", model])

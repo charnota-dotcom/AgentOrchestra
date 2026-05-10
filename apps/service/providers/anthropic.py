@@ -72,7 +72,11 @@ class AnthropicChatSession(ChatSession):
             else self._sdk
         )
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
+    async def send(self, message: str, *, attachments: Any = None) -> AsyncIterator[StreamEvent]:
+        # Attachments aren't wired through the API path yet (V1 covers
+        # the CLI providers).  Accept the kwarg so the protocol stays
+        # uniform, but quietly ignore it.
+        del attachments
         self._history.append({"role": "user", "content": message})
         kwargs = {
             "model": self.card.model,

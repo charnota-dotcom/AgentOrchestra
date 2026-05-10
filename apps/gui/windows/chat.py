@@ -13,12 +13,22 @@ message to ``sonnet 4.6`` with hard thinking can skip every gate.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+import base64
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtGui, QtWidgets
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
+
+
+_ATTACHMENT_FILTER = (
+    "Supported files (*.png *.jpg *.jpeg *.gif *.webp *.xlsx *.xls *.csv);;"
+    "Images (*.png *.jpg *.jpeg *.gif *.webp);;"
+    "Spreadsheets (*.xlsx *.xls *.csv);;"
+    "All files (*)"
+)
 
 
 # Model presets — every option goes through a local CLI (Claude Code
@@ -228,8 +238,32 @@ class ChatPage(QtWidgets.QWidget):
         )
         layout.addWidget(self.transcript, stretch=1)
 
-        # Bottom: message input + send button.
+        # Pending attachments — files the user picked but hasn't sent.
+        self._pending_attachments: list[dict[str, Any]] = []
+        self.attachments_row = QtWidgets.QHBoxLayout()
+        self.attachments_row.setSpacing(6)
+        self.attachments_row.addStretch(1)
+        self._attachments_wrap = QtWidgets.QWidget()
+        self._attachments_wrap.setLayout(self.attachments_row)
+        self._attachments_wrap.setVisible(False)
+        layout.addWidget(self._attachments_wrap)
+
+        # Bottom: paperclip + message input + send button.
         bottom = QtWidgets.QHBoxLayout()
+        self.attach_btn = QtWidgets.QPushButton("📎")
+        self.attach_btn.setToolTip(
+            "Attach an image (.png/.jpg/.gif/.webp) or a spreadsheet "
+            "(.xlsx/.xls/.csv) to the next message.  Spreadsheets are "
+            "rendered as a markdown table; images pass through to the CLI."
+        )
+        self.attach_btn.setStyleSheet(
+            "QPushButton{padding:10px 12px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:14px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        self.attach_btn.clicked.connect(self._attach_file)  # type: ignore[arg-type]
+        bottom.addWidget(self.attach_btn)
+
         self.message_input = QtWidgets.QPlainTextEdit()
         self.message_input.setPlaceholderText("Type your message.  Ctrl+Enter to send.")
         self.message_input.setFixedHeight(110)
@@ -284,12 +318,123 @@ class ChatPage(QtWidgets.QWidget):
     # Send
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Attachments
+    # ------------------------------------------------------------------
+
+    def _attach_file(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Attach a file to this conversation",
+            "",
+            _ATTACHMENT_FILTER,
+        )
+        if not path:
+            return
+        # We don't upload yet — the agent might not exist (first
+        # message of a session creates it).  Cache the local path and
+        # render a chip; the actual upload happens at send time.
+        p = Path(path)
+        try:
+            size = p.stat().st_size
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't read file", str(exc))
+            return
+        kind = "image" if p.suffix.lower() in {
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+        } else "spreadsheet"
+        self._pending_attachments.append(
+            {"local_path": str(p), "original_name": p.name, "kind": kind, "bytes": size}
+        )
+        self._render_pending_attachments()
+
+    def _render_pending_attachments(self) -> None:
+        while self.attachments_row.count() > 1:
+            item = self.attachments_row.takeAt(0)
+            w = item.widget() if item else None
+            if w is not None:
+                w.deleteLater()
+        for att in self._pending_attachments:
+            chip = self._build_chip(att)
+            self.attachments_row.insertWidget(self.attachments_row.count() - 1, chip)
+        self._attachments_wrap.setVisible(bool(self._pending_attachments))
+
+    def _build_chip(self, att: dict[str, Any]) -> QtWidgets.QWidget:
+        chip = QtWidgets.QFrame()
+        chip.setStyleSheet(
+            "QFrame{background:#eef4ff;border:1px solid #c8d6f0;border-radius:10px;}"
+            "QLabel{color:#1f3a6a;font-size:11px;}"
+            "QPushButton{border:none;color:#5b6068;background:transparent;font-size:14px;}"
+            "QPushButton:hover{color:#c0392b;}"
+        )
+        h = QtWidgets.QHBoxLayout(chip)
+        h.setContentsMargins(8, 2, 4, 2)
+        h.setSpacing(4)
+        icon = "🖼" if att.get("kind") == "image" else "📊"
+        kb = max(1, int(att.get("bytes", 0)) // 1024)
+        h.addWidget(QtWidgets.QLabel(f"{icon} {att.get('original_name', '?')} · {kb} KB"))
+        rm = QtWidgets.QPushButton("✕")
+        rm.setFixedSize(18, 18)
+        rm.clicked.connect(lambda _=False, a=att: self._remove_attachment(a))  # type: ignore[arg-type]
+        h.addWidget(rm)
+        return chip
+
+    def _remove_attachment(self, att: dict[str, Any]) -> None:
+        self._pending_attachments = [
+            a for a in self._pending_attachments if a is not att
+        ]
+        self._render_pending_attachments()
+        # If the attachment was already uploaded server-side, delete it.
+        if att.get("id"):
+            asyncio.ensure_future(
+                self.client.call("attachments.delete", {"id": att["id"]})
+            )
+
+    async def _upload_pending_for_agent(self, agent_id: str) -> list[str]:
+        """Upload every cached local file and return the resulting
+        attachment ids in order.  Files that fail to upload are
+        skipped with a chat-side warning.
+        """
+        ids: list[str] = []
+        for att in list(self._pending_attachments):
+            if att.get("id"):
+                ids.append(att["id"])
+                continue
+            local = att.get("local_path", "")
+            try:
+                data = Path(local).read_bytes()
+            except OSError as exc:
+                self._append("Warning", f"could not read {local}: {exc}")
+                continue
+            try:
+                res = await self.client.call(
+                    "attachments.upload",
+                    {
+                        "agent_id": agent_id,
+                        "original_name": att.get("original_name", "upload"),
+                        "content_b64": base64.b64encode(data).decode("ascii"),
+                    },
+                )
+            except Exception as exc:
+                self._append("Warning", f"upload failed for {att.get('original_name')}: {exc}")
+                continue
+            att["id"] = res.get("id")
+            if res.get("warning"):
+                self._append("Warning", f"{att.get('original_name')}: {res['warning']}")
+            if att["id"]:
+                ids.append(att["id"])
+        return ids
+
     def _send(self) -> None:
         text = self.message_input.toPlainText().strip()
         if not text:
             return
         self._history.append({"role": "user", "content": text})
-        self._append("You", text)
+        if self._pending_attachments:
+            names = ", ".join(a.get("original_name", "?") for a in self._pending_attachments)
+            self._append("You", f"{text}\n[attached: {names}]")
+        else:
+            self._append("You", text)
         self.message_input.clear()
         self.send_btn.setEnabled(False)
         asyncio.ensure_future(self._send_async(text))
@@ -331,34 +476,27 @@ class ChatPage(QtWidgets.QWidget):
                 self._append("Error", f"could not create agent: {exc}")
                 self.send_btn.setEnabled(True)
                 return
-            try:
-                res = await self.client.call(
-                    "agents.send",
-                    {"agent_id": self._agent_id, "message": message},
-                )
-                reply = res.get("reply", "")
-            except Exception as exc:
-                self._append("Error", str(exc))
-                self.send_btn.setEnabled(True)
-                return
-            self._history.append({"role": "assistant", "content": reply})
-            self._append(_label_for(provider, model), reply or "(empty reply)")
-            self.send_btn.setEnabled(True)
-            return
 
-        # Subsequent messages: just extend the existing agent's
-        # transcript.  agents.send already folds the full prior
-        # transcript into the prompt server-side.
+        # Upload any pending attachments now that we have an agent.
+        attachment_ids = await self._upload_pending_for_agent(self._agent_id)
+
         try:
             res = await self.client.call(
                 "agents.send",
-                {"agent_id": self._agent_id, "message": message},
+                {
+                    "agent_id": self._agent_id,
+                    "message": message,
+                    "attachment_ids": attachment_ids,
+                },
             )
             reply = res.get("reply", "")
         except Exception as exc:
             self._append("Error", str(exc))
             self.send_btn.setEnabled(True)
             return
+        # Clear the chip row — these are bound to the just-sent turn.
+        self._pending_attachments = []
+        self._render_pending_attachments()
         self._history.append({"role": "assistant", "content": reply})
         self._append(_label_for(provider, model), reply or "(empty reply)")
         self.send_btn.setEnabled(True)

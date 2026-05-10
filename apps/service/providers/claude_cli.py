@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from apps.service.providers.protocol import ChatSession, StreamEvent
-from apps.service.types import PersonalityCard, ProviderError, utc_now
+from apps.service.types import Attachment, PersonalityCard, ProviderError, utc_now
 
 log = logging.getLogger(__name__)
 
@@ -79,8 +79,22 @@ class ClaudeCLIChatSession(ChatSession):
                 "(https://docs.claude.com/en/docs/claude-code)"
             )
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
-        self._history.append({"role": "user", "content": message})
+    async def send(
+        self,
+        message: str,
+        *,
+        attachments: list[Attachment] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        # Image attachments: prepend `@<absolute_path>` references the
+        # CLI understands so the model "sees" the file.  Non-image
+        # attachments are dropped here — the orchestrator inlines
+        # spreadsheet text into the prompt before calling us.
+        att_prefix = ""
+        if attachments:
+            paths = [a.stored_path for a in attachments]
+            att_prefix = " ".join(f"@{p}" for p in paths)
+        full_message = f"{att_prefix} {message}".strip() if att_prefix else message
+        self._history.append({"role": "user", "content": full_message})
         prompt = self._render_prompt()
         args = [
             self._binary,

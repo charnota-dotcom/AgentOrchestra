@@ -19,7 +19,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from apps.service.types import PersonalityCard
+from apps.service.types import Attachment, PersonalityCard
 
 if TYPE_CHECKING:
     from apps.service.dispatch.tools import ToolExecutor
@@ -55,8 +55,19 @@ class StreamEvent:
 class ChatSession(Protocol):
     """A multi-turn conversation with one provider/model."""
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
-        """Send a user message and stream back events."""
+    async def send(
+        self,
+        message: str,
+        *,
+        attachments: list[Attachment] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Send a user message and stream back events.
+
+        ``attachments`` are typed file references (typically images);
+        the adapter is responsible for handing the underlying file to
+        its CLI / API in whatever shape the vendor expects.  Providers
+        that don't support attachments may ignore the kwarg.
+        """
         ...
 
     async def close(self) -> None: ...

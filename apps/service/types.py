@@ -516,6 +516,31 @@ class ProviderError(Exception):
     pass
 
 
+class AttachmentKind(StrEnum):
+    IMAGE = "image"
+    SPREADSHEET = "spreadsheet"
+
+
+class Attachment(BaseModel):
+    """A file the operator dropped into a chat or agent dialog.
+
+    Stored on disk; the row indexes the location plus a cached
+    rendered-text view (for spreadsheets — markdown table).  Images
+    pass straight through to the CLI as a path reference.
+    """
+
+    id: str = Field(default_factory=long_id)
+    agent_id: str
+    turn_index: int = -1  # -1 = not yet attached to a turn (just uploaded)
+    kind: AttachmentKind
+    original_name: str
+    stored_path: str
+    mime_type: str
+    bytes: int
+    rendered_text: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

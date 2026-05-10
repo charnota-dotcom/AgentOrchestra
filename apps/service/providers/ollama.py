@@ -44,7 +44,10 @@ class OllamaChatSession(ChatSession):
             timeout=httpx.Timeout(120.0, connect=5.0),
         )
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
+    async def send(self, message: str, *, attachments: Any = None) -> AsyncIterator[StreamEvent]:
+        # Attachments aren't wired through Ollama in V1; accept kwarg
+        # for protocol uniformity and ignore.
+        del attachments
         self._history.append({"role": "user", "content": message})
         body = {
             "model": self.card.model,

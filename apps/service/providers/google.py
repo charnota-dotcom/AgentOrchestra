@@ -64,7 +64,10 @@ class GeminiChatSession(ChatSession):
             config["system_instruction"] = self.system
         self._chat = self._client.chats.create(model=card.model, config=config or None)
 
-    async def send(self, message: str) -> AsyncIterator[StreamEvent]:
+    async def send(self, message: str, *, attachments: Any = None) -> AsyncIterator[StreamEvent]:
+        # Attachments aren't wired through this provider in V1; accept
+        # the kwarg for protocol uniformity and ignore it.
+        del attachments
         if isinstance(self._sdk, _MissingDependency):
             yield StreamEvent(kind="error", text="google-genai SDK not installed")
             return

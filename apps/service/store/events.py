@@ -27,6 +27,8 @@ from apps.service.types import (
     Agent,
     Approval,
     Artifact,
+    Attachment,
+    AttachmentKind,
     Branch,
     BranchState,
     Event,
@@ -849,6 +851,93 @@ class EventStore:
             )
             await self.db.commit()
         return o
+
+    # ------------------------------------------------------------------
+    # Attachments — files (images, spreadsheets) the operator drops
+    # into a chat or agent dialog.
+    # ------------------------------------------------------------------
+
+    async def insert_attachment(self, a: Attachment) -> Attachment:
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO attachments (
+                    id, agent_id, turn_index, kind, original_name,
+                    stored_path, mime_type, bytes, rendered_text, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    a.id,
+                    a.agent_id,
+                    a.turn_index,
+                    a.kind.value,
+                    a.original_name,
+                    a.stored_path,
+                    a.mime_type,
+                    a.bytes,
+                    a.rendered_text,
+                    a.created_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
+        return a
+
+    @staticmethod
+    def _hydrate_attachment(row: aiosqlite.Row) -> Attachment:
+        d = dict(row)
+        d["kind"] = AttachmentKind(d["kind"])
+        return Attachment.model_validate(d)
+
+    async def get_attachment(self, attachment_id: str) -> Attachment | None:
+        cur = await self.db.execute(
+            "SELECT * FROM attachments WHERE id = ?", (attachment_id,)
+        )
+        row = await cur.fetchone()
+        return self._hydrate_attachment(row) if row else None
+
+    async def list_attachments(self, agent_id: str) -> list[Attachment]:
+        cur = await self.db.execute(
+            "SELECT * FROM attachments WHERE agent_id = ? ORDER BY created_at",
+            (agent_id,),
+        )
+        rows = await cur.fetchall()
+        return [self._hydrate_attachment(r) for r in rows]
+
+    async def get_attachments_by_ids(self, ids: list[str]) -> list[Attachment]:
+        if not ids:
+            return []
+        qmarks = ",".join("?" for _ in ids)
+        cur = await self.db.execute(
+            f"SELECT * FROM attachments WHERE id IN ({qmarks})", ids
+        )
+        rows = await cur.fetchall()
+        # Preserve the caller's order so the prompt assembly matches
+        # what the operator selected.
+        by_id = {r["id"]: self._hydrate_attachment(r) for r in rows}
+        return [by_id[i] for i in ids if i in by_id]
+
+    async def delete_attachment(self, attachment_id: str) -> Attachment | None:
+        async with self._lock:
+            cur = await self.db.execute(
+                "SELECT * FROM attachments WHERE id = ?", (attachment_id,)
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+            attachment = self._hydrate_attachment(row)
+            await self.db.execute(
+                "DELETE FROM attachments WHERE id = ?", (attachment_id,)
+            )
+            await self.db.commit()
+        return attachment
+
+    async def update_attachment_turn(self, attachment_id: str, turn_index: int) -> None:
+        async with self._lock:
+            await self.db.execute(
+                "UPDATE attachments SET turn_index = ? WHERE id = ?",
+                (turn_index, attachment_id),
+            )
+            await self.db.commit()
 
     # ------------------------------------------------------------------
     # Convenience helpers

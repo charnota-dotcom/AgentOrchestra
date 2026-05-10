@@ -278,3 +278,25 @@ CREATE TABLE IF NOT EXISTS provider_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_provider_messages_at ON provider_messages(provider, sent_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Attachments: files (images, spreadsheets) the operator drops into a
+-- chat or agent dialog.  Stored on disk under
+-- <data_dir>/attachments/<agent_id>/<id>__<sanitized_filename>; this
+-- row indexes them and caches the rendered-text representation for
+-- spreadsheets so we don't reparse on every send.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS attachments (
+    id              TEXT PRIMARY KEY,
+    agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    turn_index      INTEGER NOT NULL DEFAULT -1,
+    kind            TEXT NOT NULL,            -- 'image' | 'spreadsheet'
+    original_name   TEXT NOT NULL,
+    stored_path     TEXT NOT NULL,
+    mime_type       TEXT NOT NULL,
+    bytes           INTEGER NOT NULL,
+    rendered_text   TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_agent ON attachments(agent_id, created_at DESC);
