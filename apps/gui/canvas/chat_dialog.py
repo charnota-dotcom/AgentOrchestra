@@ -65,6 +65,31 @@ class AgentChatDialog(QtWidgets.QDialog):
         origin.setStyleSheet("color:#5b6068;font-size:11px;")
         v.addWidget(origin)
 
+        # Workspace banner — visible repo binding so the operator
+        # always sees what files this agent can read / edit.
+        ws_row = QtWidgets.QHBoxLayout()
+        self.workspace_label = QtWidgets.QLabel(self._format_workspace_label(agent))
+        self.workspace_label.setStyleSheet(
+            "color:#1f7a3f;font-size:11px;background:#e9f8ee;"
+            "border:1px solid #c7e8d3;border-radius:4px;padding:4px 8px;"
+        )
+        self.workspace_label.setWordWrap(True)
+        ws_row.addWidget(self.workspace_label, stretch=1)
+        change_repo_btn = QtWidgets.QPushButton("Change repo")
+        change_repo_btn.setStyleSheet(
+            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        change_repo_btn.setToolTip(
+            "Bind / unbind this conversation to a project repo.  When "
+            "bound, the CLI runs inside that directory and can read, "
+            "search, and edit files using its built-in tools."
+        )
+        change_repo_btn.clicked.connect(self._change_workspace)  # type: ignore[arg-type]
+        ws_row.addWidget(change_repo_btn)
+        v.addLayout(ws_row)
+
         # References — read-only summary + "Edit" button.  Each
         # referenced agent's full transcript is inlined as context
         # on every send so this Claude / Gemini knows what those
@@ -350,6 +375,135 @@ class AgentChatDialog(QtWidgets.QDialog):
         self._pending_attachments = []
         self._render_pending_attachments()
         asyncio.ensure_future(self._send_async(text, attachment_ids))
+
+    @staticmethod
+    def _format_workspace_label(agent: dict[str, Any]) -> str:
+        ws_id = agent.get("workspace_id")
+        ws_name = agent.get("workspace_name") or ""
+        ws_path = agent.get("workspace_path") or ""
+        if not ws_id:
+            return "📂 No repo bound — chat-only conversation"
+        if ws_name and ws_path:
+            return f"📂 Working in: <b>{ws_name}</b> ({ws_path})"
+        if ws_path:
+            return f"📂 Working in: {ws_path}"
+        return "📂 Repo bound (id only — refresh to load details)"
+
+    def _change_workspace(self) -> None:
+        asyncio.ensure_future(self._open_workspace_dialog())
+
+    async def _open_workspace_dialog(self) -> None:
+        try:
+            workspaces = await self.client.call("workspaces.list", {})
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't load workspaces", str(exc))
+            return
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f"Repo for {self.agent.get('name', '?')}")
+        dlg.resize(520, 300)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(
+            QtWidgets.QLabel(
+                "When a repo is selected, the CLI runs with cwd set to "
+                "that directory.  The model can then use its built-in "
+                "Read / Bash / Edit / Grep tools against the project."
+            )
+        )
+        v.itemAt(0).widget().setWordWrap(True)  # type: ignore[union-attr]
+        v.itemAt(0).widget().setStyleSheet("color:#5b6068;font-size:11px;")  # type: ignore[union-attr]
+
+        listw = QtWidgets.QListWidget()
+        listw.setStyleSheet(
+            "QListWidget{background:#fff;border:1px solid #e6e7eb;border-radius:4px;}"
+            "QListWidget::item{padding:6px 8px;border-bottom:1px solid #eef0f3;}"
+        )
+        none_item = QtWidgets.QListWidgetItem("(no repo — chat-only)")
+        none_item.setData(QtCore.Qt.ItemDataRole.UserRole, "")
+        listw.addItem(none_item)
+        for w in workspaces:
+            item = QtWidgets.QListWidgetItem(
+                f"{w.get('name', '?')}  ·  {w.get('repo_path', '?')}"
+            )
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, w.get("id", ""))
+            listw.addItem(item)
+        # Pre-select the current binding.
+        current_id = self.agent.get("workspace_id") or ""
+        for i in range(listw.count()):
+            it = listw.item(i)
+            if it is not None and it.data(QtCore.Qt.ItemDataRole.UserRole) == current_id:
+                listw.setCurrentRow(i)
+                break
+        v.addWidget(listw, stretch=1)
+
+        bottom = QtWidgets.QHBoxLayout()
+        add_btn = QtWidgets.QPushButton("Add new repo…")
+        add_btn.clicked.connect(  # type: ignore[arg-type]
+            lambda: asyncio.ensure_future(self._add_repo_from_dialog(listw))
+        )
+        bottom.addWidget(add_btn)
+        bottom.addStretch(1)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
+        buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
+        bottom.addWidget(buttons)
+        v.addLayout(bottom)
+
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        sel = listw.currentItem()
+        if sel is None:
+            return
+        chosen = str(sel.data(QtCore.Qt.ItemDataRole.UserRole) or "")
+        try:
+            updated = await self.client.call(
+                "agents.set_workspace",
+                {"agent_id": self.agent["id"], "workspace_id": chosen or None},
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't bind repo", str(exc))
+            return
+        # Augment with workspace name + path so the banner can show them.
+        if chosen:
+            for w in workspaces:
+                if w.get("id") == chosen:
+                    updated["workspace_name"] = w.get("name")
+                    updated["workspace_path"] = w.get("repo_path")
+                    break
+        else:
+            updated["workspace_name"] = None
+            updated["workspace_path"] = None
+        self.agent = updated
+        self.workspace_label.setText(self._format_workspace_label(self.agent))
+        self.sent.emit(self.agent)
+
+    async def _add_repo_from_dialog(self, listw: QtWidgets.QListWidget) -> None:
+        from pathlib import Path
+
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Pick the project repo to register",
+            str(Path.home()),
+        )
+        if not path:
+            return
+        try:
+            ws = await self.client.call(
+                "workspaces.register",
+                {"path": path, "name": Path(path).name},
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't register repo", str(exc))
+            return
+        item = QtWidgets.QListWidgetItem(
+            f"{ws.get('name', '?')}  ·  {ws.get('repo_path', '?')}"
+        )
+        item.setData(QtCore.Qt.ItemDataRole.UserRole, ws.get("id", ""))
+        listw.addItem(item)
+        listw.setCurrentItem(item)
 
     async def _send_async(self, message: str, attachment_ids: list[str]) -> None:
         try:

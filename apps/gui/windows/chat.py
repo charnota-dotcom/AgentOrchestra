@@ -228,6 +228,37 @@ class ChatPage(QtWidgets.QWidget):
         skills_row.addWidget(self.skills_input, stretch=1)
         layout.addLayout(skills_row)
 
+        # Workspace picker — when set, the CLI subprocess is spawned
+        # with cwd = repo_path so the model can use its built-in file
+        # tools against the project.  Changing the workspace = new
+        # chat (same constraint as the model picker).
+        ws_row = QtWidgets.QHBoxLayout()
+        ws_label = QtWidgets.QLabel("Repo:")
+        ws_label.setStyleSheet("color:#5b6068;font-size:12px;")
+        ws_row.addWidget(ws_label)
+        self.workspace_combo = QtWidgets.QComboBox()
+        self.workspace_combo.addItem("(no repo — chat only)", "")
+        self.workspace_combo.setToolTip(
+            "When a repo is selected, the agent runs inside that "
+            "directory and can read / search / edit files using the "
+            "CLI's built-in tools."
+        )
+        self.workspace_combo.currentIndexChanged.connect(  # type: ignore[arg-type]
+            lambda _i: self._new_chat()
+        )
+        ws_row.addWidget(self.workspace_combo, stretch=1)
+        add_repo_btn = QtWidgets.QPushButton("Add repo…")
+        add_repo_btn.setStyleSheet(
+            "QPushButton{padding:5px 10px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        add_repo_btn.clicked.connect(self._add_repo)  # type: ignore[arg-type]
+        ws_row.addWidget(add_repo_btn)
+        layout.addLayout(ws_row)
+        # Populate after construction so we don't block the UI.
+        asyncio.ensure_future(self._reload_workspaces())
+
         # Transcript above, input below.
         self.transcript = QtWidgets.QPlainTextEdit()
         self.transcript.setReadOnly(True)
@@ -461,6 +492,7 @@ class ChatPage(QtWidgets.QWidget):
         # in one place.  Auto-name = first ~40 chars of the user's
         # opening message so the palette is browsable.
         if self._agent_id is None:
+            ws_id = self.workspace_combo.currentData() or None
             try:
                 created = await self.client.call(
                     "agents.create",
@@ -469,6 +501,7 @@ class ChatPage(QtWidgets.QWidget):
                         "provider": provider,
                         "model": model,
                         "system": system,
+                        "workspace_id": ws_id,
                     },
                 )
                 self._agent_id = created["id"]
@@ -510,6 +543,52 @@ class ChatPage(QtWidgets.QWidget):
         self._history.clear()
         self.transcript.clear()
         self.message_input.clear()
+
+    # ------------------------------------------------------------------
+    # Workspaces (project repos)
+    # ------------------------------------------------------------------
+
+    async def _reload_workspaces(self, *, select_id: str | None = None) -> None:
+        try:
+            rows = await self.client.call("workspaces.list", {})
+        except Exception:
+            return
+        prev = select_id or (self.workspace_combo.currentData() or "")
+        self.workspace_combo.blockSignals(True)
+        self.workspace_combo.clear()
+        self.workspace_combo.addItem("(no repo — chat only)", "")
+        for w in rows:
+            label = f"{w.get('name', '?')} — {w.get('repo_path', '?')}"
+            self.workspace_combo.addItem(label, w.get("id", ""))
+        # Restore prior selection if it still exists.
+        idx = 0
+        for i in range(self.workspace_combo.count()):
+            if self.workspace_combo.itemData(i) == prev:
+                idx = i
+                break
+        self.workspace_combo.setCurrentIndex(idx)
+        self.workspace_combo.blockSignals(False)
+
+    def _add_repo(self) -> None:
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Pick the project repo to give the agent access to",
+            str(Path.home()),
+        )
+        if not path:
+            return
+        asyncio.ensure_future(self._register_repo(Path(path)))
+
+    async def _register_repo(self, path: Path) -> None:
+        try:
+            ws = await self.client.call(
+                "workspaces.register",
+                {"path": str(path), "name": path.name},
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Couldn't register repo", str(exc))
+            return
+        await self._reload_workspaces(select_id=ws.get("id"))
 
     def _save_last_reply(self) -> None:
         """Save the most recent assistant turn to a file.

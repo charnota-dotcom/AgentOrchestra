@@ -68,9 +68,15 @@ class ClaudeCLIChatSession(ChatSession):
 
     name = "claude-cli"
 
-    def __init__(self, card: PersonalityCard, system: str | None = None) -> None:
+    def __init__(
+        self,
+        card: PersonalityCard,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> None:
         self.card = card
         self.system = system or ""
+        self.cwd = cwd  # if set, CLI is spawned with this as its working dir
         self._history: list[dict[str, str]] = []
         self._binary = _claude_binary()
         if not self._binary:
@@ -112,6 +118,7 @@ class ClaudeCLIChatSession(ChatSession):
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=self.cwd,  # repo-aware agents run inside their workspace
             )
         except FileNotFoundError:
             yield StreamEvent(kind="error", text="`claude` binary not found")
@@ -199,10 +206,16 @@ class ClaudeCLIChatSession(ChatSession):
 class ClaudeCLIProvider:
     name: str = "claude-cli"
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+    async def open_chat(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
         if card.provider != "claude-cli":
             raise ProviderError(f"card.provider={card.provider!r} is not claude-cli")
-        return ClaudeCLIChatSession(card, system=system)
+        return ClaudeCLIChatSession(card, system=system, cwd=cwd)
 
     async def run_with_tools(
         self,

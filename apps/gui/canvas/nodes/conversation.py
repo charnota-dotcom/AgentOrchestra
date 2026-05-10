@@ -48,10 +48,16 @@ class ConversationNode(BaseNode):
             "",
         )
         body = (last_assistant or "(no replies yet — double-click to chat)").strip()
+        # Repo binding shows up in the subtitle so an operator can
+        # tell at a glance which agents have file-tool access.
+        ws_name = agent.get("workspace_name") or ""
+        repo_marker = f"  ·  📂 {ws_name}" if (agent.get("workspace_id") and ws_name) else (
+            "  ·  📂 repo" if agent.get("workspace_id") else ""
+        )
         super().__init__(
             node_id=node_id,
             title=str(agent.get("name") or "Agent"),
-            subtitle=f"{agent.get('model', '?')} · {len(transcript)} turns",
+            subtitle=f"{agent.get('model', '?')} · {len(transcript)} turns{repo_marker}",
             body=body,
         )
         self.agent = agent
@@ -69,12 +75,19 @@ class ConversationNode(BaseNode):
             origin = f"Spawned as a follow-up of: {parent}"
         else:
             origin = "Top-level conversation (no parent)."
+        ws_path = agent.get("workspace_path") or ""
+        repo_line = (
+            f"Repo:     {ws_name or 'bound'}{f' ({ws_path})' if ws_path else ''}\n"
+            if agent.get("workspace_id")
+            else "Repo:     none — chat-only\n"
+        )
         self.setToolTip(
             f"{agent.get('name', '?')}\n"
             f"Provider: {agent.get('provider', '?')}\n"
             f"Model:    {agent.get('model', '?')}\n"
-            f"Turns:    {len(transcript)}\n\n"
-            f"{origin}\n\n"
+            f"Turns:    {len(transcript)}\n"
+            f"{repo_line}"
+            f"\n{origin}\n\n"
             "Visibility: this transcript is private to the agent.  "
             "Other agents only see it if they were spawned from it "
             "via the Agents tab's Spawn follow-up flow.\n\n"

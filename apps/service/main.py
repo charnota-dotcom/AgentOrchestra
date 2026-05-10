@@ -218,6 +218,91 @@ class Handlers:
         ok = await self.store.delete_workspace(params["workspace_id"])
         return {"removed": bool(ok)}
 
+    async def workspaces_tree(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Return a flat, gitignore-respecting file listing of a
+        workspace's repo path so the GUI can show operators what
+        an agent bound to this workspace can actually see.
+
+        ``params``:
+          workspace_id: id of the workspace.
+          limit:        max files to return (default 500).
+          query:        optional substring filter.
+
+        Listing is hard-capped to ``limit`` files to keep large repos
+        responsive.  Honours ``.gitignore`` by shelling out to
+        ``git ls-files`` when the path is a git repo; falls back to a
+        bounded recursive walk otherwise.
+        """
+        ws = await self.store.get_workspace(params["workspace_id"])
+        if not ws:
+            raise ValueError(f"unknown workspace: {params['workspace_id']}")
+        limit = max(1, min(int(params.get("limit", 500) or 500), 5000))
+        query = (params.get("query") or "").strip().lower()
+        repo_path = Path(ws.repo_path)
+        if not repo_path.is_dir():
+            raise ValueError(f"workspace path does not exist: {ws.repo_path}")
+        is_git = (repo_path / ".git").exists()
+        files: list[str] = []
+        truncated = False
+        if is_git:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(repo_path),
+                "ls-files",
+                "-co",
+                "--exclude-standard",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_b, _stderr_b = await asyncio.wait_for(
+                    proc.communicate(), timeout=10.0
+                )
+            except TimeoutError:
+                proc.kill()
+                with contextlib.suppress(TimeoutError, ProcessLookupError):
+                    await asyncio.wait_for(proc.communicate(), timeout=2.0)
+                raise ValueError("git ls-files timed out") from None
+            for line in stdout_b.decode("utf-8", errors="replace").splitlines():
+                if not line:
+                    continue
+                if query and query not in line.lower():
+                    continue
+                files.append(line)
+                if len(files) >= limit:
+                    truncated = True
+                    break
+        else:
+            # Plain directory: bounded walk, skip dotdirs, hard cap.
+            seen = 0
+            for sub in repo_path.rglob("*"):
+                if not sub.is_file():
+                    continue
+                # Skip anything under a dotdir (e.g. .git, .venv) so we
+                # don't enumerate gigabytes of vendored deps.
+                if any(p.startswith(".") for p in sub.relative_to(repo_path).parts[:-1]):
+                    continue
+                rel = str(sub.relative_to(repo_path))
+                if query and query not in rel.lower():
+                    seen += 1
+                    if seen > limit * 10:
+                        truncated = True
+                        break
+                    continue
+                files.append(rel)
+                if len(files) >= limit:
+                    truncated = True
+                    break
+        return {
+            "workspace_id": ws.id,
+            "repo_path": ws.repo_path,
+            "is_git": is_git,
+            "files": files,
+            "truncated": truncated,
+            "count": len(files),
+        }
+
     async def cards_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return [c.model_dump(mode="json") for c in await self.store.list_cards()]
 
@@ -614,28 +699,81 @@ class Handlers:
     # Named agents — persistent conversations with follow-up linkage.
     # ------------------------------------------------------------------
 
+    async def _enrich_agent(self, agent: Agent) -> dict[str, Any]:
+        """Convert an Agent to a JSON dict and decorate it with the
+        bound workspace's name + path so the GUI can render the repo
+        chip without a second round-trip.
+        """
+        d = agent.model_dump(mode="json")
+        if agent.workspace_id:
+            ws = await self.store.get_workspace(agent.workspace_id)
+            if ws is not None:
+                d["workspace_name"] = ws.name
+                d["workspace_path"] = ws.repo_path
+        return d
+
+    async def _enrich_agents(self, agents: list[Agent]) -> list[dict[str, Any]]:
+        # Pull all workspaces once instead of N round-trips for N agents.
+        ws_rows = await self.store.list_workspaces()
+        by_id = {w.id: w for w in ws_rows}
+        out: list[dict[str, Any]] = []
+        for a in agents:
+            d = a.model_dump(mode="json")
+            if a.workspace_id and a.workspace_id in by_id:
+                d["workspace_name"] = by_id[a.workspace_id].name
+                d["workspace_path"] = by_id[a.workspace_id].repo_path
+            out.append(d)
+        return out
+
     async def agents_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
-        return [a.model_dump(mode="json") for a in await self.store.list_agents()]
+        return await self._enrich_agents(await self.store.list_agents())
 
     async def agents_get(self, params: dict[str, Any]) -> dict[str, Any]:
         agent = await self.store.get_agent(params["id"])
         if not agent:
             raise ValueError(f"unknown agent: {params['id']}")
-        return agent.model_dump(mode="json")
+        return await self._enrich_agent(agent)
 
     async def agents_create(self, params: dict[str, Any]) -> dict[str, Any]:
         refs = params.get("reference_agent_ids") or []
         if not isinstance(refs, list):
             refs = []
+        workspace_id = params.get("workspace_id")
+        # Validate the workspace up-front so the GUI gets a clear error
+        # instead of a per-send failure later.
+        if workspace_id:
+            ws = await self.store.get_workspace(workspace_id)
+            if not ws:
+                raise ValueError(f"unknown workspace: {workspace_id}")
         agent = Agent(
             name=(params.get("name") or "Unnamed agent").strip(),
             provider=params["provider"],
             model=params["model"],
             system=params.get("system", ""),
             reference_agent_ids=[str(r) for r in refs if r],
+            workspace_id=workspace_id,
         )
         await self.store.insert_agent(agent)
-        return agent.model_dump(mode="json")
+        return await self._enrich_agent(agent)
+
+    async def agents_set_workspace(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Bind / unbind an agent to a Workspace (project repo).
+
+        ``params``:
+          agent_id:     id of the agent to update.
+          workspace_id: id of the workspace, or null to detach.
+        """
+        agent = await self.store.get_agent(params["agent_id"])
+        if not agent:
+            raise ValueError(f"unknown agent: {params['agent_id']}")
+        ws_id = params.get("workspace_id")
+        if ws_id:
+            ws = await self.store.get_workspace(ws_id)
+            if not ws:
+                raise ValueError(f"unknown workspace: {ws_id}")
+        agent.workspace_id = ws_id or None
+        await self.store.update_agent(agent)
+        return await self._enrich_agent(agent)
 
     async def agents_set_references(self, params: dict[str, Any]) -> dict[str, Any]:
         """Replace an existing agent's reference_agent_ids list.
@@ -653,7 +791,7 @@ class Handlers:
             refs = []
         agent.reference_agent_ids = [str(r) for r in refs if r and r != agent.id]
         await self.store.update_agent(agent)
-        return agent.model_dump(mode="json")
+        return await self._enrich_agent(agent)
 
     async def agents_send(self, params: dict[str, Any]) -> dict[str, Any]:
         """Append the user's message to the agent's transcript and
@@ -735,7 +873,31 @@ class Handlers:
                 blast_radius=BlastRadiusPolicy(),
                 sandbox_tier=SandboxTier.DEVCONTAINER,
             )
-            session = await provider.open_chat(card, system=agent.system or None)
+
+            # Repo-aware path: if the agent is bound to a Workspace,
+            # spawn the CLI subprocess with cwd=<repo_path> so the
+            # model's built-in Read / Bash / Edit tools operate against
+            # the project, and prepend a system-prompt header so the
+            # model knows what it's looking at.
+            cwd: str | None = None
+            system_prompt = agent.system or None
+            if agent.workspace_id:
+                ws = await self.store.get_workspace(agent.workspace_id)
+                if ws is not None:
+                    cwd = ws.repo_path
+                    repo_header = (
+                        f"You are operating inside the project at {ws.repo_path} "
+                        f"(workspace name: {ws.name}).  Use your built-in file "
+                        f"tools (Read / Bash / Edit / Grep) to browse and modify "
+                        f"the repository as needed."
+                    )
+                    system_prompt = (
+                        repo_header
+                        if not system_prompt
+                        else f"{repo_header}\n\n{system_prompt}"
+                    )
+
+            session = await provider.open_chat(card, system=system_prompt, cwd=cwd)
             chunks: list[str] = []
             # Fold spreadsheet attachments into the prompt body (the CLI
             # adapter has no path concept for tabular data); images
@@ -767,7 +929,7 @@ class Handlers:
             # Limits tab can show "X / cap" against the published plan
             # caps without having to ask the CLI.
             await self.store.record_provider_message(agent.provider, agent.model)
-            return {"reply": reply, "agent": agent.model_dump(mode="json")}
+            return {"reply": reply, "agent": await self._enrich_agent(agent)}
 
     async def agents_spawn_followup(self, params: dict[str, Any]) -> dict[str, Any]:
         """Spawn a new agent that builds on a parent's transcript.
@@ -818,7 +980,7 @@ class Handlers:
             transcript=seeded_transcript,
         )
         await self.store.insert_agent(agent)
-        return {"agent": agent.model_dump(mode="json")}
+        return {"agent": await self._enrich_agent(agent)}
 
     async def agents_delete(self, params: dict[str, Any]) -> dict[str, Any]:
         agent_id = params["id"]
@@ -1143,6 +1305,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("workspaces.list", h.workspaces_list)
     server.register("workspaces.register", h.workspaces_register)
     server.register("workspaces.remove", h.workspaces_remove)
+    server.register("workspaces.tree", h.workspaces_tree)
     server.register("cards.list", h.cards_list)
     server.register("runs.list", h.runs_list)
     server.register("runs.dispatch", h.runs_dispatch)
@@ -1173,6 +1336,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("agents.send", h.agents_send)
     server.register("agents.spawn_followup", h.agents_spawn_followup)
     server.register("agents.set_references", h.agents_set_references)
+    server.register("agents.set_workspace", h.agents_set_workspace)
     server.register("agents.delete", h.agents_delete)
     server.register("agents.followup_presets", h.agents_followup_presets)
     server.register("attachments.upload", h.attachments_upload)

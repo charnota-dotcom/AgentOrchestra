@@ -77,8 +77,18 @@ class LLMProvider(Protocol):
     name: Literal["anthropic", "google", "openai", "ollama"]
 
     async def open_chat(
-        self, card: PersonalityCard, *, system: str | None = None
-    ) -> ChatSession: ...
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
+        """Open a chat session.
+
+        ``cwd`` is the working directory to spawn any subprocess
+        provider in (CLI providers).  API providers ignore it.
+        """
+        ...
 
     async def run_with_tools(
         self,

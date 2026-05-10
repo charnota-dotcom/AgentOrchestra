@@ -111,7 +111,14 @@ class OllamaChatSession(ChatSession):
 class OllamaProvider:
     name: str = "ollama"
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+    async def open_chat(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
+        del cwd  # HTTP session has no cwd concept
         if card.provider != "ollama":
             raise ProviderError(f"card.provider={card.provider!r} is not ollama")
         return OllamaChatSession(card, system=system)

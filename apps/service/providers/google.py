@@ -114,7 +114,14 @@ class GoogleProvider:
     def __init__(self) -> None:
         self._sdk = _import_sdk()
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+    async def open_chat(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
+        del cwd  # API session has no working-directory concept
         if card.provider != "google":
             raise ProviderError(f"card.provider={card.provider!r} is not google")
         return GeminiChatSession(card, system=system)

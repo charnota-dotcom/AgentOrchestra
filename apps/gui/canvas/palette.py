@@ -148,7 +148,7 @@ class PalettePanel(QtWidgets.QWidget):
     def _new_conversation_dialog(self) -> None:
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("New conversation")
-        dlg.resize(420, 300)
+        dlg.resize(460, 360)
         form = QtWidgets.QFormLayout(dlg)
 
         name_input = QtWidgets.QLineEdit()
@@ -159,6 +159,32 @@ class PalettePanel(QtWidgets.QWidget):
         for label, _p, _m, _s in self._AGENT_PRESETS:
             model_combo.addItem(label)
         form.addRow("Model + type:", model_combo)
+
+        # Repo picker — bind the new agent to a Workspace so the CLI
+        # runs inside that directory and can use its file tools.
+        ws_combo = QtWidgets.QComboBox()
+        ws_combo.addItem("(no repo — chat only)", "")
+        ws_combo.setToolTip(
+            "Pick a repo to give the agent file-tool access to.  "
+            "Use the Add… button to register a new path."
+        )
+        ws_row = QtWidgets.QHBoxLayout()
+        ws_row.addWidget(ws_combo, stretch=1)
+        add_repo_btn = QtWidgets.QPushButton("Add…")
+        add_repo_btn.setStyleSheet(
+            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        add_repo_btn.clicked.connect(  # type: ignore[arg-type]
+            lambda: self._palette_add_repo(dlg, ws_combo)
+        )
+        ws_row.addWidget(add_repo_btn)
+        ws_wrap = QtWidgets.QWidget()
+        ws_wrap.setLayout(ws_row)
+        form.addRow("Repo:", ws_wrap)
+        # Populate asynchronously so the dialog appears immediately.
+        asyncio.ensure_future(self._populate_workspaces(ws_combo))
 
         first_msg = QtWidgets.QPlainTextEdit()
         first_msg.setPlaceholderText("Optional: a first message to send right after creation.")
@@ -177,6 +203,7 @@ class PalettePanel(QtWidgets.QWidget):
             return
         idx = model_combo.currentIndex()
         _label, provider, model, system = self._AGENT_PRESETS[idx]
+        ws_id = ws_combo.currentData() or ""
         asyncio.ensure_future(
             self._do_create(
                 (name_input.text() or "Unnamed conversation").strip(),
@@ -184,8 +211,55 @@ class PalettePanel(QtWidgets.QWidget):
                 model,
                 system,
                 first_msg.toPlainText().strip(),
+                ws_id,
             )
         )
+
+    async def _populate_workspaces(
+        self, combo: QtWidgets.QComboBox, *, select_id: str | None = None
+    ) -> None:
+        try:
+            rows = await self.client.call("workspaces.list", {})
+        except Exception:
+            return
+        prev = select_id or (combo.currentData() or "")
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("(no repo — chat only)", "")
+        for w in rows:
+            label = f"{w.get('name', '?')} — {w.get('repo_path', '?')}"
+            combo.addItem(label, w.get("id", ""))
+        for i in range(combo.count()):
+            if combo.itemData(i) == prev:
+                combo.setCurrentIndex(i)
+                break
+        combo.blockSignals(False)
+
+    def _palette_add_repo(
+        self, parent: QtWidgets.QWidget, combo: QtWidgets.QComboBox
+    ) -> None:
+        from pathlib import Path
+
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            parent,
+            "Pick the project repo to give the agent access to",
+            str(Path.home()),
+        )
+        if not path:
+            return
+
+        async def _go() -> None:
+            try:
+                ws = await self.client.call(
+                    "workspaces.register",
+                    {"path": path, "name": Path(path).name},
+                )
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(parent, "Couldn't register repo", str(exc))
+                return
+            await self._populate_workspaces(combo, select_id=ws.get("id"))
+
+        asyncio.ensure_future(_go())
 
     async def _do_create(
         self,
@@ -194,11 +268,18 @@ class PalettePanel(QtWidgets.QWidget):
         model: str,
         system: str,
         first_message: str,
+        workspace_id: str = "",
     ) -> None:
         try:
             agent = await self.client.call(
                 "agents.create",
-                {"name": name, "provider": provider, "model": model, "system": system},
+                {
+                    "name": name,
+                    "provider": provider,
+                    "model": model,
+                    "system": system,
+                    "workspace_id": workspace_id or None,
+                },
             )
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Create failed", str(exc))

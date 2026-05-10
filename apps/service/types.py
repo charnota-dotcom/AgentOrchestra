@@ -572,6 +572,11 @@ class Agent(BaseModel):
     provider: str
     model: str
     system: str = ""
+    # When bound to a Workspace, the CLI subprocess is spawned with
+    # cwd = workspace.repo_path so the model's built-in Read / Bash /
+    # Edit / Grep tools can browse the project.  None = chat-only
+    # agent with no repo access.
+    workspace_id: str | None = None
     parent_id: str | None = None
     parent_name: str | None = None  # denormalised for cheap display
     # Which preset created this child (summarise / annotate / deep_dive

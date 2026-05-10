@@ -255,6 +255,12 @@ CREATE TABLE IF NOT EXISTS agents (
     -- a literal child.  Existing installs get this via the code-side
     -- migration too.
     reference_agent_ids TEXT NOT NULL DEFAULT '[]',
+    -- Optional Workspace this agent operates inside.  When set, the
+    -- CLI subprocess runs with cwd = workspace.repo_path so the model
+    -- can use its built-in file tools against the project.  Null =
+    -- pure chat agent with no repo access.  Code-side migration
+    -- backfills this column on existing installs.
+    workspace_id  TEXT REFERENCES workspaces(id),
     transcript    TEXT NOT NULL DEFAULT '[]',  -- JSON: [{role, content}]
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL

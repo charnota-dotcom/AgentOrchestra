@@ -74,9 +74,15 @@ class GeminiCLIChatSession(ChatSession):
 
     name = "gemini-cli"
 
-    def __init__(self, card: PersonalityCard, system: str | None = None) -> None:
+    def __init__(
+        self,
+        card: PersonalityCard,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> None:
         self.card = card
         self.system = system or ""
+        self.cwd = cwd  # repo-aware agents spawn the CLI inside their workspace
         self._history: list[dict[str, str]] = []
         self._binary = _gemini_binary()
         if not self._binary:
@@ -123,6 +129,7 @@ class GeminiCLIChatSession(ChatSession):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                cwd=self.cwd,
             )
         except FileNotFoundError:
             yield StreamEvent(kind="error", text="`gemini` binary not found")
@@ -218,10 +225,16 @@ def _is_noise_line(line: str) -> bool:
 class GeminiCLIProvider:
     name: str = "gemini-cli"
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+    async def open_chat(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
         if card.provider != "gemini-cli":
             raise ProviderError(f"card.provider={card.provider!r} is not gemini-cli")
-        return GeminiCLIChatSession(card, system=system)
+        return GeminiCLIChatSession(card, system=system, cwd=cwd)
 
     async def run_with_tools(
         self,

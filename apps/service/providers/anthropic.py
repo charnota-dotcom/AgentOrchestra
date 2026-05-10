@@ -135,7 +135,15 @@ class AnthropicProvider:
     def __init__(self) -> None:
         self._sdk = _import_sdk()
 
-    async def open_chat(self, card: PersonalityCard, *, system: str | None = None) -> ChatSession:
+    async def open_chat(
+        self,
+        card: PersonalityCard,
+        *,
+        system: str | None = None,
+        cwd: str | None = None,
+    ) -> ChatSession:
+        # cwd is a CLI-provider concept; the API session ignores it.
+        del cwd
         if card.provider != "anthropic":
             raise ProviderError(f"card.provider={card.provider!r} is not anthropic")
         return AnthropicChatSession(card, system=system)

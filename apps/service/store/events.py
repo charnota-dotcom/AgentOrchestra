@@ -110,6 +110,10 @@ class EventStore:
             # rows in a single ALTER.  The Python-side json.loads is
             # tolerant of the empty-list literal we set here.
             ("agents", "reference_agent_ids", "TEXT NOT NULL DEFAULT '[]'"),
+            # Workspace binding for repo-aware agents.  Nullable; we
+            # don't enforce the FK on existing rows since SQLite
+            # doesn't validate FKs added via ALTER TABLE.
+            ("agents", "workspace_id", "TEXT"),
         ):
             if not await self._has_column(table, column):
                 await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {defn}")
@@ -396,9 +400,9 @@ class EventStore:
                 INSERT INTO agents (
                     id, name, provider, model, system,
                     parent_id, parent_name, parent_preset,
-                    reference_agent_ids,
+                    reference_agent_ids, workspace_id,
                     transcript, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     agent.id,
@@ -410,6 +414,7 @@ class EventStore:
                     agent.parent_name,
                     agent.parent_preset,
                     json.dumps(agent.reference_agent_ids),
+                    agent.workspace_id,
                     json.dumps(agent.transcript),
                     agent.created_at.isoformat(),
                     agent.updated_at.isoformat(),
@@ -427,6 +432,7 @@ class EventStore:
                    SET name = ?,
                        system = ?,
                        reference_agent_ids = ?,
+                       workspace_id = ?,
                        transcript = ?,
                        updated_at = ?
                  WHERE id = ?
@@ -435,6 +441,7 @@ class EventStore:
                     agent.name,
                     agent.system,
                     json.dumps(agent.reference_agent_ids),
+                    agent.workspace_id,
                     json.dumps(agent.transcript),
                     agent.updated_at.isoformat(),
                     agent.id,
