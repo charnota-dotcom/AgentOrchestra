@@ -87,7 +87,20 @@ class PalettePanel(QtWidgets.QWidget):
         # Persistent named conversations (Agents tab).  Drag onto the
         # canvas to anchor a conversation as a node; double-click the
         # node to open a chat dialog scoped to that one agent.
-        layout.addWidget(self._section_header("Conversations"))
+        conv_header = QtWidgets.QHBoxLayout()
+        conv_header.setContentsMargins(0, 0, 0, 0)
+        conv_header.addWidget(self._section_header("Conversations"), stretch=1)
+        new_conv_btn = QtWidgets.QPushButton("+ New")
+        new_conv_btn.setStyleSheet(
+            "QPushButton{padding:2px 8px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#f6f8fa;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        new_conv_btn.setToolTip("Create a new named conversation without leaving the canvas.")
+        new_conv_btn.clicked.connect(self._new_conversation_dialog)  # type: ignore[arg-type]
+        conv_header.addWidget(new_conv_btn)
+        layout.addLayout(conv_header)
+
         self.agents_list = _DragList()
         self.agents_list.setStyleSheet(self._list_stylesheet())
         layout.addWidget(self.agents_list, stretch=1)
@@ -96,6 +109,111 @@ class PalettePanel(QtWidgets.QWidget):
 
     async def _reload_all(self) -> None:
         await asyncio.gather(self.reload_cards(), self.reload_agents())
+
+    # New-conversation dialog so the operator can mint an agent
+    # directly from the canvas, picking provider + model + type
+    # (Coding / General) without leaving the page.  On success the
+    # palette refreshes and the new entry is draggable.
+    _AGENT_PRESETS: list[tuple[str, str, str, str]] = [
+        # (label, provider, model, default system prompt)
+        ("Claude Sonnet 4.6  (Coding / Claude Code)", "claude-cli", "claude-sonnet-4-6", ""),
+        ("Claude Opus 4.7  (Coding / Claude Code)", "claude-cli", "claude-opus-4-7", ""),
+        (
+            "Claude Sonnet 4.6  (General Chat)",
+            "claude-cli",
+            "claude-sonnet-4-6",
+            "You are a friendly general-purpose assistant.  Help with "
+            "writing, research, brainstorming, planning, and everyday "
+            "questions.  Don't assume the user is asking about code.",
+        ),
+        (
+            "Claude Opus 4.7  (General Chat)",
+            "claude-cli",
+            "claude-opus-4-7",
+            "You are a friendly general-purpose assistant.  Help with "
+            "writing, research, brainstorming, planning, and everyday "
+            "questions.  Don't assume the user is asking about code.",
+        ),
+        ("Gemini 2.5 Pro  (Coding / Gemini CLI)", "gemini-cli", "gemini-2.5-pro", ""),
+        (
+            "Gemini 2.5 Pro  (General Chat)",
+            "gemini-cli",
+            "gemini-2.5-pro",
+            "You are a friendly general-purpose assistant.  Help with "
+            "writing, research, brainstorming, planning, and everyday "
+            "questions.  Don't assume the user is asking about code.",
+        ),
+    ]
+
+    def _new_conversation_dialog(self) -> None:
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("New conversation")
+        dlg.resize(420, 300)
+        form = QtWidgets.QFormLayout(dlg)
+
+        name_input = QtWidgets.QLineEdit()
+        name_input.setPlaceholderText("e.g. Agent Smith")
+        form.addRow("Name:", name_input)
+
+        model_combo = QtWidgets.QComboBox()
+        for label, _p, _m, _s in self._AGENT_PRESETS:
+            model_combo.addItem(label)
+        form.addRow("Model + type:", model_combo)
+
+        first_msg = QtWidgets.QPlainTextEdit()
+        first_msg.setPlaceholderText("Optional: a first message to send right after creation.")
+        first_msg.setMinimumHeight(80)
+        form.addRow("First message:", first_msg)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)  # type: ignore[arg-type]
+        buttons.rejected.connect(dlg.reject)  # type: ignore[arg-type]
+        form.addRow(buttons)
+
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        idx = model_combo.currentIndex()
+        _label, provider, model, system = self._AGENT_PRESETS[idx]
+        asyncio.ensure_future(
+            self._do_create(
+                (name_input.text() or "Unnamed conversation").strip(),
+                provider,
+                model,
+                system,
+                first_msg.toPlainText().strip(),
+            )
+        )
+
+    async def _do_create(
+        self,
+        name: str,
+        provider: str,
+        model: str,
+        system: str,
+        first_message: str,
+    ) -> None:
+        try:
+            agent = await self.client.call(
+                "agents.create",
+                {"name": name, "provider": provider, "model": model, "system": system},
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Create failed", str(exc))
+            return
+        if first_message:
+            try:
+                await self.client.call(
+                    "agents.send",
+                    {"agent_id": agent["id"], "message": first_message},
+                )
+            except Exception as exc:
+                # The agent exists; just the first send failed.  Show
+                # the error but keep the agent in the list.
+                QtWidgets.QMessageBox.warning(self, "First message failed", str(exc))
+        await self.reload_agents()
 
     async def reload_agents(self) -> None:
         try:

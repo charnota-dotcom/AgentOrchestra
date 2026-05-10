@@ -127,6 +127,10 @@ class CanvasPage(QtWidgets.QWidget):
         root.addWidget(self.inspector)
 
         self.scene.selection_changed.connect(self.inspector.show_for)  # type: ignore[arg-type]
+        # Visibility-mode highlight: redrives whenever selection
+        # changes so the cluster updates as the operator clicks
+        # different ConversationNodes.
+        self.scene.selection_changed.connect(self._refresh_visibility_highlight)  # type: ignore[arg-type]
         self.inspector.flow_name_changed.connect(self._on_flow_name_changed)  # type: ignore[arg-type]
         self.inspector.run_requested.connect(self._on_run_clicked)  # type: ignore[arg-type]
         self.inspector.cancel_requested.connect(self._on_cancel_clicked)  # type: ignore[arg-type]
@@ -164,6 +168,26 @@ class CanvasPage(QtWidgets.QWidget):
                 btn.setToolTip(f"{label} ({shortcut})")
             btn.clicked.connect(slot)  # type: ignore[arg-type]
             h.addWidget(btn)
+        h.addSpacing(8)
+
+        # Visibility toggle.  When ON + a ConversationNode is
+        # selected, dim every node that the selection can't see /
+        # be seen by, leaving the lineage cluster fully visible so
+        # the operator can read the cross-agent reach at a glance.
+        self.visibility_btn = QtWidgets.QPushButton("Visibility")
+        self.visibility_btn.setCheckable(True)
+        self.visibility_btn.setToolTip(
+            "When enabled, click a conversation to highlight everyone "
+            "who can see (or be seen by) that agent's transcript.  "
+            "Lineage = parents + descendants spawned via Spawn follow-up."
+        )
+        self.visibility_btn.setStyleSheet(
+            "QPushButton{padding:4px 12px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;}"
+            "QPushButton:checked{background:#1f7a3f;color:#fff;border-color:#1f7a3f;}"
+        )
+        self.visibility_btn.toggled.connect(self._on_visibility_toggled)  # type: ignore[arg-type]
+        h.addWidget(self.visibility_btn)
         h.addSpacing(12)
 
         # Wire keyboard shortcuts up front so they fire even when the
@@ -289,6 +313,98 @@ class CanvasPage(QtWidgets.QWidget):
     # ------------------------------------------------------------------
     # Lineage edges
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Visibility toggle — dims nodes outside the selected lineage
+    # cluster so the cross-agent reach is readable at a glance.
+    # ------------------------------------------------------------------
+
+    def _on_visibility_toggled(self, on: bool) -> None:
+        if not on:
+            self._clear_visibility_highlight()
+            return
+        # On enable, immediately drive the highlight off the current
+        # selection (if any) so the operator sees the effect without
+        # having to re-click.
+        self._refresh_visibility_highlight(
+            [n for n in self.scene.selectedItems() if isinstance(n, BaseNode)]
+        )
+
+    def _refresh_visibility_highlight(self, selected: list[BaseNode] | None = None) -> None:
+        if not getattr(self, "visibility_btn", None) or not self.visibility_btn.isChecked():
+            return
+        if selected is None:
+            selected = [n for n in self.scene.selectedItems() if isinstance(n, BaseNode)]
+        # Find the first selected ConversationNode — visibility only
+        # makes sense for those.  AgentNode (template) and control
+        # nodes don't have a transcript.
+        anchor: ConversationNode | None = next(
+            (n for n in selected if isinstance(n, ConversationNode)), None
+        )
+        if anchor is None:
+            self._clear_visibility_highlight()
+            return
+        cluster_ids = self._lineage_cluster(anchor)
+        for node in self.scene.nodes():
+            in_cluster = (
+                isinstance(node, ConversationNode) and node.agent.get("id") in cluster_ids
+            ) or node is anchor
+            node.setOpacity(1.0 if in_cluster else 0.25)
+
+    def _clear_visibility_highlight(self) -> None:
+        for node in self.scene.nodes():
+            node.setOpacity(1.0)
+
+    def _lineage_cluster(self, anchor: ConversationNode) -> set[str]:
+        """All agent ids in the lineage cluster of ``anchor``.
+
+        A cluster = the anchor itself + every ancestor (transcript-
+        readers) + every descendant (transcript-receivers).  Built
+        from the agents currently on the canvas, so what the operator
+        sees matches what's drawn.
+
+        Visibility model:
+        * Parent agents see nothing of their children's later turns.
+        * Children see the snapshot of the parent's transcript at
+          spawn time (we capture it into the seeded transcript).
+        * Other agents see neither.
+
+        Highlighting both directions is intentional — the operator
+        wants to know who can see this conversation AND whose
+        conversations this one can see.
+        """
+        anchor_id = anchor.agent.get("id")
+        if not anchor_id:
+            return set()
+        by_id: dict[str, ConversationNode] = {}
+        children: dict[str, list[str]] = {}  # parent_id → [child_id, ...]
+        for node in self.scene.nodes():
+            if not isinstance(node, ConversationNode):
+                continue
+            aid = node.agent.get("id")
+            if not aid:
+                continue
+            by_id[aid] = node
+            pid = node.agent.get("parent_id")
+            if pid:
+                children.setdefault(pid, []).append(aid)
+
+        cluster: set[str] = {anchor_id}
+        # Walk up the parent chain.
+        current = anchor.agent.get("parent_id")
+        while current and current in by_id and current not in cluster:
+            cluster.add(current)
+            current = by_id[current].agent.get("parent_id")
+        # Walk down the descendant tree (BFS).
+        frontier = [anchor_id]
+        while frontier:
+            nid = frontier.pop()
+            for child in children.get(nid, []):
+                if child in cluster:
+                    continue
+                cluster.add(child)
+                frontier.append(child)
+        return cluster
 
     def _refresh_lineage_edges(self) -> None:
         """Auto-draw a directional, labelled edge between a parent
