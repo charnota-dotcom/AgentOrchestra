@@ -361,7 +361,21 @@ class Handlers:
             transcribe_file,
         )
 
-        path = Path(params["audio_path"])
+        # The RPC server is loopback-only, but a malicious local process
+        # could still POST to it.  Resolve the path and confirm it points
+        # at a regular file with an audio-shaped extension before handing
+        # it to the transcriber.
+        allowed_exts = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}
+        raw = params.get("audio_path")
+        if not isinstance(raw, str) or not raw:
+            raise ValueError("audio_path required")
+        path = Path(raw).resolve(strict=False)
+        if not path.is_file():
+            raise ValueError(f"audio_path is not a regular file: {path}")
+        if path.suffix.lower() not in allowed_exts:
+            raise ValueError(
+                f"audio_path extension {path.suffix!r} not in allowed set {sorted(allowed_exts)}"
+            )
         text = await asyncio.to_thread(
             transcribe_file,
             path,
@@ -729,6 +743,12 @@ class Handlers:
                     stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
                 except TimeoutError:
                     proc.kill()
+                    # Reap the child so we don't leave a zombie behind.
+                    # communicate() also closes the pipes for us.
+                    try:
+                        await asyncio.wait_for(proc.communicate(), timeout=2.0)
+                    except (TimeoutError, ProcessLookupError):
+                        pass
                     return {
                         "ok": False,
                         "stdout": "",

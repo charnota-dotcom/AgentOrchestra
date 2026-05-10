@@ -261,12 +261,20 @@ class FlowExecutor:
         while ready:
             wave = ready
             ready = []
-            results = await asyncio.gather(
-                *(execute(nid) for nid in wave),
-                return_exceptions=True,
-            )
+            tasks = {nid: asyncio.create_task(execute(nid)) for nid in wave}
+            try:
+                results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+            except asyncio.CancelledError:
+                # External cancel landed on the supervisor.  Cancel every
+                # in-flight node and wait for their teardown so child
+                # subprocesses (claude/gemini CLIs) get reaped instead of
+                # being left orphaned.
+                for t in tasks.values():
+                    t.cancel()
+                await asyncio.gather(*tasks.values(), return_exceptions=True)
+                raise
             for nid, res in zip(wave, results, strict=False):
-                if isinstance(res, Exception) and not isinstance(res, asyncio.CancelledError):
+                if isinstance(res, BaseException) and not isinstance(res, asyncio.CancelledError):
                     run.state = FlowState.FAILED
                     run.error = repr(res)
                 if nid not in skipped:

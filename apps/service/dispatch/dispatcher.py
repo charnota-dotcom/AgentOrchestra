@@ -297,7 +297,11 @@ class RunDispatcher:
             try:
                 await self.manager.reject(run.branch_id, reason)
             except Exception:
-                log.exception("worktree reject failed")
+                log.exception(
+                    "worktree reject failed for run %s branch %s",
+                    run.id,
+                    run.branch_id,
+                )
         await self._transition_run(run, RunState.REJECTED)
         await self.store.append_event(
             Event(
@@ -711,7 +715,11 @@ class RunDispatcher:
                 try:
                     await self.manager.abandon(branch.id, "cancelled")
                 except Exception:
-                    pass
+                    log.exception(
+                        "worktree abandon failed during cancel for run %s branch %s",
+                        run.id,
+                        branch.id,
+                    )
             raise
         except Exception as exc:
             log.exception("agentic run %s failed", run.id)
@@ -720,7 +728,11 @@ class RunDispatcher:
                 try:
                     await self.manager.abandon(branch.id, f"failed: {exc}")
                 except Exception:
-                    pass
+                    log.exception(
+                        "worktree abandon failed during failure for run %s branch %s",
+                        run.id,
+                        branch.id,
+                    )
 
     async def _open_mcp_tools(self, card: PersonalityCard):
         """Resolve any MCP server names in card.tool_allowlist against
