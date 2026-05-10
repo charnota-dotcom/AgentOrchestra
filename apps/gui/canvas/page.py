@@ -101,10 +101,13 @@ class CanvasPage(QtWidgets.QWidget):
         c = QtWidgets.QVBoxLayout(centre)
         c.setContentsMargins(0, 0, 0, 0)
         c.setSpacing(0)
-        c.addWidget(self._build_toolbar())
 
+        # Scene + view must exist before _build_toolbar() since the
+        # toolbar wires the zoom-label up to ``self.view.zoom_changed``.
         self.scene = CanvasScene()
         self.view = _CanvasViewWithDrop(self.scene, self)
+
+        c.addWidget(self._build_toolbar())
         c.addWidget(self.view, stretch=1)
 
         # Minimap floats in the bottom-right corner of the centre
