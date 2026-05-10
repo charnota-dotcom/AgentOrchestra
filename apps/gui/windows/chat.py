@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtGui, QtWidgets
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
@@ -23,15 +23,108 @@ if TYPE_CHECKING:
 
 # Model presets — every option goes through a local CLI (Claude Code
 # or Gemini CLI) so chat reuses your Max-plan / Gemini-CLI auth and
-# never bills against an API key.  The dropdown reads naturally; each
-# entry maps to (provider, model).  Add more here without changing
-# any other code.
-_MODEL_PRESETS: list[tuple[str, str, str]] = [
-    ("Claude Sonnet 4.6  (Claude Code)", "claude-cli", "claude-sonnet-4-6"),
-    ("Claude Opus 4.7  (Claude Code)", "claude-cli", "claude-opus-4-7"),
-    ("Claude Haiku 4.5  (Claude Code)", "claude-cli", "claude-haiku-4-5"),
-    ("Gemini 2.5 Pro  (Gemini CLI)", "gemini-cli", "gemini-2.5-pro"),
-    ("Gemini 2.5 Flash  (Gemini CLI)", "gemini-cli", "gemini-2.5-flash"),
+# never bills against an API key.
+#
+# Each entry is (display label, provider, model, system_prompt).  The
+# system prompt is what swaps the assistant's persona without leaving
+# the same provider — e.g. "Claude Sonnet 4.6 (General Chat)" goes
+# through claude-cli but with a friendlier general-purpose prompt
+# than the default coding-assistant behaviour you'd get with
+# "Claude Sonnet 4.6 (Claude Code)".
+_MODEL_PRESETS: list[tuple[str, str, str, str]] = [
+    # Coding-default rows — what you'd get from `claude` on its own.
+    ("Claude Sonnet 4.6  (Claude Code)", "claude-cli", "claude-sonnet-4-6", ""),
+    ("Claude Opus 4.7  (Claude Code)", "claude-cli", "claude-opus-4-7", ""),
+    ("Claude Haiku 4.5  (Claude Code)", "claude-cli", "claude-haiku-4-5", ""),
+    ("Gemini 2.5 Pro  (Gemini CLI)", "gemini-cli", "gemini-2.5-pro", ""),
+    ("Gemini 2.5 Flash  (Gemini CLI)", "gemini-cli", "gemini-2.5-flash", ""),
+    # General-chat rows — same models, friendlier prompt.  Useful for
+    # writing, research, brainstorming, planning, everyday questions.
+    (
+        "Claude Sonnet 4.6  (General Chat)",
+        "claude-cli",
+        "claude-sonnet-4-6",
+        "You are a friendly general-purpose assistant.  Help with "
+        "writing, research, brainstorming, planning, and everyday "
+        "questions.  Do not assume the user is asking about code; "
+        "if they are, treat code as one option among many.  Be "
+        "concise unless asked for depth.",
+    ),
+    (
+        "Claude Opus 4.7  (General Chat)",
+        "claude-cli",
+        "claude-opus-4-7",
+        "You are a friendly general-purpose assistant.  Help with "
+        "writing, research, brainstorming, planning, and everyday "
+        "questions.  Do not assume the user is asking about code; "
+        "if they are, treat code as one option among many.  Be "
+        "concise unless asked for depth.",
+    ),
+    (
+        "Gemini 2.5 Pro  (General Chat)",
+        "gemini-cli",
+        "gemini-2.5-pro",
+        "You are a friendly general-purpose assistant.  Help with "
+        "writing, research, brainstorming, planning, and everyday "
+        "questions.  Do not assume the user is asking about code; "
+        "if they are, treat code as one option among many.  Be "
+        "concise unless asked for depth.",
+    ),
+    # File / artifact mode — model emits the file's contents directly
+    # so the operator can hit "Save reply" and write it to disk.
+    (
+        "Claude Sonnet 4.6  (File / artifact)",
+        "claude-cli",
+        "claude-sonnet-4-6",
+        "Produce a self-contained artifact the user can save to "
+        "disk.  Format your reply as the file's literal contents "
+        "— no surrounding chatter, no Markdown fencing unless the "
+        "file format itself uses Markdown.  If the user didn't "
+        "specify a format, pick the most appropriate one (plain "
+        "text, JSON, CSV, Markdown, etc.) and start your reply "
+        "with a single header line `# filename.ext` so the file "
+        "can be saved with a sensible name.",
+    ),
+    (
+        "Gemini 2.5 Pro  (File / artifact)",
+        "gemini-cli",
+        "gemini-2.5-pro",
+        "Produce a self-contained artifact the user can save to "
+        "disk.  Format your reply as the file's literal contents "
+        "— no surrounding chatter, no Markdown fencing unless the "
+        "file format itself uses Markdown.  If the user didn't "
+        "specify a format, pick the most appropriate one (plain "
+        "text, JSON, CSV, Markdown, etc.) and start your reply "
+        "with a single header line `# filename.ext` so the file "
+        "can be saved with a sensible name.",
+    ),
+    # Image-prompt mode — useful for piping into a separate image
+    # generator (Midjourney, DALL-E, Stable Diffusion).  Native image
+    # generation needs a paid API; out of scope for the no-fees default.
+    (
+        "Claude Sonnet 4.6  (Image prompt)",
+        "claude-cli",
+        "claude-sonnet-4-6",
+        "The user wants an image.  Don't try to render one — "
+        "instead produce a precise, vivid prompt suitable for a "
+        "text-to-image generator (Midjourney / DALL-E / Stable "
+        "Diffusion / Imagen).  Include subject, composition, "
+        "style, lighting, mood, and any reference points.  Keep "
+        "the prompt under 200 words.  Output only the prompt; no "
+        "preamble.",
+    ),
+    (
+        "Gemini 2.5 Pro  (Image prompt)",
+        "gemini-cli",
+        "gemini-2.5-pro",
+        "The user wants an image.  Don't try to render one — "
+        "instead produce a precise, vivid prompt suitable for a "
+        "text-to-image generator (Midjourney / DALL-E / Stable "
+        "Diffusion / Imagen).  Include subject, composition, "
+        "style, lighting, mood, and any reference points.  Keep "
+        "the prompt under 200 words.  Output only the prompt; no "
+        "preamble.",
+    ),
 ]
 
 
@@ -86,8 +179,8 @@ class ChatPage(QtWidgets.QWidget):
         model_label.setStyleSheet("color:#5b6068;font-size:12px;")
         top.addWidget(model_label)
         self.model_combo = QtWidgets.QComboBox()
-        for label, _provider, _model in _MODEL_PRESETS:
-            self.model_combo.addItem(label)
+        for entry in _MODEL_PRESETS:
+            self.model_combo.addItem(entry[0])
         top.addWidget(self.model_combo, stretch=1)
 
         thinking_label = QtWidgets.QLabel("Thinking:")
@@ -145,6 +238,21 @@ class ChatPage(QtWidgets.QWidget):
         bottom.addWidget(self.send_btn)
         layout.addLayout(bottom)
 
+        controls = QtWidgets.QHBoxLayout()
+        controls.addStretch(1)
+        save_btn = QtWidgets.QPushButton("Save last reply…")
+        save_btn.setToolTip(
+            "Save the most recent assistant reply to a file.  Useful "
+            'when you ran the "File / artifact" model preset.'
+        )
+        save_btn.setStyleSheet(
+            "QPushButton{padding:6px 14px;font-size:11px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#fff;color:#5b6068;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        save_btn.clicked.connect(self._save_last_reply)  # type: ignore[arg-type]
+        controls.addWidget(save_btn)
+
         new_chat_btn = QtWidgets.QPushButton("New chat (clear history)")
         new_chat_btn.setStyleSheet(
             "QPushButton{padding:6px 14px;font-size:11px;border:1px solid #d0d3d9;"
@@ -152,7 +260,8 @@ class ChatPage(QtWidgets.QWidget):
             "QPushButton:hover{background:#eef0f3;}"
         )
         new_chat_btn.clicked.connect(self._new_chat)  # type: ignore[arg-type]
-        layout.addWidget(new_chat_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        controls.addWidget(new_chat_btn)
+        layout.addLayout(controls)
 
         # Ctrl+Enter to send from the input box.
         shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Return"), self.message_input)
@@ -174,16 +283,17 @@ class ChatPage(QtWidgets.QWidget):
 
     async def _send_async(self, message: str) -> None:
         idx = self.model_combo.currentIndex()
-        _label, provider, model = _MODEL_PRESETS[idx]
+        _label, provider, model, mode_system = _MODEL_PRESETS[idx]
         thinking_idx = self.thinking_combo.currentIndex()
         _t_label, system_thinking = _THINKING_PRESETS[thinking_idx]
 
-        # Skills + thinking depth are stitched into the system
-        # prompt rather than the user message.  The model treats
-        # system text as instructions; treating skills as user text
-        # made them feel like part of the user's actual question.
+        # System prompt is stitched together from three sources, in
+        # priority order: the model preset's mode prompt (Coding /
+        # General / File / Image), the thinking-depth directive,
+        # then the user's free-form skills field.  Joined with blank
+        # lines so each is its own paragraph for the model.
         skills = self.skills_input.text().strip()
-        system_parts = [p for p in (system_thinking, _skills_to_system(skills)) if p]
+        system_parts = [p for p in (mode_system, system_thinking, _skills_to_system(skills)) if p]
         system = "\n\n".join(system_parts)
 
         full_prompt = self._render_for_send()
@@ -211,6 +321,50 @@ class ChatPage(QtWidgets.QWidget):
         self._history.clear()
         self.transcript.clear()
         self.message_input.clear()
+
+    def _save_last_reply(self) -> None:
+        """Save the most recent assistant turn to a file.
+
+        Looks for a leading ``# filename.ext`` header line (which the
+        File / artifact model preset emits) to seed the suggested
+        filename.  Strips the header from the saved contents so the
+        file isn't littered with our own marker.
+        """
+        last = next(
+            (m for m in reversed(self._history) if m.get("role") == "assistant"),
+            None,
+        )
+        if last is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Nothing to save",
+                "No assistant reply yet.  Send a message first.",
+            )
+            return
+        text = last.get("content", "")
+        suggested_name = "reply.txt"
+        body = text
+        # File / artifact mode emits "# filename.ext" as the first
+        # line.  Pick that up if present.
+        first_line, sep, rest = text.partition("\n")
+        if first_line.startswith("# ") and "." in first_line[2:50]:
+            suggested_name = first_line[2:].strip()
+            body = rest if sep else ""
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save reply as file",
+            suggested_name,
+        )
+        if not path:
+            return
+        try:
+            from pathlib import Path
+
+            Path(path).write_text(body, encoding="utf-8")
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Save failed", str(exc))
+            return
+        self._append("System", f"Saved reply to {path}")
 
     def _render_for_send(self) -> str:
         """Fold the in-memory turn buffer into a single prompt.
