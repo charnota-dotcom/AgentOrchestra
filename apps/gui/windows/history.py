@@ -63,8 +63,10 @@ class HistoryPage(QtWidgets.QWidget):
         v.setSpacing(10)
 
         self.runs_table = QtWidgets.QTableWidget()
-        self.runs_table.setColumnCount(5)
-        self.runs_table.setHorizontalHeaderLabels(["Run ID", "Card", "State", "Cost", "Created"])
+        self.runs_table.setColumnCount(6)
+        self.runs_table.setHorizontalHeaderLabels(
+            ["Run ID", "Card", "State", "Cost", "Created", "Actions"]
+        )
         self.runs_table.horizontalHeader().setStretchLastSection(True)
         self.runs_table.verticalHeader().setVisible(False)
         self.runs_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -127,6 +129,67 @@ class HistoryPage(QtWidgets.QWidget):
             )
             for c, val in enumerate(cells):
                 self.runs_table.setItem(r, c, QtWidgets.QTableWidgetItem(str(val)))
+            self.runs_table.setCellWidget(r, 5, self._row_actions(row))
+
+    def _row_actions(self, row: dict) -> QtWidgets.QWidget:
+        """Per-row Approve / Reject / Cancel button strip.
+
+        Approve and Reject only fire when state == 'reviewing' (the
+        terminal-but-pending state where chat / research cards land).
+        Cancel only fires for in-flight states.  Otherwise the cell
+        shows nothing — the run is already in a final state.
+        """
+        widget = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(widget)
+        h.setContentsMargins(2, 2, 2, 2)
+        h.setSpacing(4)
+        state = row.get("state", "")
+        run_id = row.get("id", "")
+        if state == "reviewing":
+            for label, slot in (
+                ("Approve", self._approve),
+                ("Reject", self._reject),
+            ):
+                btn = QtWidgets.QPushButton(label)
+                btn.setStyleSheet(
+                    "QPushButton{padding:2px 8px;font-size:11px;border:1px solid #d0d3d9;"
+                    "border-radius:4px;background:#fff;}"
+                    "QPushButton:hover{background:#f0f2f5;}"
+                )
+                btn.clicked.connect(  # type: ignore[arg-type]
+                    lambda _checked=False, rid=run_id, fn=slot: fn(rid)
+                )
+                h.addWidget(btn)
+        elif state in ("queued", "planning", "executing", "awaiting_approval"):
+            btn = QtWidgets.QPushButton("Cancel")
+            btn.setStyleSheet(
+                "QPushButton{padding:2px 8px;font-size:11px;border:1px solid #d0d3d9;"
+                "border-radius:4px;background:#fff;color:#5b6068;}"
+                "QPushButton:hover{background:#fde8e7;border-color:#b3261e;color:#b3261e;}"
+            )
+            btn.clicked.connect(  # type: ignore[arg-type]
+                lambda _checked=False, rid=run_id: self._cancel(rid)
+            )
+            h.addWidget(btn)
+        h.addStretch(1)
+        return widget
+
+    def _approve(self, run_id: str) -> None:
+        asyncio.ensure_future(self._call_then_reload("runs.approve", {"run_id": run_id}))
+
+    def _reject(self, run_id: str) -> None:
+        asyncio.ensure_future(self._call_then_reload("runs.reject", {"run_id": run_id}))
+
+    def _cancel(self, run_id: str) -> None:
+        asyncio.ensure_future(self._call_then_reload("runs.cancel", {"run_id": run_id}))
+
+    async def _call_then_reload(self, method: str, params: dict) -> None:
+        try:
+            await self.client.call(method, params)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, f"{method} failed", str(exc))
+            return
+        await self._reload_runs()
 
     def _replay_selected(self) -> None:
         idx = self.runs_table.currentRow()
