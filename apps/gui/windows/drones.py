@@ -22,6 +22,9 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.widgets.context_gauge import ContextGauge
+from apps.service.tokens import context_window, estimate_action_total
+
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
@@ -186,6 +189,11 @@ class DronesPage(QtWidgets.QWidget):
         bottom.addWidget(self.send_btn)
         v.addLayout(bottom)
 
+        # Context-window gauge: hidden until the first send returns
+        # token totals.  See docs/BROWSER_PROVIDER_PLAN.md (PR 1).
+        self.context_gauge = ContextGauge(parent=wrap)
+        v.addWidget(self.context_gauge)
+
         shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Return"), self.message_input)
         shortcut.activated.connect(self._send_message)  # type: ignore[arg-type]
         return wrap
@@ -229,6 +237,7 @@ class DronesPage(QtWidgets.QWidget):
             self.subtitle.setText("")
             self.workspace_label.setVisible(False)
             self.transcript.setHtml(_render_transcript_html([]))
+            self.context_gauge.update(None, None)
             self.send_btn.setEnabled(False)
             return
         action = self._actions[row]
@@ -245,7 +254,33 @@ class DronesPage(QtWidgets.QWidget):
         else:
             self.workspace_label.setVisible(False)
         self.transcript.setHtml(_render_transcript_html(action.get("transcript") or []))
+        # Show a baseline gauge value from the action's transcript so
+        # switching drones immediately reflects their size, without
+        # waiting for the next send to populate.
+        self._refresh_gauge_from_action(action)
         self.send_btn.setEnabled(True)
+
+    def _refresh_gauge_from_action(self, action: dict[str, Any]) -> None:
+        """Estimate token usage client-side from the action snapshot.
+
+        Used when no fresh ``drones.send`` response is available (e.g.
+        the operator just selected the drone in the sidebar).  Reuses
+        the shared ``apps.service.tokens`` estimator — same pure-Python
+        functions the service calls, no host-boundary crossing.
+        """
+        snap = action.get("blueprint_snapshot") or {}
+        provider = snap.get("provider")
+        model = snap.get("model")
+        if not provider or not model:
+            self.context_gauge.update(None, None)
+            return
+        total = estimate_action_total(
+            action,
+            system_prompt=snap.get("system_persona") or "",
+            provider=provider,
+            model=model,
+        )
+        self.context_gauge.update(total, context_window(provider, model))
 
     async def _load_workspace_label(self, workspace_id: str) -> None:
         try:
@@ -300,6 +335,12 @@ class DronesPage(QtWidgets.QWidget):
                 self._actions[i] = action
                 break
         self.transcript.setHtml(_render_transcript_html(action.get("transcript") or []))
+        # Update the context-window gauge with the fresh totals from the
+        # response.  Hidden if context_window is None (unknown model).
+        self.context_gauge.update(
+            out.get("transcript_tokens"),
+            out.get("context_window"),
+        )
         self.send_btn.setEnabled(True)
         # Re-pull list so the sidebar's "N msg" counter updates.
         await self._reload()

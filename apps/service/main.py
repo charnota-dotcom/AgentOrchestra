@@ -42,6 +42,7 @@ from apps.service.providers.registry import known_providers
 from apps.service.secrets.keyring_store import hook_token
 from apps.service.store.events import EventStore
 from apps.service.templates.engine import render
+from apps.service.tokens import context_window, estimate_action_total, estimate_tokens
 from apps.service.types import (
     BlueprintVersionConflict,
     DroneAction,
@@ -1265,7 +1266,22 @@ class Handlers:
             action.transcript.append({"role": "assistant", "content": reply})
             await self.store.update_drone_action(action)
             await self.store.record_provider_message(provider_name, model)
-            return {"reply": reply, "action": action.model_dump(mode="json")}
+            # Token-usage gauge fields (PR `claude/token-tracking`).  See
+            # docs/BROWSER_PROVIDER_PLAN.md.  v1 estimator is char/4 —
+            # accurate ±30% on English; labelled (est) in the GUI.  These
+            # fields are additive; callers that don't know about them
+            # ignore them.
+            prompt_tokens = estimate_tokens(message_body, provider=provider_name, model=model)
+            if system_prompt:
+                prompt_tokens += estimate_tokens(system_prompt, provider=provider_name, model=model)
+            transcript_tokens = estimate_action_total(action, provider=provider_name, model=model)
+            return {
+                "reply": reply,
+                "action": action.model_dump(mode="json"),
+                "prompt_tokens": prompt_tokens,
+                "transcript_tokens": transcript_tokens,
+                "context_window": context_window(provider_name, model),
+            }
 
     async def _load_actor_for_authority(self, actor_id: str) -> DroneAction:
         actor = await self.store.get_drone_action(actor_id)
