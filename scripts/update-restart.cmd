@@ -41,7 +41,12 @@ echo [update-restart] Stopping any running AgentOrchestra...
 
 rem Window-title kill (visible cmd hosts started by launch.cmd /
 rem ops.cmd or by hand).
-taskkill /FI "WINDOWTITLE eq AgentOrchestra*" /F /T >nul 2>&1
+rem Exact match (no trailing *) on "AgentOrchestra" so we don't also
+rem kill "AgentOrchestra Ops Panel" — the panel is the host running
+rem THIS script.  Killing it leaves the operator stranded with no UI
+rem to click further commands.  The Service title still has its
+rem trailing * because there's no name collision risk there.
+taskkill /FI "WINDOWTITLE eq AgentOrchestra" /F /T >nul 2>&1
 taskkill /FI "WINDOWTITLE eq AgentOrchestra Service*" /F /T >nul 2>&1
 
 rem Port-listening kill (catches the supervisor-spawned service
