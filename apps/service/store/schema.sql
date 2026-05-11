@@ -264,6 +264,10 @@ CREATE TABLE IF NOT EXISTS drone_blueprints (
     system_persona           TEXT NOT NULL DEFAULT '',
     skills                   TEXT NOT NULL DEFAULT '[]',
     reference_blueprint_ids  TEXT NOT NULL DEFAULT '[]',
+    -- For ``provider == "browser"`` blueprints: URL of the chat
+    -- product the operator pastes into.  NULL for other providers.
+    -- See docs/BROWSER_PROVIDER_PLAN.md.
+    chat_url                 TEXT,
     version                  INTEGER NOT NULL DEFAULT 1,
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
@@ -280,6 +284,11 @@ CREATE TABLE IF NOT EXISTS drone_actions (
     additional_skills                 TEXT NOT NULL DEFAULT '[]',
     additional_reference_action_ids   TEXT NOT NULL DEFAULT '[]',
     transcript                        TEXT NOT NULL DEFAULT '[]',
+    -- For ``provider == "browser"`` actions: specific conversation URL
+    -- captured from the first paste-back.  Subsequent pastes are
+    -- routed to this drone only if their clipboard SourceURL matches.
+    -- NULL until first paste; nullable for all other providers.
+    bound_chat_url                    TEXT,
     created_at                        TEXT NOT NULL,
     updated_at                        TEXT NOT NULL
 );

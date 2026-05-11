@@ -606,6 +606,12 @@ class DroneBlueprint(BaseModel):
     # this blueprint inherits a reference to whatever the latest
     # action of each listed blueprint was.  Empty for most blueprints.
     reference_blueprint_ids: list[str] = Field(default_factory=list)
+    # For ``provider == "browser"`` drones: the URL the GUI opens when
+    # the operator clicks Send.  Pre-populated by the editor to
+    # ``https://claude.ai/new`` but the operator can change it to
+    # ChatGPT / Gemini / anything URL-addressable.  Ignored when
+    # ``provider`` is anything else.  See docs/BROWSER_PROVIDER_PLAN.md.
+    chat_url: str | None = None
     # Optimistic-concurrency token; bumped on every update.  The
     # blueprints.update RPC can take an ``expected_version`` to detect
     # racing edits the same way ``flows.update`` does.
@@ -640,6 +646,14 @@ class DroneAction(BaseModel):
     # by a Supervisor/Courier drone via append_reference).
     additional_reference_action_ids: list[str] = Field(default_factory=list)
     transcript: list[dict[str, str]] = Field(default_factory=list)
+    # For ``provider == "browser"`` drones: the specific conversation
+    # URL captured from the first paste-back's clipboard source.
+    # Subsequent pastes route to this drone only if their source URL
+    # matches.  The GUI also renders a link-back icon that
+    # ``webbrowser.open()``s this URL.  None until the first paste; can
+    # be cleared and re-bound via ``drones.bind_chat_url``.  See
+    # docs/BROWSER_PROVIDER_PLAN.md.
+    bound_chat_url: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

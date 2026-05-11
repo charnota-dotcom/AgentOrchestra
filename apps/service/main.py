@@ -105,6 +105,102 @@ def _first_descriptive_line(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Drone handoff formatters — see docs/BROWSER_PROVIDER_PLAN.md.
+#
+# Produces a text block the operator can paste into a different chat
+# service to "pick up the conversation elsewhere".  Three formats:
+#
+#   continuation:  persona + skills + full transcript, framed as
+#                  "pick up from the last user turn".  For continuing
+#                  in a fresh tab of the same or a different service.
+#   fork:          persona + skills only, no prior turns.  For spawning
+#                  a sibling conversation with the same character on a
+#                  new topic.
+#   plain:         user/assistant turns only, no framing.  For sharing
+#                  with a teammate, embedding in a doc, code-reviewing
+#                  the conversation.
+#
+# Universal across claude.ai / ChatGPT / Gemini — those products are
+# all flexible enough that per-service tagged formats add marginal
+# gain.  Tuning per-service is a v2 polish.
+# ---------------------------------------------------------------------------
+
+
+_ROLE_DESCRIPTIONS = {
+    "worker": "Worker — self-contained chat, cannot mutate peers",
+    "supervisor": "Supervisor — full peer authority",
+    "courier": "Courier — can append references onto peers",
+    "auditor": "Auditor — read-only",
+}
+
+
+def _format_drone_handoff(
+    kind: str,
+    *,
+    persona: str,
+    role: str,
+    skills: list[str],
+    transcript: list[dict[str, Any]],
+) -> str:
+    """Build a handoff text block in one of the three supported formats.
+
+    Pure function — no I/O, no Pydantic round-trips.  Easily testable
+    in isolation; the unit tests live in
+    ``apps/gui/browser_bridge/tests/test_handoff.py`` (the GUI side
+    consumes the same formats via the ``drones.export`` RPC).
+    """
+    role_line = _ROLE_DESCRIPTIONS.get(role, role)
+    skills_line = "Operator-supplied skills you can invoke: " + " ".join(skills) if skills else ""
+
+    if kind == "fork":
+        lines: list[str] = []
+        lines.append(f"You are a {role} drone with the following character:")
+        if persona:
+            lines.append("")
+            lines.append(persona)
+        if skills_line:
+            lines.append("")
+            lines.append(skills_line)
+        lines.append("")
+        lines.append("Please introduce yourself briefly and wait for the user's first instruction.")
+        return "\n".join(lines).rstrip() + "\n"
+
+    if kind == "plain":
+        chunks: list[str] = []
+        for m in transcript:
+            who = "User" if m.get("role") == "user" else "Assistant"
+            chunks.append(f"{who}: {m.get('content', '')}")
+        return ("\n\n".join(chunks)).rstrip() + "\n"
+
+    # Continuation (default): full framed handoff.
+    lines = []
+    lines.append(
+        "You are continuing a conversation that began in another window. "
+        "Pick up from the last user message; do not repeat or paraphrase "
+        "prior turns."
+    )
+    lines.append("")
+    lines.append("[Role and persona]")
+    lines.append(role_line)
+    if persona:
+        lines.append(persona)
+    if skills_line:
+        lines.append("")
+        lines.append("[Available skills]")
+        lines.append(" ".join(skills))
+    if transcript:
+        lines.append("")
+        lines.append("[Conversation so far]")
+        lines.append("")
+        for m in transcript:
+            who = "User" if m.get("role") == "user" else "You (assistant)"
+            lines.append(f"{who}: {m.get('content', '')}")
+            lines.append("")
+        lines.append("[End of prior conversation — please respond to the user's next message.]")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Drone authority — see docs/DRONE_MODEL.md ("Authority matrix").
 #
 # Encodes the role -> (op, scope) permission matrix as a single
@@ -1022,6 +1118,7 @@ class Handlers:
             reference_blueprint_ids=[
                 str(r) for r in (params.get("reference_blueprint_ids") or []) if r
             ],
+            chat_url=params.get("chat_url") or None,
         )
         await self.store.insert_drone_blueprint(bp)
         return bp.model_dump(mode="json")
@@ -1056,6 +1153,8 @@ class Handlers:
             bp.reference_blueprint_ids = [
                 str(r) for r in (params["reference_blueprint_ids"] or []) if r
             ]
+        if "chat_url" in params:
+            bp.chat_url = params["chat_url"] or None
         expected_version = params.get("expected_version")
         try:
             await self.store.update_drone_blueprint(
@@ -1219,6 +1318,33 @@ class Handlers:
             system_prompt: str | None = "\n\n".join(system_lines).strip() or None
             message_body = message
 
+            # Browser-mode drones don't call any LLM here — the operator
+            # is going to paste the prompt into a browser tab themselves.
+            # Persist the user turn we just appended (so it survives even
+            # if the operator abandons the paste-back), then return the
+            # rendered prompt + URL + token totals.  The GUI opens a
+            # BrowserBridgeDialog from this shape.  See
+            # docs/BROWSER_PROVIDER_PLAN.md.
+            if provider_name == "browser":
+                await self.store.update_drone_action(action)
+                rendered_prompt = (
+                    f"{system_prompt}\n\n{message_body}" if system_prompt else message_body
+                )
+                return {
+                    "needs_paste": True,
+                    "rendered_prompt": rendered_prompt,
+                    "chat_url": snapshot.get("chat_url") or "https://claude.ai/new",
+                    "bound_chat_url": action.bound_chat_url,
+                    "prompt_tokens": estimate_tokens(
+                        rendered_prompt, provider=provider_name, model=model
+                    ),
+                    "transcript_tokens": estimate_action_total(
+                        action, provider=provider_name, model=model
+                    ),
+                    "context_window": context_window(provider_name, model),
+                    "action": action.model_dump(mode="json"),
+                }
+
             provider = get_provider(provider_name)
             from apps.service.types import (
                 BlastRadiusPolicy,
@@ -1282,6 +1408,99 @@ class Handlers:
                 "transcript_tokens": transcript_tokens,
                 "context_window": context_window(provider_name, model),
             }
+
+    async def drones_append_assistant_turn(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Append a manually-pasted assistant reply to a browser-mode
+        drone's transcript.
+
+        Companion to ``drones.send`` for browser drones: the GUI calls
+        this when the operator pastes the chat product's reply back
+        into the BrowserBridgeDialog.  Validates content is non-empty;
+        returns the updated action plus fresh token totals so the GUI
+        can refresh the context gauge.  See
+        docs/BROWSER_PROVIDER_PLAN.md.
+        """
+        action_id = params["action_id"]
+        content = (params.get("content") or "").strip()
+        if not content:
+            raise ValueError("content required")
+        async with await self._lock_for_action(action_id):
+            action = await self.store.get_drone_action(action_id)
+            if not action:
+                raise ValueError(f"unknown action: {action_id}")
+            action.transcript.append({"role": "assistant", "content": content})
+            await self.store.update_drone_action(action)
+            snap = action.blueprint_snapshot or {}
+            return {
+                "action": action.model_dump(mode="json"),
+                "transcript_tokens": estimate_action_total(
+                    action,
+                    provider=snap.get("provider", ""),
+                    model=snap.get("model", ""),
+                ),
+                "context_window": context_window(snap.get("provider", ""), snap.get("model", "")),
+            }
+
+    async def drones_bind_chat_url(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Pin or rebind a drone's ``bound_chat_url``.
+
+        Called automatically by the GUI after the first successful
+        paste-back captures a conversation-specific URL (e.g.
+        ``https://claude.ai/chat/<uuid>``).  Also exposed as a manual
+        "Re-link…" action so the operator can clear or replace the
+        binding.  Pass ``url=None`` or empty to clear.
+        """
+        action_id = params["action_id"]
+        url = (params.get("url") or "").strip() or None
+        async with await self._lock_for_action(action_id):
+            action = await self.store.get_drone_action(action_id)
+            if not action:
+                raise ValueError(f"unknown action: {action_id}")
+            action.bound_chat_url = url
+            await self.store.update_drone_action(action)
+            return {"action": action.model_dump(mode="json")}
+
+    async def drones_export(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Format a drone's transcript for cross-service handoff.
+
+        Three formats (operator-picked via the Handoff menu):
+        ``"continuation"`` — persona + skills + full transcript framed
+            as "pick up from the last user turn".
+        ``"fork"`` — persona + skills only, no prior turns; for
+            spawning a sibling conversation with the same character.
+        ``"plain"`` — user/assistant turns only, no framing; for
+            sharing, doc embedding, or code review.
+
+        Returns the formatted text + token estimate so the GUI can
+        show "this is ~3.2K tokens; fits in claude.ai easily".
+        """
+        action_id = params["action_id"]
+        format_kind = params.get("format", "continuation")
+        if format_kind not in ("continuation", "fork", "plain"):
+            raise ValueError(
+                f"unknown handoff format: {format_kind!r} "
+                "(expected one of: continuation, fork, plain)"
+            )
+        action = await self.store.get_drone_action(action_id)
+        if not action:
+            raise ValueError(f"unknown action: {action_id}")
+        snap = action.blueprint_snapshot or {}
+        text = _format_drone_handoff(
+            format_kind,
+            persona=snap.get("system_persona") or "",
+            role=snap.get("role", "worker"),
+            skills=list(snap.get("skills") or []) + list(action.additional_skills or []),
+            transcript=action.transcript or [],
+        )
+        return {
+            "text": text,
+            "tokens": estimate_tokens(
+                text,
+                provider=snap.get("provider", ""),
+                model=snap.get("model", ""),
+            ),
+            "format": format_kind,
+        }
 
     async def _load_actor_for_authority(self, actor_id: str) -> DroneAction:
         actor = await self.store.get_drone_action(actor_id)
@@ -1624,6 +1843,11 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("drones.send", h.drones_send)
     server.register("drones.append_reference", h.drones_append_reference)
     server.register("drones.append_skill", h.drones_append_skill)
+    # Browser-provider RPCs (PR claude/browser-provider; see
+    # docs/BROWSER_PROVIDER_PLAN.md).
+    server.register("drones.append_assistant_turn", h.drones_append_assistant_turn)
+    server.register("drones.bind_chat_url", h.drones_bind_chat_url)
+    server.register("drones.export", h.drones_export)
     server.register("skills.list", h.skills_list)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)

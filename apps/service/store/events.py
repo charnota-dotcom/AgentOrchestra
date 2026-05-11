@@ -107,7 +107,29 @@ class EventStore:
         # no-op once the rows are gone.
         for legacy in ("attachments", "agents"):
             await self.db.execute(f"DROP TABLE IF EXISTS {legacy}")
+        # Additive column migrations.  CREATE TABLE IF NOT EXISTS leaves
+        # existing tables untouched; for already-deployed DBs we need
+        # explicit ALTERs so the new fields appear on the existing
+        # tables too.  Each ALTER is idempotent via a column-presence
+        # probe — re-running the migration on an already-patched DB is
+        # a no-op.  See docs/BROWSER_PROVIDER_PLAN.md (PR 2).
+        await self._add_column_if_missing("drone_blueprints", "chat_url", "TEXT")
+        await self._add_column_if_missing("drone_actions", "bound_chat_url", "TEXT")
         await self.db.commit()
+
+    async def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
+        """Idempotent ``ALTER TABLE table ADD COLUMN column decl`` —
+        no-op when the column already exists.  Decl is the type plus
+        any constraints (e.g. ``"TEXT NOT NULL DEFAULT ''"``); SQLite
+        requires a default when adding a NOT NULL column to a non-empty
+        table, so callers must include one for non-nullable adds.
+        """
+        cur = await self.db.execute(f"PRAGMA table_info({table})")
+        rows = await cur.fetchall()
+        existing = {r["name"] for r in rows}
+        if column in existing:
+            return
+        await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     # ------------------------------------------------------------------
     # Event append
@@ -764,8 +786,8 @@ class EventStore:
                 INSERT INTO drone_blueprints (
                     id, name, description, role, provider, model,
                     system_persona, skills, reference_blueprint_ids,
-                    version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    chat_url, version, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     bp.id,
@@ -777,6 +799,7 @@ class EventStore:
                     bp.system_persona,
                     json.dumps(bp.skills),
                     json.dumps(bp.reference_blueprint_ids),
+                    bp.chat_url,
                     bp.version,
                     bp.created_at.isoformat(),
                     bp.updated_at.isoformat(),
@@ -799,7 +822,7 @@ class EventStore:
                     UPDATE drone_blueprints
                        SET name = ?, description = ?, role = ?, provider = ?,
                            model = ?, system_persona = ?, skills = ?,
-                           reference_blueprint_ids = ?,
+                           reference_blueprint_ids = ?, chat_url = ?,
                            version = version + 1, updated_at = ?
                      WHERE id = ? AND version = ?
                     """,
@@ -812,6 +835,7 @@ class EventStore:
                         bp.system_persona,
                         json.dumps(bp.skills),
                         json.dumps(bp.reference_blueprint_ids),
+                        bp.chat_url,
                         bp.updated_at.isoformat(),
                         bp.id,
                         expected_version,
@@ -828,7 +852,7 @@ class EventStore:
                     UPDATE drone_blueprints
                        SET name = ?, description = ?, role = ?, provider = ?,
                            model = ?, system_persona = ?, skills = ?,
-                           reference_blueprint_ids = ?,
+                           reference_blueprint_ids = ?, chat_url = ?,
                            version = version + 1, updated_at = ?
                      WHERE id = ?
                     """,
@@ -841,6 +865,7 @@ class EventStore:
                         bp.system_persona,
                         json.dumps(bp.skills),
                         json.dumps(bp.reference_blueprint_ids),
+                        bp.chat_url,
                         bp.updated_at.isoformat(),
                         bp.id,
                     ),
@@ -904,8 +929,8 @@ class EventStore:
                 INSERT INTO drone_actions (
                     id, blueprint_id, blueprint_snapshot, workspace_id,
                     additional_skills, additional_reference_action_ids,
-                    transcript, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    transcript, bound_chat_url, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     action.id,
@@ -915,6 +940,7 @@ class EventStore:
                     json.dumps(action.additional_skills),
                     json.dumps(action.additional_reference_action_ids),
                     json.dumps(action.transcript),
+                    action.bound_chat_url,
                     action.created_at.isoformat(),
                     action.updated_at.isoformat(),
                 ),
@@ -932,6 +958,7 @@ class EventStore:
                        additional_skills = ?,
                        additional_reference_action_ids = ?,
                        transcript = ?,
+                       bound_chat_url = ?,
                        updated_at = ?
                  WHERE id = ?
                 """,
@@ -940,6 +967,7 @@ class EventStore:
                     json.dumps(action.additional_skills),
                     json.dumps(action.additional_reference_action_ids),
                     json.dumps(action.transcript),
+                    action.bound_chat_url,
                     action.updated_at.isoformat(),
                     action.id,
                 ),
