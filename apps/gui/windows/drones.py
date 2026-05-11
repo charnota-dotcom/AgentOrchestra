@@ -36,19 +36,38 @@ def _render_transcript_html(transcript: list[dict[str, Any]]) -> str:
     Mirrors the lightweight markup the Agents tab uses — User /
     Assistant labels with role-coloured backgrounds.  Plain text only;
     the message body is HTML-escaped before insertion.
+
+    Recognises four entry kinds:
+
+    * ``role=user`` / ``role=assistant`` — chat turns, rendered as
+      coloured speech bubbles (the v1 shape).
+    * ``role=tool_call`` — the assistant invoked a tool.  Rendered as
+      a slim monospace card with the tool name, input, and (for
+      ``Task``) a "sub-agent" badge.  Captured from claude-cli's
+      stream-json output.
+    * ``role=tool_result`` — a tool returned a result.  Rendered as a
+      paired card; turns red on ``is_error``.
+
+    See ``ClaudeCLIChatSession`` in
+    ``apps/service/providers/claude_cli/session.py``.
     """
     blocks: list[str] = []
     for m in transcript:
         role = m.get("role") or "user"
-        content = _html.escape(m.get("content") or "")
         if role == "user":
+            content = _html.escape(m.get("content") or "")
             blocks.append(
                 '<div style="background:#eef3fb;border-radius:6px;padding:10px 12px;'
                 'margin-bottom:10px;"><b style="color:#1f6feb;">You</b><br>'
                 f'<pre style="white-space:pre-wrap;font-family:inherit;margin:6px 0 0 0;">'
                 f"{content}</pre></div>"
             )
+        elif role == "tool_call":
+            blocks.append(_render_tool_call_html(m))
+        elif role == "tool_result":
+            blocks.append(_render_tool_result_html(m))
         else:
+            content = _html.escape(m.get("content") or "")
             blocks.append(
                 '<div style="background:#f7f8fa;border:1px solid #e6e7eb;border-radius:6px;'
                 'padding:10px 12px;margin-bottom:10px;"><b style="color:#5b6068;">Drone</b><br>'
@@ -58,6 +77,59 @@ def _render_transcript_html(transcript: list[dict[str, Any]]) -> str:
     return (
         "".join(blocks)
         or "<i style='color:#7a7d85;'>(no messages yet — send one to get started)</i>"
+    )
+
+
+def _render_tool_call_html(entry: dict[str, Any]) -> str:
+    name = _html.escape(str(entry.get("tool_name") or "?"))
+    is_subagent = bool(entry.get("is_subagent"))
+    step = entry.get("step") or 0
+    badge = (
+        '<span style="background:#7c3aed;color:#fff;font-size:10px;'
+        'padding:1px 6px;border-radius:9px;margin-left:6px;">sub-agent</span>'
+        if is_subagent
+        else ""
+    )
+    tool_input = entry.get("tool_input") or {}
+    try:
+        import json as _json
+
+        input_text = _json.dumps(tool_input, indent=2, default=str)
+    except (TypeError, ValueError):
+        input_text = str(tool_input)
+    input_text = _html.escape(input_text)
+    if len(input_text) > 1200:
+        input_text = input_text[:1200] + "\n... (truncated)"
+    label_color = "#7c3aed" if is_subagent else "#0a7d4d"
+    return (
+        '<div style="background:#fbfaf3;border:1px solid #ece6c5;border-radius:6px;'
+        'padding:8px 12px;margin-bottom:6px;font-size:12px;">'
+        f'<b style="color:{label_color};">tool_call</b> '
+        f'<span style="color:#5b6068;">#{int(step)}</span> '
+        f'<code style="background:#fff3c4;padding:1px 4px;border-radius:3px;">{name}</code>'
+        f"{badge}<br>"
+        '<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;'
+        f'font-size:11px;color:#3a3d44;margin:6px 0 0 0;">{input_text}</pre></div>'
+    )
+
+
+def _render_tool_result_html(entry: dict[str, Any]) -> str:
+    step = entry.get("step") or 0
+    is_error = bool(entry.get("is_error"))
+    output = _html.escape(str(entry.get("tool_output") or ""))
+    if len(output) > 1500:
+        output = output[:1500] + "\n... (truncated)"
+    border = "#f3b1b1" if is_error else "#cfe8d4"
+    bg = "#fdf2f2" if is_error else "#f2f9f4"
+    label_color = "#b3261e" if is_error else "#0a7d4d"
+    label = "tool_result (error)" if is_error else "tool_result"
+    return (
+        f'<div style="background:{bg};border:1px solid {border};border-radius:6px;'
+        'padding:8px 12px;margin-bottom:10px;font-size:12px;">'
+        f'<b style="color:{label_color};">{label}</b> '
+        f'<span style="color:#5b6068;">#{int(step)}</span><br>'
+        '<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;'
+        f'font-size:11px;color:#3a3d44;margin:6px 0 0 0;">{output}</pre></div>'
     )
 
 

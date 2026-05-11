@@ -36,11 +36,11 @@ def test_resolve_model_pass_through_for_unknown() -> None:
 
 @pytest.mark.asyncio
 async def test_healthcheck_reflects_binary_presence(monkeypatch) -> None:
-    monkeypatch.setattr(claude_cli, "_claude_binary", lambda: None)
+    monkeypatch.setattr(claude_cli.provider, "_claude_binary", lambda: None)
     p = claude_cli.ClaudeCLIProvider()
     assert (await p.healthcheck()) is False
 
-    monkeypatch.setattr(claude_cli, "_claude_binary", lambda: "/usr/local/bin/claude")
+    monkeypatch.setattr(claude_cli.provider, "_claude_binary", lambda: "/usr/local/bin/claude")
     assert (await p.healthcheck()) is True
 
 
@@ -61,7 +61,7 @@ def _make_card(provider: str = "claude-cli") -> PersonalityCard:
 
 @pytest.mark.asyncio
 async def test_open_chat_raises_when_binary_missing(monkeypatch) -> None:
-    monkeypatch.setattr(claude_cli, "_claude_binary", lambda: None)
+    monkeypatch.setattr(claude_cli.provider, "_claude_binary", lambda: None)
     p = claude_cli.ClaudeCLIProvider()
     with pytest.raises(ProviderError, match="claude"):
         await p.open_chat(_make_card())
@@ -71,7 +71,7 @@ async def test_open_chat_raises_when_binary_missing(monkeypatch) -> None:
 async def test_open_chat_rejects_wrong_provider_card(monkeypatch) -> None:
     # Even with the binary present, a card targeting a different
     # provider must not be served by this adapter.
-    monkeypatch.setattr(claude_cli, "_claude_binary", lambda: "/usr/local/bin/claude")
+    monkeypatch.setattr(claude_cli.provider, "_claude_binary", lambda: "/usr/local/bin/claude")
     p = claude_cli.ClaudeCLIProvider()
     with pytest.raises(ProviderError, match="not claude-cli"):
         await p.open_chat(_make_card(provider="anthropic"))
@@ -101,14 +101,14 @@ async def test_run_with_tools_is_deferred() -> None:
 
 
 def test_render_prompt_single_turn(monkeypatch) -> None:
-    monkeypatch.setattr(claude_cli, "_claude_binary", lambda: "/usr/local/bin/claude")
+    monkeypatch.setattr(claude_cli.provider, "_claude_binary", lambda: "/usr/local/bin/claude")
     s = claude_cli.ClaudeCLIChatSession(_make_card())
     s._history = [{"role": "user", "content": "hello"}]
     assert s._render_prompt() == "hello"
 
 
 def test_render_prompt_multi_turn_inlines_history(monkeypatch) -> None:
-    monkeypatch.setattr(claude_cli, "_claude_binary", lambda: "/usr/local/bin/claude")
+    monkeypatch.setattr(claude_cli.provider, "_claude_binary", lambda: "/usr/local/bin/claude")
     s = claude_cli.ClaudeCLIChatSession(_make_card(), system="be terse")
     s._history = [
         {"role": "user", "content": "ping"},

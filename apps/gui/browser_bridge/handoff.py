@@ -57,6 +57,12 @@ def render_handoff(
     role_line = _ROLE_DESCRIPTIONS.get(role, role)
     skills_line = "Operator-supplied skills you can invoke: " + " ".join(skills) if skills else ""
 
+    # Drop tool_call / tool_result agent-loop entries — they're a
+    # local visibility record for the GUI, not chat turns to hand off
+    # to a fresh browser session.  See ``ClaudeCLIChatSession``
+    # (stream-json) and ``drones_send`` for where they originate.
+    transcript = [m for m in transcript if m.get("role") in ("user", "assistant")]
+
     if kind == "fork":
         lines: list[str] = []
         lines.append(f"You are a {role} drone with the following character:")
