@@ -32,7 +32,13 @@ echo.
 echo --- gemini -p "say hi in 5 words" ---
 echo (waiting up to 30s for a reply...)
 echo.
-call gemini -p "say hi in 5 words"
+rem `--skip-trust` + GEMINI_CLI_TRUST_WORKSPACE: Gemini CLI refuses
+rem headless runs in any folder it doesn't consider trusted.  Both
+rem the env var and the flag are needed because different CLI
+rem versions honour different bypasses.  Mirrors the production
+rem gemini_cli.py provider's escape hatch.
+set GEMINI_CLI_TRUST_WORKSPACE=true
+call gemini -p "say hi in 5 words" --skip-trust
 set GEMINI_EXIT=%ERRORLEVEL%
 echo.
 
