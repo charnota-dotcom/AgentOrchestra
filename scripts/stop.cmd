@@ -13,7 +13,12 @@ rem    started.
 
 echo Stopping AgentOrchestra...
 
-taskkill /FI "WINDOWTITLE eq AgentOrchestra*" /F /T >nul 2>&1
+rem Exact match (no trailing *) so we don't accidentally also kill
+rem "AgentOrchestra Ops Panel" — the panel is the host that's
+rem running THIS script; killing it leaves the operator stranded
+rem with no UI to click further commands.  See annotation about
+rem Update + Restart not re-opening the panel.
+taskkill /FI "WINDOWTITLE eq AgentOrchestra" /F /T >nul 2>&1
 taskkill /FI "WINDOWTITLE eq AgentOrchestra Service*" /F /T >nul 2>&1
 
 rem Kill anything listening on the orchestrator port.  Skips the
