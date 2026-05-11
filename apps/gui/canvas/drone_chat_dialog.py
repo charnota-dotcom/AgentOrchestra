@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.widgets.context_gauge import ContextGauge
+from apps.service.tokens import context_window, estimate_action_total
+
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
@@ -110,8 +113,36 @@ class DroneActionChatDialog(QtWidgets.QDialog):
         bottom.addWidget(self.send_btn)
         v.addLayout(bottom)
 
+        # Context-window gauge.  Compact layout for the dialog's
+        # tighter horizontal space.  Hidden if the model pair is
+        # unknown; otherwise lit up immediately with the size of
+        # whatever transcript we opened with.
+        self.context_gauge = ContextGauge(parent=self, compact=True)
+        v.addWidget(self.context_gauge)
+        self._refresh_gauge()
+
         shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Return"), self.message_input)
         shortcut.activated.connect(self._send)  # type: ignore[arg-type]
+
+    def _refresh_gauge(self) -> None:
+        """Update the context gauge from the action snapshot.
+
+        Used on dialog open + as a fallback when the server response
+        doesn't carry fresh token totals (e.g. older service).
+        """
+        snap = self.action.get("blueprint_snapshot") or {}
+        provider = snap.get("provider")
+        model = snap.get("model")
+        if not provider or not model:
+            self.context_gauge.update(None, None)
+            return
+        total = estimate_action_total(
+            self.action,
+            system_prompt=snap.get("system_persona") or "",
+            provider=provider,
+            model=model,
+        )
+        self.context_gauge.update(total, context_window(provider, model))
 
     def _send(self) -> None:
         text = self.message_input.toPlainText().strip()
@@ -139,6 +170,15 @@ class DroneActionChatDialog(QtWidgets.QDialog):
             return
         self.action = out.get("action") or self.action
         self.transcript.setHtml(_render_html(self.action.get("transcript") or []))
+        # Prefer the server's fresh totals; fall back to a local
+        # estimate if the response is missing them (e.g. older service).
+        if out.get("context_window") is not None:
+            self.context_gauge.update(
+                out.get("transcript_tokens"),
+                out.get("context_window"),
+            )
+        else:
+            self._refresh_gauge()
         self.send_btn.setEnabled(True)
         # Bubble up so the canvas can refresh the node.
         self.sent.emit(self.action)
