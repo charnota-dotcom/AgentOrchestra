@@ -141,6 +141,26 @@
         "scripts/start.cmd"
       ],
       "annotation_excerpt": "problem is still here, and where is"
+    },
+    {
+      "annotation_index": 13,
+      "version": "0.1.0+blueprints-save-creates-when-empty",
+      "status": "shipped",
+      "description": "Operator filled in the Blueprints form fields (Name, Description, Role, Provider, Model, System persona, Default skills, Reference blueprints) but the Save button stayed greyed out. Root cause: Save was hard-gated on `_current` (a selected blueprint row); the big form was editable even with no selection, but there was no path to actually create from it — operator had to discover the small `+ New` dialog instead. Fixed by enabling Save as soon as Name is non-empty, and branching `_save_async`: when `_current` is None it calls `blueprints.create` with the full form shape (which the backend already accepts at apps/service/main.py:1007); otherwise the existing update path runs unchanged.",
+      "change_overview": [
+        "apps/gui/windows/blueprints.py — new `_update_save_enabled` wired to `name_in.textChanged`; enables Save when either a row is selected OR Name is non-empty",
+        "apps/gui/windows/blueprints.py — `_save_async` refactored to share a `common` form-snapshot dict between create and update; calls `blueprints.create` when `_current` is None"
+      ],
+      "risk_level": "Low",
+      "risk_note": "Existing `+ New` minimal-dialog flow is untouched and still works. The only behavioural change is that filling in the big form now also yields a saveable blueprint, which is what an operator would expect from a form that looks editable.",
+      "next_steps": [
+        "Run scripts\\update.cmd then click Restart in the Operator Panel. Open Blueprints tab. Type a name into the big form (without clicking + New first) — Save should enable. Click Save — sidebar gains a new row with status \"Created (v1)\".",
+        "Edit fields on the now-selected blueprint and Save — status reads \"Saved (v2)\", confirming the update path still works."
+      ],
+      "files_changed": [
+        "apps/gui/windows/blueprints.py"
+      ],
+      "annotation_excerpt": "cannot save blueprint"
     }
   ]
 }
