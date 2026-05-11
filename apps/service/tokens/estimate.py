@@ -74,14 +74,25 @@ def _get_transcript(action: Any) -> list[Any]:
 
 def _entry_text(entry: Any) -> str:
     if isinstance(entry, dict):
-        # Prefer ``content`` (user/assistant/tool_call/tool_result).
-        for key in ("content", "output", "input", "prompt", "result"):
+        # Prefer ``content`` (user / assistant turns).  Then the agent-
+        # loop entry keys (``tool_output`` / ``tool_input``) emitted by
+        # claude-cli's stream-json path, then the legacy fallbacks.
+        for key in (
+            "content",
+            "tool_output",
+            "output",
+            "tool_input",
+            "input",
+            "prompt",
+            "result",
+        ):
             value = entry.get(key)
             if isinstance(value, str) and value:
                 return value
             if isinstance(value, dict):
-                # tool_call.input is a dict of arg → value; flatten to a
-                # readable string so its size counts toward the total.
+                # tool_call.tool_input is a dict of arg -> value;
+                # flatten to a readable string so its size counts
+                # toward the total.
                 return " ".join(f"{k}={v}" for k, v in value.items())
         return ""
     return str(getattr(entry, "content", "") or "")

@@ -1301,7 +1301,13 @@ class Handlers:
                     "Operator-supplied skills you can invoke: " + " ".join(effective_skills)
                 )
 
-            prior_turns = action.transcript[:-1]
+            # Skip tool_call / tool_result transcript entries when
+            # composing the LLM history — those are agent-loop visibility
+            # records for the GUI, not chat turns the model has to be
+            # primed on.  See ``ClaudeCLIChatSession`` (stream-json).
+            prior_turns = [
+                m for m in action.transcript[:-1] if m.get("role") in ("user", "assistant")
+            ]
             if prior_turns:
                 history_lines = []
                 for m in prior_turns:
@@ -1377,19 +1383,78 @@ class Handlers:
                     )
 
             session = await provider.open_chat(card, system=system_prompt, cwd=cwd)
-            chunks: list[str] = []
+            # Collect the assistant turn as an ordered list of segments
+            # so we capture the full agent loop, not just the final
+            # answer.  For chat-only providers (anthropic / openai /
+            # gemini) only ``text_delta`` events arrive and we end up
+            # with one assistant segment — identical to the v1 shape.
+            # For the claude-cli stream-json path we additionally see
+            # ``tool_call`` and ``tool_result`` events interleaved with
+            # text — those become their own transcript entries so the
+            # GUI can render the agent loop.  See
+            # docs/BROWSER_PROVIDER_PLAN.md (PR ``claude-cli-stream-json``).
+            text_buffer: list[str] = []
+            turn_segments: list[dict[str, Any]] = []
+
+            def _flush_text() -> None:
+                if not text_buffer:
+                    return
+                joined = "".join(text_buffer).strip()
+                text_buffer.clear()
+                if joined:
+                    turn_segments.append({"role": "assistant", "content": joined})
+
             try:
                 async for ev in session.send(message_body, attachments=[]):
                     if ev.kind == "text_delta":
-                        chunks.append(ev.text)
+                        text_buffer.append(ev.text)
+                    elif ev.kind == "tool_call":
+                        _flush_text()
+                        p = ev.payload or {}
+                        turn_segments.append(
+                            {
+                                "role": "tool_call",
+                                "tool_name": p.get("tool_name") or "",
+                                "tool_input": p.get("tool_input") or {},
+                                "tool_id": p.get("tool_id") or "",
+                                "is_subagent": bool(p.get("is_subagent")),
+                                "step": int(p.get("step") or 0),
+                            }
+                        )
+                    elif ev.kind == "tool_result":
+                        _flush_text()
+                        p = ev.payload or {}
+                        turn_segments.append(
+                            {
+                                "role": "tool_result",
+                                "tool_id": p.get("tool_id") or "",
+                                "tool_output": p.get("tool_output") or "",
+                                "is_error": bool(p.get("is_error")),
+                                "step": int(p.get("step") or 0),
+                            }
+                        )
+                    elif ev.kind == "assistant_message":
+                        _flush_text()
                     elif ev.kind == "error":
                         raise RuntimeError(ev.text or "provider error")
                     elif ev.kind == "finish":
+                        _flush_text()
                         break
             finally:
                 await session.close()
-            reply = "".join(chunks)
-            action.transcript.append({"role": "assistant", "content": reply})
+            # Drain anything still buffered (some providers never emit
+            # ``assistant_message`` / ``finish``).
+            _flush_text()
+            # Reply text returned to the JSON-RPC caller is the
+            # concatenation of the assistant text segments — the agent
+            # loop's tool calls aren't part of the human-facing reply.
+            reply = "\n\n".join(s["content"] for s in turn_segments if s.get("role") == "assistant")
+            if not turn_segments:
+                # Provider yielded neither text nor tool events.  Keep
+                # the v1 shape: a single empty assistant entry so the
+                # transcript still reflects "we asked, got nothing".
+                turn_segments.append({"role": "assistant", "content": reply})
+            action.transcript.extend(turn_segments)
             await self.store.update_drone_action(action)
             await self.store.record_provider_message(provider_name, model)
             # Token-usage gauge fields (PR `claude/token-tracking`).  See
