@@ -102,6 +102,16 @@ class ClaudeCLIChatSession(ChatSession):
             "--output-format",
             "json",
         ]
+        # Pass persona / repo-aware system context via the CLI's
+        # native flag rather than inlining it into the user message.
+        # `--append-system-prompt` preserves Claude Code's default
+        # tool definitions and adds our operator text on top.  Without
+        # this, callers that set `system=...` on open_chat() saw their
+        # context silently dropped on single-turn calls (drones, ad-hoc
+        # chats).  See drones_send() in apps/service/main.py for the
+        # bug report that surfaced this.
+        if self.system:
+            args.extend(["--append-system-prompt", self.system])
         model = _resolve_model(self.card.model)
         if model:
             args.extend(["--model", model])

@@ -127,7 +127,14 @@ class DroneActionChatDialog(QtWidgets.QDialog):
                 "drones.send", {"action_id": self.action["id"], "message": text}
             )
         except Exception as exc:
-            QtWidgets.QMessageBox.critical(self, "Send failed", str(exc))
+            msg = str(exc).strip()
+            body = f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
+            body += (
+                "\n\nFor a deeper trace, run scripts\\doctor.cmd — its "
+                "`--- Recent service log ---` section shows the last "
+                "lines the auto-spawned service wrote to stderr."
+            )
+            QtWidgets.QMessageBox.critical(self, "Send failed", body)
             self.send_btn.setEnabled(True)
             return
         self.action = out.get("action") or self.action

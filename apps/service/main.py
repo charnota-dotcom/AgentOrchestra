@@ -1163,27 +1163,52 @@ class Handlers:
                 )
             action.transcript.append({"role": "user", "content": message})
 
-            # Build the prompt body from the transcript.  Mirrors
-            # _render_transcript() but reads from the snapshot for the
-            # system header, since blueprint edits AFTER deploy must
-            # not retroactively change in-flight conversations.
+            # Build a CLEAN system prompt and a CLEAN message body.
+            #
+            # Earlier this method pre-formatted a fake transcript with
+            # "System: ..." / "Available skills: ..." / "User: ..." /
+            # "Assistant:" labels and shipped the whole thing as a
+            # single user message to the CLI.  Claude-sonnet read that
+            # as a metadata dump from the host, not a question from a
+            # user, and replied "I don't see a question in your message
+            # — just system reminders about available tools, skills,
+            # and context."  See the bug-report screenshot the operator
+            # pasted on 2026-05-11.
+            #
+            # The fix: persona + skills go via the provider's proper
+            # system-prompt mechanism (claude-cli: --append-system-
+            # prompt; gemini-cli: its _render_prompt inlines it).
+            # The message body is JUST the conversational content,
+            # with prior turns (if any) framed in natural language so
+            # the model can't mistake the framing for system metadata.
             persona = snapshot.get("system_persona") or ""
             effective_skills = list(snapshot.get("skills") or []) + list(
                 action.additional_skills or []
             )
-            parts: list[str] = []
+            system_lines: list[str] = []
             if persona:
-                parts.append(f"System: {persona}")
+                system_lines.append(persona)
             if effective_skills:
-                # Inline the skill tokens so the model knows it's allowed
-                # to invoke them.  Provider adapters may further inject
-                # tool definitions; this is the minimum viable hint.
-                parts.append("Available skills: " + " ".join(effective_skills))
-            for m in action.transcript:
-                role = "User" if m.get("role") == "user" else "Assistant"
-                parts.append(f"{role}: {m.get('content', '')}")
-            parts.append("Assistant:")
-            prompt = "\n\n".join(parts)
+                system_lines.append(
+                    "Operator-supplied skills you can invoke: " + " ".join(effective_skills)
+                )
+            system_prompt: str | None = "\n\n".join(system_lines).strip() or None
+
+            prior_turns = action.transcript[:-1]
+            if prior_turns:
+                history_lines = []
+                for m in prior_turns:
+                    speaker = "User" if m.get("role") == "user" else "You (assistant)"
+                    history_lines.append(f"{speaker}: {m.get('content', '')}")
+                history_block = "\n\n".join(history_lines)
+                message_body = (
+                    "Prior conversation in this thread:\n\n"
+                    f"{history_block}\n\n"
+                    "---\n\n"
+                    f"New message from the user:\n\n{message}"
+                )
+            else:
+                message_body = message
 
             provider = get_provider(provider_name)
             from apps.service.types import (
@@ -1208,7 +1233,6 @@ class Handlers:
             )
 
             cwd: str | None = None
-            system_prompt: str | None = persona or None
             if action.workspace_id:
                 ws = await self.store.get_workspace(action.workspace_id)
                 if ws is not None:
@@ -1220,7 +1244,7 @@ class Handlers:
             session = await provider.open_chat(card, system=system_prompt, cwd=cwd)
             chunks: list[str] = []
             try:
-                async for ev in session.send(prompt, attachments=[]):
+                async for ev in session.send(message_body, attachments=[]):
                     if ev.kind == "text_delta":
                         chunks.append(ev.text)
                     elif ev.kind == "error":

@@ -73,6 +73,26 @@ if exist "%DATA%" (
 )
 echo.
 
+rem Tail the supervisor-spawned service log.  Captures stdout +
+rem stderr of the auto-spawned `python -m apps.service.main` child
+rem (see apps/gui/service_supervisor.py:service_log_path).  This
+rem is the canonical place to see WHY a `drones.send` / `flows.*`
+rem RPC failed — before the redirect, those tracebacks went to
+rem /dev/null on Windows and the operator saw an empty "Send
+rem failed" dialog with no body.
+echo --- Recent service log (last 30 lines) ---
+set SVCLOG=%USERPROFILE%\.local\share\agentorchestra\logs\service.log
+if exist "%SVCLOG%" (
+    echo path: %SVCLOG%
+    echo.
+    powershell -NoProfile -Command "Get-Content -Path '%SVCLOG%' -Tail 30 -ErrorAction SilentlyContinue"
+) else (
+    echo no service log found at %SVCLOG%
+    echo ^(no auto-spawned service has run since the log redirect shipped,
+    echo  or the operator started the service themselves outside the GUI^)
+)
+echo.
+
 echo --- pyside6_annotator import ---
 if exist "%REPO%\.venv\Scripts\python.exe" (
     "%REPO%\.venv\Scripts\python.exe" -c "import pyside6_annotator; print('OK', pyside6_annotator.__file__)" 2>nul || echo pyside6_annotator: NOT installed (the floating overlay won't show)
