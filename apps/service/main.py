@@ -1165,22 +1165,30 @@ class Handlers:
 
             # Build a CLEAN system prompt and a CLEAN message body.
             #
-            # Earlier this method pre-formatted a fake transcript with
-            # "System: ..." / "Available skills: ..." / "User: ..." /
-            # "Assistant:" labels and shipped the whole thing as a
-            # single user message to the CLI.  Claude-sonnet read that
-            # as a metadata dump from the host, not a question from a
-            # user, and replied "I don't see a question in your message
-            # — just system reminders about available tools, skills,
-            # and context."  See the bug-report screenshot the operator
-            # pasted on 2026-05-11.
+            # History of this prompt-assembly logic:
+            #   v1 (pre-PR-37) inlined a fake "System: ... User: ...
+            #       Assistant:" transcript as a single user message.
+            #       Claude-sonnet read it as a metadata dump and replied
+            #       "I don't see a question, just system reminders."
+            #   v2 (PR #37) moved persona/skills to system_prompt and
+            #       framed multi-turn history in natural language inside
+            #       the user message ("Prior conversation in this thread
+            #       ... New message from the user ...").  Single-turn
+            #       worked.  Multi-turn FAILED — claude saw role-labeled
+            #       text in the user-turn and hallucinated fake "User:"
+            #       / "Assistant:" lines in its reply, continuing the
+            #       pattern.  Operator screenshot 2026-05-11 showed a
+            #       drone "responding" with three fake assistant lines
+            #       and a fake user line.
+            #   v3 (this rewrite) moves the history INTO the system
+            #       prompt (clearly framed as "for context only, do NOT
+            #       echo or paraphrase these turns") and sends ONLY the
+            #       new user message as the user-turn.  No role labels
+            #       in the body for the model to mimic.
             #
-            # The fix: persona + skills go via the provider's proper
-            # system-prompt mechanism (claude-cli: --append-system-
-            # prompt; gemini-cli: its _render_prompt inlines it).
-            # The message body is JUST the conversational content,
-            # with prior turns (if any) framed in natural language so
-            # the model can't mistake the framing for system metadata.
+            # persona + skills + history all go via the provider's
+            # proper system-prompt mechanism (claude-cli: --append-
+            # system-prompt; gemini-cli: its _render_prompt inlines).
             persona = snapshot.get("system_persona") or ""
             effective_skills = list(snapshot.get("skills") or []) + list(
                 action.additional_skills or []
@@ -1192,23 +1200,23 @@ class Handlers:
                 system_lines.append(
                     "Operator-supplied skills you can invoke: " + " ".join(effective_skills)
                 )
-            system_prompt: str | None = "\n\n".join(system_lines).strip() or None
 
             prior_turns = action.transcript[:-1]
             if prior_turns:
                 history_lines = []
                 for m in prior_turns:
-                    speaker = "User" if m.get("role") == "user" else "You (assistant)"
+                    speaker = "User" if m.get("role") == "user" else "You (the assistant)"
                     history_lines.append(f"{speaker}: {m.get('content', '')}")
                 history_block = "\n\n".join(history_lines)
-                message_body = (
-                    "Prior conversation in this thread:\n\n"
-                    f"{history_block}\n\n"
-                    "---\n\n"
-                    f"New message from the user:\n\n{message}"
+                system_lines.append(
+                    "Prior conversation in this thread, provided here as "
+                    "context only.  Do NOT echo, paraphrase, or continue "
+                    "these turns in your reply — the new user message "
+                    "follows separately and is the one to respond to.\n\n" + history_block
                 )
-            else:
-                message_body = message
+
+            system_prompt: str | None = "\n\n".join(system_lines).strip() or None
+            message_body = message
 
             provider = get_provider(provider_name)
             from apps.service.types import (
