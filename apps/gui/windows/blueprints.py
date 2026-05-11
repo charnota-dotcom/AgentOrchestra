@@ -38,13 +38,26 @@ _ROLE_LABELS: tuple[tuple[str, str], ...] = (
 
 # Subset of providers we currently route to.  Stays in sync with the
 # Agents tab's ``_AGENTS_TAB_PRESETS`` until PR #24 unifies them.
-_PROVIDERS: tuple[str, ...] = ("claude-cli", "gemini-cli")
+_PROVIDERS: tuple[str, ...] = ("claude-cli", "gemini-cli", "browser")
+
+# Default chat URL pre-filled when the operator picks ``provider="browser"``.
+# Operator can change to ChatGPT / Gemini / anything URL-addressable.
+_DEFAULT_CHAT_URL = "https://claude.ai/new"
 
 # Per-provider model defaults.  An operator can type a custom model
 # string into the QLineEdit instead — these are just convenience picks.
 _MODEL_HINTS: dict[str, tuple[str, ...]] = {
     "claude-cli": ("claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"),
     "gemini-cli": ("gemini-2.5-pro", "gemini-2.5-flash"),
+    # Browser-mode shares model names with the underlying service; the
+    # operator picks whichever model they're paying for in the browser.
+    "browser": (
+        "claude-sonnet-4-6",
+        "claude-opus-4-7",
+        "claude-haiku-4-5",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+    ),
 }
 
 
@@ -200,12 +213,29 @@ class BlueprintsPage(QtWidgets.QWidget):
         for p in _PROVIDERS:
             self.provider_in.addItem(p, p)
         self.provider_in.currentTextChanged.connect(self._refresh_model_hints)  # type: ignore[arg-type]
+        self.provider_in.currentTextChanged.connect(self._refresh_provider_rows)  # type: ignore[arg-type]
         form.addRow("Provider", self.provider_in)
 
         self.model_in = QtWidgets.QComboBox()
         self.model_in.setEditable(True)
         self._refresh_model_hints(_PROVIDERS[0])
-        form.addRow("Model", self.model_in)
+        self._model_label = QtWidgets.QLabel("Model")
+        form.addRow(self._model_label, self.model_in)
+
+        # Chat URL row — only meaningful when provider="browser".
+        # The row is shown/hidden via _refresh_provider_rows so other
+        # providers don't see a misleading empty box.  See
+        # docs/BROWSER_PROVIDER_PLAN.md.
+        self.chat_url_in = QtWidgets.QLineEdit()
+        self.chat_url_in.setPlaceholderText(_DEFAULT_CHAT_URL)
+        self.chat_url_in.setToolTip(
+            "Where the GUI opens when you Send a message — the chat product "
+            "you'll paste into.  claude.ai/new is the default; replace with "
+            "https://chatgpt.com/, https://gemini.google.com/app, or any "
+            "URL-addressable chat product."
+        )
+        self._chat_url_label = QtWidgets.QLabel("Chat URL")
+        form.addRow(self._chat_url_label, self.chat_url_in)
 
         self.system_persona_in = QtWidgets.QPlainTextEdit()
         self.system_persona_in.setPlaceholderText(
@@ -286,6 +316,23 @@ class BlueprintsPage(QtWidgets.QWidget):
             self.model_in.setEditText(current)
         self.model_in.blockSignals(False)
 
+    def _refresh_provider_rows(self, provider: str) -> None:
+        """Show / hide rows that only apply to specific providers.
+
+        Currently: the Chat URL row is only shown for
+        ``provider="browser"``.  Other providers don't have a chat URL
+        concept (their drone calls the CLI / API directly), so the
+        row is hidden to avoid implying it does anything.  See
+        docs/BROWSER_PROVIDER_PLAN.md.
+        """
+        is_browser = provider == "browser"
+        self.chat_url_in.setVisible(is_browser)
+        self._chat_url_label.setVisible(is_browser)
+        if is_browser and not self.chat_url_in.text().strip():
+            # Pre-fill the default so the operator can hit Save without
+            # touching this row.
+            self.chat_url_in.setText(_DEFAULT_CHAT_URL)
+
     # ------------------------------------------------------------------
     # Data
     # ------------------------------------------------------------------
@@ -341,6 +388,8 @@ class BlueprintsPage(QtWidgets.QWidget):
                 break
         self._refresh_model_hints(bp.get("provider") or _PROVIDERS[0])
         self.model_in.setEditText(bp.get("model") or "")
+        self.chat_url_in.setText(bp.get("chat_url") or "")
+        self._refresh_provider_rows(bp.get("provider") or _PROVIDERS[0])
         self.system_persona_in.setPlainText(bp.get("system_persona") or "")
         self.skills_in.setText(", ".join(bp.get("skills") or []))
         self.refs_in.setText(", ".join(bp.get("reference_blueprint_ids") or []))
@@ -372,6 +421,10 @@ class BlueprintsPage(QtWidgets.QWidget):
             # braces in case the gating is bypassed.
             self._set_status("Name is required.", error=True)
             return
+        # `chat_url` is sent for every provider but only consulted by
+        # the service when provider == "browser".  Empty string maps
+        # to None so non-browser blueprints store NULL (no clutter).
+        chat_url = self.chat_url_in.text().strip() or None
         common = {
             "name": name,
             "description": self.description_in.text().strip(),
@@ -381,6 +434,7 @@ class BlueprintsPage(QtWidgets.QWidget):
             "system_persona": self.system_persona_in.toPlainText(),
             "skills": _split_csv(self.skills_in.text()),
             "reference_blueprint_ids": _split_csv(self.refs_in.text()),
+            "chat_url": chat_url,
         }
         self.save_btn.setEnabled(False)
         if self._current is None:

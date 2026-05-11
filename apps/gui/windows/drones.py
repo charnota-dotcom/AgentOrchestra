@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.browser_bridge import BrowserBridgeDialog
 from apps.gui.widgets.context_gauge import ContextGauge
 from apps.service.tokens import context_window, estimate_action_total
 
@@ -328,6 +329,14 @@ class DronesPage(QtWidgets.QWidget):
             self.send_btn.setEnabled(True)
             return
         action = out.get("action") or {}
+        # Browser-mode drones return needs_paste=True instead of a
+        # reply — the service rendered the prompt and now the operator
+        # paste-rounds-trips it through their browser.  Open the
+        # BrowserBridgeDialog and let it drive the rest.  See
+        # docs/BROWSER_PROVIDER_PLAN.md.
+        if out.get("needs_paste"):
+            self._open_browser_bridge(action, out)
+            return
         # Update local cache + viewer.
         self._current = action
         for i, a in enumerate(self._actions):
@@ -344,6 +353,53 @@ class DronesPage(QtWidgets.QWidget):
         self.send_btn.setEnabled(True)
         # Re-pull list so the sidebar's "N msg" counter updates.
         await self._reload()
+
+    def _open_browser_bridge(
+        self,
+        action: dict[str, Any],
+        response: dict[str, Any],
+    ) -> None:
+        """Open the BrowserBridgeDialog from a browser-mode
+        ``drones.send`` response.
+
+        The service has already persisted the user turn; the dialog
+        handles the operator's copy → paste-into-browser → copy-back
+        round-trip, then calls ``drones.append_assistant_turn`` to
+        save the reply.  We wire ``saved`` so the local cache +
+        transcript view refresh once that lands.
+        """
+        dlg = BrowserBridgeDialog(
+            client=self.client,
+            action_id=action.get("id", ""),
+            rendered_prompt=response.get("rendered_prompt") or "",
+            chat_url=response.get("chat_url"),
+            bound_chat_url=response.get("bound_chat_url"),
+            prompt_tokens=response.get("prompt_tokens"),
+            transcript_tokens=response.get("transcript_tokens"),
+            context_window=response.get("context_window"),
+            parent=self,
+        )
+
+        def _on_saved(updated_action: dict[str, Any]) -> None:
+            self._current = updated_action
+            for i, a in enumerate(self._actions):
+                if a.get("id") == updated_action.get("id"):
+                    self._actions[i] = updated_action
+                    break
+            self.transcript.setHtml(_render_transcript_html(updated_action.get("transcript") or []))
+            self._refresh_gauge_from_action(updated_action)
+            self.send_btn.setEnabled(True)
+            asyncio.ensure_future(self._reload())
+
+        dlg.saved.connect(_on_saved)  # type: ignore[arg-type]
+        # Also re-enable Send when the operator cancels the dialog
+        # (otherwise they're stuck with a disabled button).
+        dlg.rejected.connect(lambda: self.send_btn.setEnabled(True))  # type: ignore[arg-type]
+        dlg.show()
+        # Show the partial transcript that has the new user turn even
+        # if the operator hasn't pasted a reply yet, so they see what
+        # was sent.
+        self.transcript.setHtml(_render_transcript_html(action.get("transcript") or []))
 
     def _delete_selected(self) -> None:
         if not self._current:

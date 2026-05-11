@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apps.gui.browser_bridge import BrowserBridgeDialog
 from apps.gui.widgets.context_gauge import ContextGauge
 from apps.service.tokens import context_window, estimate_action_total
 
@@ -168,7 +169,15 @@ class DroneActionChatDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(self, "Send failed", body)
             self.send_btn.setEnabled(True)
             return
-        self.action = out.get("action") or self.action
+        # Browser-mode drones return needs_paste=True instead of an
+        # immediate reply.  Open the BrowserBridgeDialog and let it
+        # drive the round-trip; once the operator pastes back, our
+        # action snapshot refreshes via the dialog's saved signal.
+        action_out = out.get("action") or self.action
+        if out.get("needs_paste"):
+            self._open_browser_bridge(action_out, out)
+            return
+        self.action = action_out
         self.transcript.setHtml(_render_html(self.action.get("transcript") or []))
         # Prefer the server's fresh totals; fall back to a local
         # estimate if the response is missing them (e.g. older service).
@@ -182,3 +191,41 @@ class DroneActionChatDialog(QtWidgets.QDialog):
         self.send_btn.setEnabled(True)
         # Bubble up so the canvas can refresh the node.
         self.sent.emit(self.action)
+
+    def _open_browser_bridge(
+        self,
+        action: dict[str, Any],
+        response: dict[str, Any],
+    ) -> None:
+        """Open the BrowserBridgeDialog from a browser-mode
+        ``drones.send`` response on the canvas chat surface.
+
+        Mirrors the equivalent helper on ``apps/gui/windows/drones.py``
+        — same dialog, same lifecycle, with our local transcript view
+        + gauge refreshed when the operator saves.
+        """
+        dlg = BrowserBridgeDialog(
+            client=self.client,
+            action_id=action.get("id", ""),
+            rendered_prompt=response.get("rendered_prompt") or "",
+            chat_url=response.get("chat_url"),
+            bound_chat_url=response.get("bound_chat_url"),
+            prompt_tokens=response.get("prompt_tokens"),
+            transcript_tokens=response.get("transcript_tokens"),
+            context_window=response.get("context_window"),
+            parent=self,
+        )
+
+        def _on_saved(updated_action: dict[str, Any]) -> None:
+            self.action = updated_action
+            self.transcript.setHtml(_render_html(updated_action.get("transcript") or []))
+            self._refresh_gauge()
+            self.send_btn.setEnabled(True)
+            self.sent.emit(self.action)
+
+        dlg.saved.connect(_on_saved)  # type: ignore[arg-type]
+        dlg.rejected.connect(lambda: self.send_btn.setEnabled(True))  # type: ignore[arg-type]
+        dlg.show()
+        # Reflect the partial transcript (with the user turn already
+        # persisted) immediately so the operator sees what was sent.
+        self.transcript.setHtml(_render_html(action.get("transcript") or []))
