@@ -43,10 +43,13 @@ if errorlevel 1 (
 ) else (
     rem `call` because `gemini` is an npm-installed .cmd shim;
     rem bare invocation from a .cmd file is a tail-call.
+    rem GEMINI_CLI_TRUST_WORKSPACE + --skip-trust because Gemini
+    rem refuses headless runs in untrusted workspaces.
+    set GEMINI_CLI_TRUST_WORKSPACE=true
     call gemini --version
     echo.
     echo Trying ``gemini status`` ^(may not exist in older versions^):
-    call gemini status 2>&1
+    call gemini status --skip-trust 2>&1
     echo.
     echo Per-tier quota: see the dashboards below.  ``gemini /quota``
     echo is not a real command and the older script versions calling
