@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from apps.gui.ipc.sse_client import SseClient
 
@@ -98,7 +98,35 @@ class LivePage(QtWidgets.QWidget):
         self.event_log.clear()
         self.cancel_btn.setEnabled(True)
         self.review_btn.setEnabled(False)
-        self._task = asyncio.ensure_future(self._consume(run_id))
+        # Sync the canonical run state up-front so a short-lived run
+        # that finished before the SSE stream attaches doesn't leave the
+        # UI hung on "waiting for first event…" with stale buttons.
+        self._task = asyncio.ensure_future(self._attach_and_consume(run_id))
+
+    async def _attach_and_consume(self, run_id: str) -> None:
+        try:
+            await self._sync_initial_state(run_id)
+            await self._consume(run_id)
+        except asyncio.CancelledError:
+            return
+
+    async def _sync_initial_state(self, run_id: str) -> None:
+        try:
+            runs = await self.client.call("runs.list", {})
+        except Exception:
+            return
+        if self._run_id != run_id:
+            return
+        match = next((r for r in runs if r.get("id") == run_id), None)
+        if not match:
+            return
+        state = match.get("state") or ""
+        cost = float(match.get("cost_usd") or 0.0)
+        self.meta.setText(f"run {run_id} · {state} · ${cost:.4f}")
+        if state in ("reviewing", "merged", "rejected", "aborted"):
+            self.cancel_btn.setEnabled(False)
+        if state == "reviewing":
+            self.review_btn.setEnabled(True)
 
     def _detach_task(self) -> None:
         if self._task and not self._task.done():
@@ -107,40 +135,69 @@ class LivePage(QtWidgets.QWidget):
 
     async def _consume(self, run_id: str) -> None:
         cost = 0.0
-        async for ev in self._sse.stream_run(run_id):
-            kind = ev.get("kind", "")
-            text = ev.get("text", "") or ""
-            payload = ev.get("payload") or {}
+        try:
+            async for ev in self._sse.stream_run(run_id):
+                kind = ev.get("kind", "")
+                text = ev.get("text", "") or ""
+                payload = ev.get("payload") or {}
 
-            self.event_log.insertItem(0, f"[{kind}] {text[:120] if text else payload}")
-            if self.event_log.count() > 200:
-                self.event_log.takeItem(self.event_log.count() - 1)
+                self.event_log.insertItem(0, f"[{kind}] {text[:120] if text else payload}")
+                if self.event_log.count() > 200:
+                    self.event_log.takeItem(self.event_log.count() - 1)
 
-            if kind == "llm.call_completed":
-                delta = payload.get("delta")
-                if delta:
-                    self.transcript.moveCursor(self.transcript.textCursor().MoveOperation.End)
-                    self.transcript.insertPlainText(delta)
+                if kind == "llm.call_completed":
+                    delta = payload.get("delta")
+                    if delta:
+                        # Only auto-scroll if the operator was already
+                        # parked at the bottom; otherwise yanking the
+                        # viewport while they're reading earlier output
+                        # is infuriating.
+                        bar = self.transcript.verticalScrollBar()
+                        at_bottom = bar.value() >= bar.maximum() - 4
+                        cursor = self.transcript.textCursor()
+                        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+                        cursor.insertText(delta)
+                        if at_bottom:
+                            self.transcript.setTextCursor(cursor)
+                            bar.setValue(bar.maximum())
 
-            if kind == "run.state_changed":
-                state = payload.get("to") or payload.get("state")
-                if isinstance(payload.get("cost_usd"), (int, float)):
-                    cost = float(payload["cost_usd"])
-                self.meta.setText(f"run {run_id} · {state} · ${cost:.4f}")
-                if state in ("reviewing", "merged", "rejected", "aborted"):
+                if kind == "run.state_changed":
+                    state = payload.get("to") or payload.get("state")
+                    if isinstance(payload.get("cost_usd"), (int, float)):
+                        cost = float(payload["cost_usd"])
+                    self.meta.setText(f"run {run_id} · {state} · ${cost:.4f}")
+                    if state in ("reviewing", "merged", "rejected", "aborted"):
+                        self.cancel_btn.setEnabled(False)
+                    if state == "reviewing":
+                        self.review_btn.setEnabled(True)
+
+                if kind == "run.completed":
                     self.cancel_btn.setEnabled(False)
-                if state == "reviewing":
-                    self.review_btn.setEnabled(True)
-
-            if kind == "run.completed":
-                self.cancel_btn.setEnabled(False)
-                break
+                    break
+        except asyncio.CancelledError:
+            # Normal path when attach_run() switches to a different run.
+            return
 
     def _cancel(self) -> None:
         if not self._run_id:
             return
-        asyncio.ensure_future(self.client.call("runs.cancel", {"run_id": self._run_id}))
         self.cancel_btn.setEnabled(False)
+        asyncio.ensure_future(self._cancel_async(self._run_id))
+
+    async def _cancel_async(self, run_id: str) -> None:
+        try:
+            await self.client.call("runs.cancel", {"run_id": run_id})
+        except Exception as exc:
+            # If the cancel RPC fails the user is stranded with a
+            # disabled button and no feedback; re-enable so they can
+            # retry and surface the error.
+            if self._run_id == run_id:
+                self.cancel_btn.setEnabled(True)
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Cancel failed",
+                f"Could not cancel run {run_id}: {exc}",
+            )
 
     def _open_review(self) -> None:
         if self._run_id:

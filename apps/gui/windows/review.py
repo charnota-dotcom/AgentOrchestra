@@ -80,6 +80,12 @@ class ReviewPage(QtWidgets.QWidget):
         self._run_id = run_id
         self.body.setPlainText("Loading…")
         self.meta.setText(f"run {run_id}")
+        # Clear note + re-enable approve so a justification typed for a
+        # previous run can't ride into the new one and so the button
+        # state is consistent for the new selection.
+        self.note.clear()
+        self.approve_btn.setEnabled(True)
+        self._stack.setCurrentIndex(0)
         asyncio.ensure_future(self._load())
 
     async def _load(self) -> None:
@@ -88,6 +94,11 @@ class ReviewPage(QtWidgets.QWidget):
         try:
             artifacts = await self.client.call("runs.artifacts", {"run_id": self._run_id})
         except Exception as exc:
+            # Make sure the plain-text pane is visible — if the previous
+            # run rendered a diff, the failure message would otherwise
+            # land on the hidden body widget while the stale diff stays
+            # on screen.
+            self._stack.setCurrentIndex(0)
             self.body.setPlainText(f"Failed to load: {exc}")
             return
         if not artifacts:
@@ -118,6 +129,11 @@ class ReviewPage(QtWidgets.QWidget):
     def _approve(self) -> None:
         if not self._run_id:
             return
+        # Disable immediately so a double-click or impatient mash can't
+        # queue two simultaneous approve RPCs against the same run.
+        if not self.approve_btn.isEnabled():
+            return
+        self.approve_btn.setEnabled(False)
         asyncio.ensure_future(self._approve_async())
 
     async def _approve_async(self) -> None:
@@ -130,6 +146,7 @@ class ReviewPage(QtWidgets.QWidget):
             )
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Approve failed", str(exc))
+            self.approve_btn.setEnabled(True)
             return
         QtWidgets.QMessageBox.information(self, "Approved", "Run merged.")
         self.closed.emit()

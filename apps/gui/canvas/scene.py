@@ -99,6 +99,11 @@ class CanvasScene(QtWidgets.QGraphicsScene):
                 self.remove_edge(edge)
         if node in self._nodes:
             self._nodes.remove(node)
+        # Drop selection before removeItem() so the selectionChanged
+        # signal fires against a still-valid wrapper rather than racing
+        # the C++ deletion.
+        if node.isSelected():
+            node.setSelected(False)
         self.removeItem(node)
 
     def add_edge(self, edge: Edge) -> None:

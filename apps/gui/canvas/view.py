@@ -56,17 +56,34 @@ class CanvasView(QtWidgets.QGraphicsView):
             super().wheelEvent(event)
             return
         # Zoom anchored to cursor: translate so the scene point under
-        # the cursor stays put across the scale change.
-        old_pos = self.mapToScene(event.position().toPoint())
-        factor = _ZOOM_STEP if event.angleDelta().y() > 0 else 1.0 / _ZOOM_STEP
-        new_zoom = self._current_zoom() * factor
-        if not (_MIN_ZOOM <= new_zoom <= _MAX_ZOOM):
+        # the cursor stays put across the scale change.  Map through
+        # the inverted viewport transform so we keep sub-pixel accuracy
+        # — toPoint() was discarding fractional pixels each tick, which
+        # accumulated into visible drift away from the cursor.
+        cursor_pos = event.position()
+        old_pos = self._map_to_scene_f(cursor_pos)
+        current = self._current_zoom()
+        raw_factor = _ZOOM_STEP if event.angleDelta().y() > 0 else 1.0 / _ZOOM_STEP
+        # Clamp the target zoom into the allowed range and derive the
+        # actual factor from the clamped target.  The old "abort the
+        # whole event if it overshoots" branch stranded users near the
+        # edges (e.g. 3.9x could never reach exactly 4.0).
+        target_zoom = max(_MIN_ZOOM, min(_MAX_ZOOM, current * raw_factor))
+        if target_zoom == current:
             return
+        factor = target_zoom / current
         self.scale(factor, factor)
-        new_pos = self.mapToScene(event.position().toPoint())
+        new_pos = self._map_to_scene_f(cursor_pos)
         delta = new_pos - old_pos
         self.translate(delta.x(), delta.y())
         self.zoom_changed.emit(self._current_zoom())
+
+    def _map_to_scene_f(self, view_point: QtCore.QPointF) -> QtCore.QPointF:
+        """``mapToScene`` for a QPointF, preserving sub-pixel precision."""
+        inverted, ok = self.viewportTransform().inverted()
+        if not ok:
+            return self.mapToScene(view_point.toPoint())
+        return inverted.map(view_point)
 
     def _current_zoom(self) -> float:
         return float(self.transform().m11())
@@ -146,3 +163,13 @@ class CanvasView(QtWidgets.QGraphicsView):
                 self.viewport().setCursor(QtCore.Qt.CursorShape.ArrowCursor)
         else:
             super().keyReleaseEvent(event)
+
+    def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
+        # Alt-Tab / window switch swallows the keyRelease, so the
+        # spacebar pan latch would otherwise stay on after returning
+        # and break ordinary left-click interactions.
+        if self._space_held or self._panning:
+            self._space_held = False
+            self._panning = False
+            self.viewport().setCursor(QtCore.Qt.CursorShape.ArrowCursor)
+        super().focusOutEvent(event)
