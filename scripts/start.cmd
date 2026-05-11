@@ -20,18 +20,22 @@ rem   * Each subprocess's exit code captured to a NAMED var
 rem     immediately after the call.
 rem   * The headless `-p` probe is wrapped in PowerShell with a
 rem     hard 20-second timeout so a hung CLI can't freeze the
-rem     script forever.  Three PowerShell-on-Windows gotchas the
-rem     probe has to navigate:
+rem     script forever.  PowerShell-on-Windows gotchas the probe
+rem     has to navigate:
 rem       - `Start-Process` rejects `-RedirectStandardOutput` and
 rem         `-RedirectStandardError` pointing to the same path; we
 rem         use two distinct temp files cleaned up in `finally`.
-rem       - `Start-Process -FilePath 'claude'` does NOT honour
-rem         PATHEXT, so it cannot find `claude.cmd` by bare name.
-rem         We call `Get-Command claude` first to resolve the full
-rem         path including the `.cmd` extension, then pass that.
-rem         (Symptom of the missing fix: catch block fires and the
-rem         probe returns exit 99, even when `claude -p ...` works
-rem         fine outside the wrapper.)
+rem       - `Start-Process -FilePath '<claude.cmd>'` itself is
+rem         unreliable when redirecting stdout/stderr: with .cmd
+rem         shim files some PS versions throw before launch even
+rem         when the full path is given.  We work around it by
+rem         shelling through `cmd.exe /c claude …` — cmd resolves
+rem         PATHEXT and shim invocation natively, PowerShell just
+rem         orchestrates the timeout.  (Symptoms of the wrong path
+rem         here: catch block fires and the probe returns exit 99
+rem         even when `claude -p …` works fine outside the wrapper.
+rem         If you see exit 99 again, the catch now `Write-Host`s
+rem         the actual exception message — read it.)
 rem       - Gemini CLI refuses headless runs in an "untrusted"
 rem         workspace; we set GEMINI_CLI_TRUST_WORKSPACE=true and
 rem         pass `--skip-trust`, mirroring the gemini_cli.py
@@ -76,7 +80,7 @@ if "!CLAUDE_PRESENT!"=="0" echo           Install with:  npm install -g @anthrop
 
 if "!CLAUDE_PRESENT!"=="1" call claude --version
 if "!CLAUDE_PRESENT!"=="1" echo   probing 'claude -p ping' with a hard 20-second timeout...
-if "!CLAUDE_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "$o=[IO.Path]::GetTempFileName(); $e=[IO.Path]::GetTempFileName(); try { $exe=(Get-Command claude -ErrorAction Stop).Source; $p = Start-Process -FilePath $exe -ArgumentList @('-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput $o -RedirectStandardError $e; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 } finally { Remove-Item $o,$e -ErrorAction SilentlyContinue }"
+if "!CLAUDE_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "$o=[IO.Path]::GetTempFileName(); $e=[IO.Path]::GetTempFileName(); try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c','claude','-p','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput $o -RedirectStandardError $e; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { Write-Host ('  [probe-exc] ' + $_.Exception.Message); exit 99 } finally { Remove-Item $o,$e -ErrorAction SilentlyContinue }"
 if "!CLAUDE_PRESENT!"=="1" set CLAUDE_PROBE_RC=!errorlevel!
 if "!CLAUDE_PRESENT!"=="0" set CLAUDE_PROBE_RC=-1
 
@@ -104,7 +108,7 @@ if "!GEMINI_PRESENT!"=="0" echo           Install with:  npm install -g @google/
 
 if "!GEMINI_PRESENT!"=="1" call gemini --version
 if "!GEMINI_PRESENT!"=="1" echo   probing 'gemini -p ping' with a hard 20-second timeout...
-if "!GEMINI_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "$o=[IO.Path]::GetTempFileName(); $e=[IO.Path]::GetTempFileName(); $env:GEMINI_CLI_TRUST_WORKSPACE='true'; try { $exe=(Get-Command gemini -ErrorAction Stop).Source; $p = Start-Process -FilePath $exe -ArgumentList @('-p','respond with the single word OK','--skip-trust') -PassThru -NoNewWindow -RedirectStandardOutput $o -RedirectStandardError $e; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { exit 99 } finally { Remove-Item $o,$e -ErrorAction SilentlyContinue }"
+if "!GEMINI_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "$o=[IO.Path]::GetTempFileName(); $e=[IO.Path]::GetTempFileName(); $env:GEMINI_CLI_TRUST_WORKSPACE='true'; try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c','gemini','-p','respond with the single word OK','--skip-trust') -PassThru -NoNewWindow -RedirectStandardOutput $o -RedirectStandardError $e; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { Write-Host ('  [probe-exc] ' + $_.Exception.Message); exit 99 } finally { Remove-Item $o,$e -ErrorAction SilentlyContinue }"
 if "!GEMINI_PRESENT!"=="1" set GEMINI_PROBE_RC=!errorlevel!
 if "!GEMINI_PRESENT!"=="0" set GEMINI_PROBE_RC=-1
 
