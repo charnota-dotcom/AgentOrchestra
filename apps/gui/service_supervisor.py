@@ -115,7 +115,15 @@ def _spawn_service() -> None:
     # `--- Recent service log ---` section in doctor.cmd.
     log_path = service_log_path()
     try:
-        log_fh: int | object = open(log_path, "a", encoding="utf-8", errors="replace")
+        # SIM115 false-positive: this handle deliberately outlives the
+        # try-block because we pass it as `stdout=` to subprocess.Popen
+        # below.  Wrapping it in `with open(...)` would close the file
+        # before the child service ever writes to it.  Cleanup happens
+        # implicitly when the parent process exits (atexit terminates
+        # the child first, then GC closes the FH).
+        log_fh: int | object = open(  # noqa: SIM115
+            log_path, "a", encoding="utf-8", errors="replace"
+        )
         log_fh.write(  # type: ignore[union-attr]
             f"\n--- service spawn at {datetime.datetime.now().isoformat()} (pid TBD) ---\n"
         )
