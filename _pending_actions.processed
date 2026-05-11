@@ -2,44 +2,59 @@
   "for_app": "agentorchestra",
   "attempts": [
     {
-      "annotation_index": 6,
-      "version": "0.1.0+canvas-empty-fix",
+      "annotation_index": 8,
+      "version": "0.1.0+canvas-refresh-and-skills-picker",
       "status": "shipped",
-      "description": "After clicking '+ New conversation' in the Canvas palette, the agent was created server-side and added to the Conversations list on the left, but no node was placed on the canvas itself — operator stared at empty grid wondering where the new agent went. Fixed: PalettePanel emits a new `conversation_created` Qt signal; CanvasPage handles it by dropping a ConversationNode at the centre of the current viewport AND auto-opening the chat dialog so the operator immediately sees and can talk to the agent. Idempotent — duplicate creates re-centre + reopen the existing node. Also replaced 'Unnamed conversation' fallback with a friendlier `<model> · <HH:MM>` default name so multiple un-named agents are distinguishable.",
+      "description": "Operator created 'Taylor Grift' agent (likely from the Agents tab or Chat tab) and it didn't appear in the Canvas Conversations palette — the palette only loaded its agents list once at canvas-page construction. Fixed by overriding CanvasPage.showEvent to call palette.reload_agents() every time the operator navigates to the Canvas tab. Cheap (single agents.list RPC); fires only on tab switch. Also shipped a multi-select Skills picker (per the operator's request 'set skills for the agent per model and select them'): new skills.list RPC scans ~/.claude/skills/ for Claude; new SkillsPicker dialog wired to a 'Browse skills…' button on Chat tab + Canvas New-Conversation dialog.",
       "change_overview": [
-        "apps/gui/canvas/palette.py — new `conversation_created` Signal; `_do_create` emits the enriched agent dict after agents.create (and the optional first-send) succeeds",
-        "apps/gui/canvas/palette.py — friendlier default name when operator leaves Name field blank (`<model> · <HH:MM>`)",
-        "apps/gui/canvas/page.py — wired `palette.conversation_created` → new `_on_conversation_created` handler",
-        "apps/gui/canvas/page.py — `_on_conversation_created` drops a ConversationNode at view-centre, refreshes lineage, and opens the chat dialog"
+        "apps/gui/canvas/page.py — CanvasPage.showEvent overrides Qt's default to fire palette.reload_agents() on every tab visit",
+        "apps/service/main.py — new skills_list RPC scanning ~/.claude/skills/*.md; description picked from front-matter description: or first non-empty body line",
+        "apps/service/main.py — _first_descriptive_line helper",
+        "apps/service/main.py — server.register('skills.list', h.skills_list)",
+        "apps/gui/widgets/skills_picker.py — SkillsPicker QDialog with multi-select list + pre-checked from current /tokens; selected_tokens() returns /name1 /name2",
+        "apps/gui/windows/chat.py — Browse skills… button next to Skills field; _open_skills_picker splices picked tokens with any free-form text",
+        "apps/gui/canvas/palette.py — Browse… button on the New-Conversation dialog Skills row; same splice behaviour",
+        "apps/gui/ipc/client.py — _friendlier wraps RpcClient errors so 'unknown method: X' surfaces a 'run scripts/restart.cmd' hint instead of cryptic raw text"
       ],
       "risk_level": "Low",
-      "risk_note": "Pure additive: new signal + handler. No existing palette / canvas paths changed. The view-centre placement uses `view.mapToScene` which is correct regardless of zoom / pan; tested mentally against 100% zoom and the empty-canvas state from the screenshot.",
+      "risk_note": "showEvent override calls super first; reload is idempotent and async (won't block tab switch). SkillsPicker is a brand-new file used only by the new buttons. The friendlier-error wrapper only modifies error messages — no behaviour change for success paths.",
       "next_steps": [
-        "Run scripts/restart.cmd so the GUI picks up the new code",
-        "Click Canvas → Conversations '+ New' → Create — the new agent should appear at the centre of the canvas with the chat dialog already open"
+        "Run scripts/restart.cmd so the service picks up the new skills.list RPC registration",
+        "Click any other tab then return to Canvas — the palette should refresh; create an agent in the Agents tab and watch it appear in the canvas Conversations list on next canvas visit"
       ],
       "files_changed": [
+        "apps/gui/canvas/page.py",
         "apps/gui/canvas/palette.py",
-        "apps/gui/canvas/page.py"
+        "apps/gui/windows/chat.py",
+        "apps/gui/widgets/skills_picker.py",
+        "apps/gui/ipc/client.py",
+        "apps/service/main.py"
       ],
-      "annotation_excerpt": "I don't get it, i've created a new agent"
+      "annotation_excerpt": "I've created agent Taylor Grift, but it's not"
     },
     {
-      "annotation_index": 7,
-      "version": "0.1.0+canvas-empty-fix",
+      "annotation_index": 9,
+      "version": "0.1.0+start-cmd-call-fix",
       "status": "no_change_needed",
-      "description": "The 'Probe failed: unknown method: limits.check' error is the JSON-RPC server's generic response when an RPC method isn't in its in-memory registration table. The `limits.check` handler IS registered in `apps/service/main.py` (verified line 1855), so the only way the running service can return 'unknown method' is if it's an OLDER service process from before that registration landed in main. The user merged the relevant PR + ran update.cmd (which `git pull`s + `pip install -e`s), but the orchestrator service was already running and stayed on the old in-memory code. Operational fix only: restart the service.",
+      "description": "Operator saw 'Reload failed: unknown method: blueprints.list' on the Blueprints tab. The friendlier-error wrapper from PR #19 (apps/gui/ipc/client.py:_friendlier) is already firing the correct hint: 'service is running an older code version than the GUI. Run scripts\\restart.cmd…' This is the intended diagnostic surface for the post-merge stale-service case (Phase 6 added blueprints.* and drones.* RPCs that an old service process won't know). No GUI code change can fix the underlying mismatch — the operator must restart the service so it picks up the new RPC registrations.",
       "change_overview": [
-        "(no code changes — operational fix)"
+        "No code change for annotation #9 itself.",
+        "Bundled in this attempt: scripts/start.cmd, scripts/test-claude.cmd, scripts/test-gemini.cmd, scripts/limits.cmd, scripts/doctor.cmd — every bare `claude` / `gemini` invocation now goes through `call …` so cmd.exe doesn't tail-call out of the script (operator hit this earlier: pre-flight printed `claude --version` then exited without ever probing Gemini or launching the GUI; doctor.cmd had the same bug — `where claude && claude --version` would have bailed before the port / data-dir / annotator / version sections)."
       ],
       "risk_level": "Low",
-      "risk_note": "No code change.",
+      "risk_note": "_friendlier text is unchanged; operator workaround (restart the service) was already the documented fix.",
       "next_steps": [
-        "Run scripts/restart.cmd — the three-pass kill (window-title + port-listening on 8765) reaps any orphaned service, then launches the GUI which auto-spawns a fresh service",
-        "Re-open the Limits tab — the cards should populate"
+        "Run scripts\\restart.cmd (or click Restart in the Operator Panel) so the running service picks up the blueprints.* and drones.* registrations. Reload the Blueprints tab — the error should go away.",
+        "Future: consider auto-detecting 'unknown method' on a tab's first reload and offering a one-click 'Restart service' button inline. Tracked as a follow-up; not in scope for this attempt."
       ],
-      "files_changed": [],
-      "annotation_excerpt": "says probe failed: unknown method"
+      "files_changed": [
+        "scripts/start.cmd",
+        "scripts/test-claude.cmd",
+        "scripts/test-gemini.cmd",
+        "scripts/limits.cmd",
+        "scripts/doctor.cmd"
+      ],
+      "annotation_excerpt": "error text - reload failed"
     }
   ]
 }
