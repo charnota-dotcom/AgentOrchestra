@@ -1190,8 +1190,7 @@ class Handlers:
                 system_lines.append(persona)
             if effective_skills:
                 system_lines.append(
-                    "Operator-supplied skills you can invoke: "
-                    + " ".join(effective_skills)
+                    "Operator-supplied skills you can invoke: " + " ".join(effective_skills)
                 )
             system_prompt: str | None = "\n\n".join(system_lines).strip() or None
 
@@ -1199,11 +1198,7 @@ class Handlers:
             if prior_turns:
                 history_lines = []
                 for m in prior_turns:
-                    speaker = (
-                        "User"
-                        if m.get("role") == "user"
-                        else "You (assistant)"
-                    )
+                    speaker = "User" if m.get("role") == "user" else "You (assistant)"
                     history_lines.append(f"{speaker}: {m.get('content', '')}")
                 history_block = "\n\n".join(history_lines)
                 message_body = (
