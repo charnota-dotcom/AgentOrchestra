@@ -49,6 +49,17 @@ netstat -ano | findstr ":8765" >nul && (
 ) || echo Port 8765 is free — service is not running.
 echo.
 
+rem Hit /healthz to see what RPC methods the running service has
+rem actually registered.  This is the diagnostic that tells the
+rem operator whether the service is on the latest code: a missing
+rem method like `limits.check` or `blueprints.list` means the
+rem running process was started before that registration landed
+rem (annotation #7 root cause).  Run scripts\restart.cmd to swap
+rem it out for a fresh process from the latest checkout.
+echo --- Service /healthz ---
+powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/healthz' -TimeoutSec 3 -ErrorAction Stop; Write-Host \"  service replied; $($r.methods.Count) RPC methods registered.\"; foreach ($m in @('limits.check','blueprints.list','drones.list','skills.list')) { if ($m -in $r.methods) { Write-Host \"    [OK]      $m\" } else { Write-Host \"    [MISSING] $m  <-- service running stale code; run scripts\restart.cmd\" } } } catch { Write-Host \"  /healthz did not respond ($($_.Exception.Message))\" }"
+echo.
+
 echo --- Local data directory ---
 set DATA=%USERPROFILE%\.local\share\agentorchestra
 if exist "%DATA%" (

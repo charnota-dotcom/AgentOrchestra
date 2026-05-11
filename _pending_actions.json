@@ -1,0 +1,146 @@
+{
+  "for_app": "agentorchestra",
+  "attempts": [
+    {
+      "annotation_index": 8,
+      "version": "0.1.0+canvas-refresh-and-skills-picker",
+      "status": "shipped",
+      "description": "Operator created 'Taylor Grift' agent (likely from the Agents tab or Chat tab) and it didn't appear in the Canvas Conversations palette — the palette only loaded its agents list once at canvas-page construction. Fixed by overriding CanvasPage.showEvent to call palette.reload_agents() every time the operator navigates to the Canvas tab. Cheap (single agents.list RPC); fires only on tab switch. Also shipped a multi-select Skills picker (per the operator's request 'set skills for the agent per model and select them'): new skills.list RPC scans ~/.claude/skills/ for Claude; new SkillsPicker dialog wired to a 'Browse skills…' button on Chat tab + Canvas New-Conversation dialog.",
+      "change_overview": [
+        "apps/gui/canvas/page.py — CanvasPage.showEvent overrides Qt's default to fire palette.reload_agents() on every tab visit",
+        "apps/service/main.py — new skills_list RPC scanning ~/.claude/skills/*.md; description picked from front-matter description: or first non-empty body line",
+        "apps/service/main.py — _first_descriptive_line helper",
+        "apps/service/main.py — server.register('skills.list', h.skills_list)",
+        "apps/gui/widgets/skills_picker.py — SkillsPicker QDialog with multi-select list + pre-checked from current /tokens; selected_tokens() returns /name1 /name2",
+        "apps/gui/windows/chat.py — Browse skills… button next to Skills field; _open_skills_picker splices picked tokens with any free-form text",
+        "apps/gui/canvas/palette.py — Browse… button on the New-Conversation dialog Skills row; same splice behaviour",
+        "apps/gui/ipc/client.py — _friendlier wraps RpcClient errors so 'unknown method: X' surfaces a 'run scripts/restart.cmd' hint instead of cryptic raw text"
+      ],
+      "risk_level": "Low",
+      "risk_note": "showEvent override calls super first; reload is idempotent and async (won't block tab switch). SkillsPicker is a brand-new file used only by the new buttons. The friendlier-error wrapper only modifies error messages — no behaviour change for success paths.",
+      "next_steps": [
+        "Run scripts/restart.cmd so the service picks up the new skills.list RPC registration",
+        "Click any other tab then return to Canvas — the palette should refresh; create an agent in the Agents tab and watch it appear in the canvas Conversations list on next canvas visit"
+      ],
+      "files_changed": [
+        "apps/gui/canvas/page.py",
+        "apps/gui/canvas/palette.py",
+        "apps/gui/windows/chat.py",
+        "apps/gui/widgets/skills_picker.py",
+        "apps/gui/ipc/client.py",
+        "apps/service/main.py"
+      ],
+      "annotation_excerpt": "I've created agent Taylor Grift, but it's not"
+    },
+    {
+      "annotation_index": 9,
+      "version": "0.1.0+start-cmd-call-fix",
+      "status": "no_change_needed",
+      "description": "Operator saw 'Reload failed: unknown method: blueprints.list' on the Blueprints tab. The friendlier-error wrapper from PR #19 (apps/gui/ipc/client.py:_friendlier) is already firing the correct hint: 'service is running an older code version than the GUI. Run scripts\\restart.cmd…' This is the intended diagnostic surface for the post-merge stale-service case (Phase 6 added blueprints.* and drones.* RPCs that an old service process won't know). No GUI code change can fix the underlying mismatch — the operator must restart the service so it picks up the new RPC registrations.",
+      "change_overview": [
+        "No code change for annotation #9 itself.",
+        "Bundled in this attempt: scripts/start.cmd, scripts/test-claude.cmd, scripts/test-gemini.cmd, scripts/limits.cmd, scripts/doctor.cmd — every bare `claude` / `gemini` invocation now goes through `call …` so cmd.exe doesn't tail-call out of the script (operator hit this earlier: pre-flight printed `claude --version` then exited without ever probing Gemini or launching the GUI; doctor.cmd had the same bug — `where claude && claude --version` would have bailed before the port / data-dir / annotator / version sections)."
+      ],
+      "risk_level": "Low",
+      "risk_note": "_friendlier text is unchanged; operator workaround (restart the service) was already the documented fix.",
+      "next_steps": [
+        "Run scripts\\restart.cmd (or click Restart in the Operator Panel) so the running service picks up the blueprints.* and drones.* registrations. Reload the Blueprints tab — the error should go away.",
+        "Future: consider auto-detecting 'unknown method' on a tab's first reload and offering a one-click 'Restart service' button inline. Tracked as a follow-up; not in scope for this attempt."
+      ],
+      "files_changed": [
+        "scripts/start.cmd",
+        "scripts/test-claude.cmd",
+        "scripts/test-gemini.cmd",
+        "scripts/limits.cmd",
+        "scripts/doctor.cmd"
+      ],
+      "annotation_excerpt": "error text - reload failed"
+    },
+    {
+      "annotation_index": 11,
+      "version": "0.1.0+blueprint-model-provider-tie",
+      "status": "shipped",
+      "description": "Operator selected Provider 'claude-cli' but the Model field still showed 'gemini-2.5-pro'. Root cause: _refresh_model_hints (and the matching _refresh_models on the New-blueprint dialog) unconditionally preserved the prior text across provider switches, so a known model belonging to the OTHER provider survived the change. Fixed by adding _belongs_to_other_provider — when the current text is a known hint for some other provider it gets replaced with the new provider's first hint; custom operator-typed strings (not in any hint set) are still preserved.",
+      "change_overview": [
+        "apps/gui/windows/blueprints.py — new _belongs_to_other_provider helper",
+        "apps/gui/windows/blueprints.py — _refresh_model_hints uses the helper to reset cross-provider models to the new provider's first hint",
+        "apps/gui/windows/blueprints.py — _NewBlueprintDialog._refresh_models — same fix on the create dialog so a freshly opened dialog also defaults sensibly when the operator switches providers",
+        "tests/unit/test_blueprints_page.py — test_belongs_to_other_provider pins the four cases (empty / same-provider / other-provider / custom-typed)"
+      ],
+      "risk_level": "Low",
+      "risk_note": "Custom operator-typed model strings (anything not in either provider's hint tuple) are still preserved across provider switches — only known cross-provider models get reset.",
+      "next_steps": [
+        "Run scripts\\restart.cmd, open Blueprints tab, switch Provider claude-cli ↔ gemini-cli — Model field should reset to the first hint of the new provider each time. Type a custom value (e.g. 'my-custom-model') and switch providers — custom value should survive.",
+        "Ready to merge."
+      ],
+      "files_changed": [
+        "apps/gui/windows/blueprints.py",
+        "tests/unit/test_blueprints_page.py"
+      ],
+      "annotation_excerpt": "I've selected Provider claude-cli, but the Model"
+    },
+    {
+      "annotation_index": 12,
+      "version": "0.1.0+canvas-palette-drag-enable",
+      "status": "shipped",
+      "description": "Operator: 'on the canvas the cards should be draggable onto the working space'. The _DragList widget in apps/gui/canvas/palette.py overrode startDrag to emit a custom-MIME drag, but never enabled the drag-source machinery — QListWidget defaults to dragDropMode=NoDragDrop / dragEnabled=False, so Qt's view layer never invoked startDrag. The override was effectively dead code. Added an __init__ that calls setDragEnabled(True) + setDragDropMode(DragOnly). Drop side on the canvas (apps/gui/canvas/view.py + page.py) was already wired correctly.",
+      "change_overview": [
+        "apps/gui/canvas/palette.py — _DragList.__init__ enables drag and sets DragOnly mode so startDrag actually fires; control nodes, agent cards, and drone actions are all now draggable onto the canvas working space"
+      ],
+      "risk_level": "Low",
+      "risk_note": "DragOnly means the palette won't accept drops back into itself, which matches the existing UX (the palette is purely a source).",
+      "next_steps": [
+        "Restart the GUI, open Canvas tab. Drag a Trigger / Branch / Output node from Control onto the canvas — should drop a node. Same for an Agent card and a Drone action.",
+        "Ready to merge."
+      ],
+      "files_changed": [
+        "apps/gui/canvas/palette.py"
+      ],
+      "annotation_excerpt": "on the canvas the cards should be draggable"
+    },
+    {
+      "annotation_index": 7,
+      "version": "0.1.0+orphan-service-kill-hardening",
+      "status": "shipped",
+      "description": "Operator: 'Probe failed: unknown method: limits.check' persists across multiple restarts. Prior diagnosis (no_change_needed; just restart) was wrong because restart.cmd's kill missed the orphan: it only reaped processes by window-title (matches the visible cmd host) and by netstat-PID on :8765 (matches whatever currently binds the port). A CREATE_NO_WINDOW orphan service from an older session whose port binding is stale or whose service crashed mid-bind survives both. The GUI's supervisor then probes :8765, finds the orphan still answering, and attaches to its old in-memory RPC table. Hardened restart.cmd + stop.cmd to also kill any python.exe/pythonw.exe whose command line contains 'apps.service.main'. Added a /healthz probe to doctor.cmd that lists the registered methods and flags missing ones — the operator now has a one-button diagnostic to confirm whether the running service is actually on the latest code.",
+      "change_overview": [
+        "scripts/restart.cmd — additional PowerShell-based kill for any python whose command line includes apps.service.main (catches CREATE_NO_WINDOW orphans regardless of port state)",
+        "scripts/stop.cmd — same belt-and-braces kill",
+        "scripts/doctor.cmd — new '--- Service /healthz ---' section probes 127.0.0.1:8765/healthz, prints the registered method count, and explicitly flags whether limits.check / blueprints.list / drones.list / skills.list are present"
+      ],
+      "risk_level": "Low",
+      "risk_note": "PowerShell command-line filter only matches strings ending in 'apps.service.main' so it cannot kill an unrelated python process; doctor's probe uses a 3-second timeout so the script doesn't hang if the service isn't running.",
+      "next_steps": [
+        "Run scripts\\restart.cmd ONCE more — the new command-line kill will catch any orphan service the netstat-PID kill missed. Then click the Limits button in the Operator Panel; the Limits tab should populate.",
+        "If it still fails, run scripts\\doctor.cmd — the new '--- Service /healthz ---' section will say [MISSING] next to limits.check and tell you exactly which RPCs the running service knows about. Paste that output if it still doesn't help."
+      ],
+      "files_changed": [
+        "scripts/restart.cmd",
+        "scripts/stop.cmd",
+        "scripts/doctor.cmd"
+      ],
+      "annotation_excerpt": "says probe failed: unknown method: limits"
+    },
+    {
+      "annotation_index": 7,
+      "version": "0.1.0+everything-to-main",
+      "status": "shipped",
+      "description": "Operator second follow-up: 'problem is still here, and where is the ai comment from the previous query?'. Two things: (1) The orphan-kill fix from PR #31 (and the start.cmd PowerShell redirect fix added in this same PR) had been merged into a stack of branches but NOT into main. The operator's running code therefore had none of the fixes — restart.cmd was still the old version that misses orphans. (2) The 'previous AI comment' was in PR #31's _pending_actions.json which never reached main, so the annotator never processed it on the operator's box. Consolidated PR #28 + #29 + #30 + #31 + start.cmd PowerShell redirect into ONE branch targeting main. After this lands, the operator's update.cmd will pull all four PR's worth of fixes at once.",
+      "change_overview": [
+        "scripts/start.cmd — PowerShell `Start-Process` probes use two distinct temp files (modern PS rejects same-target redirects)",
+        "Consolidates PR #28 (script call-prefix), PR #29 (blueprint provider tie), PR #30 (canvas drag), PR #31 (orphan kill + healthz probe) into a single merge target",
+        "_pending_actions.json — appends this entry so the operator can verify the AI thread is up to date once the file lands"
+      ],
+      "risk_level": "Low",
+      "risk_note": "All upstream PRs were already passed by you and merged into the stack; this PR just consolidates them onto main. No new code beyond the start.cmd PowerShell fix.",
+      "next_steps": [
+        "Merge this PR into main, then on your machine: scripts\\update.cmd (git pull + pip install) → scripts\\restart.cmd (the new orphan-kill catches the stale service) → click Limits in the Operator Panel.",
+        "If Limits STILL says unknown method, run scripts\\doctor.cmd — the new --- Service /healthz --- section will print the actual list of registered methods and explicitly flag whether limits.check is present. Paste that output if it still doesn't help."
+      ],
+      "files_changed": [
+        "scripts/start.cmd"
+      ],
+      "annotation_excerpt": "problem is still here, and where is"
+    }
+  ]
+}

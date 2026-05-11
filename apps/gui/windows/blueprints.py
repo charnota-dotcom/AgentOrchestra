@@ -48,6 +48,23 @@ _MODEL_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _belongs_to_other_provider(model: str, provider: str) -> bool:
+    """True iff `model` is a known hint for some provider other than
+    `provider` and is NOT a hint for `provider` itself.
+
+    Drives the "tie model to provider" behaviour on the editor +
+    create-dialog combo boxes: switching from claude-cli to gemini-cli
+    while ``claude-sonnet-4-6`` is selected should reset the model
+    field, but a custom string the operator typed (not present in any
+    hint set) should be preserved across the switch.
+    """
+    if not model:
+        return False
+    if model in _MODEL_HINTS.get(provider, ()):
+        return False
+    return any(model in hints for hints in _MODEL_HINTS.values())
+
+
 def _split_csv(text: str) -> list[str]:
     """Split a comma- or whitespace-separated input into a clean list.
 
@@ -247,12 +264,21 @@ class BlueprintsPage(QtWidgets.QWidget):
 
     def _refresh_model_hints(self, provider: str) -> None:
         current = self.model_in.currentText()
+        new_hints = _MODEL_HINTS.get(provider, ())
         self.model_in.blockSignals(True)
         self.model_in.clear()
-        for m in _MODEL_HINTS.get(provider, ()):
+        for m in new_hints:
             self.model_in.addItem(m, m)
-        if current:
-            # Preserve any operator-typed value across provider switches.
+        if _belongs_to_other_provider(current, provider) or not current:
+            # Wrong-provider model (e.g. gemini-2.5-pro after switching
+            # to claude-cli) or initial empty state — pick the new
+            # provider's first hint as a sensible default.
+            if new_hints:
+                self.model_in.setEditText(new_hints[0])
+        else:
+            # Either matches the new provider already, or is a custom
+            # operator-typed value not in any provider's hints —
+            # preserve.
             self.model_in.setEditText(current)
         self.model_in.blockSignals(False)
 
@@ -450,11 +476,15 @@ class _NewBlueprintDialog(QtWidgets.QDialog):
 
     def _refresh_models(self, provider: str) -> None:
         current = self._model.currentText()
+        new_hints = _MODEL_HINTS.get(provider, ())
         self._model.blockSignals(True)
         self._model.clear()
-        for m in _MODEL_HINTS.get(provider, ()):
+        for m in new_hints:
             self._model.addItem(m, m)
-        if current:
+        if _belongs_to_other_provider(current, provider) or not current:
+            if new_hints:
+                self._model.setEditText(new_hints[0])
+        else:
             self._model.setEditText(current)
         self._model.blockSignals(False)
 
