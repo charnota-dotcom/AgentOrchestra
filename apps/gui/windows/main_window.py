@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from apps.gui.annotator import setup_annotator
 from apps.gui.canvas.page import CanvasPage
@@ -85,8 +85,17 @@ class MainWindow(QtWidgets.QMainWindow):
         # the package isn't installed; never raises.
         self._annotator = setup_annotator(self)
 
-        if first_run_pending():
-            QtCore.QTimer.singleShot(0, self._show_first_run_wizard)
+        self._first_run_wizard_scheduled = False
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        # Defer the modal wizard until after the main window has had a
+        # chance to paint at least once.  A 0 ms timer fires before
+        # initial paint events flush, so the wizard would overlay an
+        # un-painted (transparent / black) main-window rectangle.
+        if not self._first_run_wizard_scheduled and first_run_pending():
+            self._first_run_wizard_scheduled = True
+            QtCore.QTimer.singleShot(80, self._show_first_run_wizard)
 
     def _show_first_run_wizard(self) -> None:
         wizard = FirstRunWizard(self.client, parent=self)

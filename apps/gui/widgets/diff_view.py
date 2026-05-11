@@ -37,6 +37,12 @@ class _DiffHighlighter(QtGui.QSyntaxHighlighter):
     def highlightBlock(self, text: str) -> None:
         if not text:
             return
+        # NoWrap means one diff line = one block, so an agent that
+        # dumps a 500k-char minified payload would otherwise pin the
+        # main thread inside setFormat for seconds.  Skip formatting
+        # on absurdly long lines — the raw text still renders fine.
+        if len(text) > 5000:
+            return
         if text.startswith("+++") or text.startswith("---"):
             self.setFormat(0, len(text), self._head)
         elif text.startswith("@@"):

@@ -77,9 +77,12 @@ def _render_tool_call_html(entry: dict[str, Any]) -> str:
         input_text = _json.dumps(entry.get("tool_input") or {}, indent=2, default=str)
     except (TypeError, ValueError):
         input_text = str(entry.get("tool_input") or {})
-    input_text = _html.escape(input_text)
+    # Truncate FIRST, then escape — slicing inside an escaped entity
+    # like ``&quot;`` leaks malformed markup into the QTextEdit and
+    # corrupts the rich-text layout for the rest of the document.
     if len(input_text) > 1200:
         input_text = input_text[:1200] + "\n... (truncated)"
+    input_text = _html.escape(input_text)
     label_color = "#7c3aed" if is_subagent else "#0a7d4d"
     return (
         '<div style="background:#fbfaf3;border:1px solid #ece6c5;border-radius:6px;'
@@ -96,9 +99,12 @@ def _render_tool_call_html(entry: dict[str, Any]) -> str:
 def _render_tool_result_html(entry: dict[str, Any]) -> str:
     step = entry.get("step") or 0
     is_error = bool(entry.get("is_error"))
-    output = _html.escape(str(entry.get("tool_output") or ""))
+    output = str(entry.get("tool_output") or "")
+    # Truncate first; escape afterwards so we never slice through an
+    # in-flight entity.
     if len(output) > 1500:
         output = output[:1500] + "\n... (truncated)"
+    output = _html.escape(output)
     border = "#f3b1b1" if is_error else "#cfe8d4"
     bg = "#fdf2f2" if is_error else "#f2f9f4"
     label_color = "#b3261e" if is_error else "#0a7d4d"
@@ -208,6 +214,12 @@ class DroneActionChatDialog(QtWidgets.QDialog):
         self.context_gauge.update(total, context_window(provider, model))
 
     def _send(self) -> None:
+        # Ctrl+Return bypasses the visual disabled-button gate, so an
+        # impatient operator can mash the shortcut and queue duplicate
+        # drones.send RPCs against the same action.  Honour the button
+        # state explicitly.
+        if not self.send_btn.isEnabled():
+            return
         text = self.message_input.toPlainText().strip()
         if not text:
             return
@@ -287,6 +299,11 @@ class DroneActionChatDialog(QtWidgets.QDialog):
 
         dlg.saved.connect(_on_saved)  # type: ignore[arg-type]
         dlg.rejected.connect(lambda: self.send_btn.setEnabled(True))  # type: ignore[arg-type]
+        # Hold the Python wrapper on the dialog instance — without this
+        # the local ``dlg`` falls out of scope as soon as the method
+        # returns, the GC reaps the wrapper, and the non-modal C++
+        # window flashes and vanishes before the user can paste.
+        self._bridge_dlg = dlg
         dlg.show()
         # Reflect the partial transcript (with the user turn already
         # persisted) immediately so the operator sees what was sent.
