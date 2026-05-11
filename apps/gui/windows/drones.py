@@ -278,7 +278,18 @@ class DronesPage(QtWidgets.QWidget):
                 "drones.send", {"action_id": action_id, "message": message}
             )
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Send failed", str(e))
+            # Show the exception type as well as the message — some
+            # service-side errors (timeouts, parse failures) raise
+            # exceptions whose str() is empty, leaving the dialog body
+            # blank and the operator with nothing to copy/paste.
+            msg = str(e).strip()
+            body = f"{type(e).__name__}: {msg}" if msg else type(e).__name__
+            body += (
+                "\n\nFor a deeper trace, run scripts\\doctor.cmd — its "
+                "`--- Recent service log ---` section shows the last "
+                "lines the auto-spawned service wrote to stderr."
+            )
+            QtWidgets.QMessageBox.critical(self, "Send failed", body)
             self.send_btn.setEnabled(True)
             return
         action = out.get("action") or {}

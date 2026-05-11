@@ -25,17 +25,32 @@ Design notes:
 from __future__ import annotations
 
 import atexit
+import datetime
 import logging
 import os
 import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
 _SUPERVISED_CHILD: subprocess.Popen | None = None
+
+
+def service_log_path() -> Path:
+    """Where the supervisor-spawned service writes stdout+stderr.
+
+    Kept under the same per-user data dir the rest of the GUI uses
+    (matches the convention in apps/gui/annotator.py:_data_dir).
+    Exposed as a helper so doctor.cmd / debug tools can tail it
+    without duplicating the path constant.
+    """
+    base = Path.home() / ".local" / "share" / "agentorchestra" / "logs"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "service.log"
 
 
 def _port_open(host: str, port: int, timeout: float = 0.25) -> bool:
@@ -91,8 +106,28 @@ def _spawn_service() -> None:
     args = [sys.executable, "-m", "apps.service.main"]
     creationflags = 0
     stdin = subprocess.DEVNULL
-    stdout: int | None = subprocess.DEVNULL
-    stderr: int | None = subprocess.DEVNULL
+    # Redirect stdout + stderr to a per-user log file rather than
+    # /dev/null.  Before this, every service traceback (provider
+    # errors, hook failures, store crashes) disappeared into the
+    # void — the operator's "Send failed" dialog had no body
+    # because the service-side reason was simply gone.  With a
+    # rotating-on-launch log they can `tail` it or hit the new
+    # `--- Recent service log ---` section in doctor.cmd.
+    log_path = service_log_path()
+    try:
+        log_fh: int | object = open(log_path, "a", encoding="utf-8", errors="replace")
+        log_fh.write(  # type: ignore[union-attr]
+            f"\n--- service spawn at {datetime.datetime.now().isoformat()} (pid TBD) ---\n"
+        )
+        log_fh.flush()  # type: ignore[union-attr]
+    except OSError:
+        # Disk full / permissions broken — fall back to DEVNULL so the
+        # service still starts.  The GUI's RpcClient errors will still
+        # surface anything client-visible, just without the server side.
+        log.warning("could not open service log %s; falling back to DEVNULL", log_path)
+        log_fh = subprocess.DEVNULL
+    stdout = log_fh
+    stderr = subprocess.STDOUT  # interleave stderr into the same file
     if os.name == "nt":
         # 0x08000000 = CREATE_NO_WINDOW — keep the console hidden so
         # the user only sees the GUI window, not a phantom cmd box.
