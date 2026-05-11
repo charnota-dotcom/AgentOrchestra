@@ -176,6 +176,10 @@ class BlueprintsPage(QtWidgets.QWidget):
 
         self.name_in = QtWidgets.QLineEdit()
         self.name_in.setPlaceholderText("e.g. Code reviewer")
+        # textChanged drives the Save-enabled state — the operator can
+        # type a name into the big form (without first clicking + New)
+        # and save: we'll create-on-empty in `_save_async`.
+        self.name_in.textChanged.connect(self._update_save_enabled)  # type: ignore[arg-type]
         form.addRow("Name", self.name_in)
 
         self.description_in = QtWidgets.QLineEdit()
@@ -343,15 +347,32 @@ class BlueprintsPage(QtWidgets.QWidget):
         self.save_btn.setEnabled(True)
         self._set_status("")
 
+    def _update_save_enabled(self) -> None:
+        """Save is allowed when either a row is selected (update path)
+        or the operator has typed a name into the big form (create-on-
+        save path).  Wired to name_in.textChanged.  Without this, the
+        big form looked editable but Save was permanently grey when no
+        row was selected, with no in-app hint about clicking + New —
+        operator dead end (annotation #13)."""
+        has_selection = self._current is not None
+        has_name = bool(self.name_in.text().strip())
+        self.save_btn.setEnabled(has_selection or has_name)
+
     def _save(self) -> None:
         asyncio.ensure_future(self._save_async())
 
     async def _save_async(self) -> None:
-        if not self._current:
+        # Common form snapshot — both create and update use the same
+        # field set (verified against apps/service/main.py:1007
+        # blueprints_create which accepts the full shape).
+        name = self.name_in.text().strip()
+        if not name:
+            # Defensive: _update_save_enabled should keep Save disabled
+            # when name is empty AND nothing is selected, but belt and
+            # braces in case the gating is bypassed.
+            self._set_status("Name is required.", error=True)
             return
-        name = self.name_in.text().strip() or "Untitled blueprint"
-        params = {
-            "id": self._current["id"],
+        common = {
             "name": name,
             "description": self.description_in.text().strip(),
             "role": self.role_in.currentData(),
@@ -360,9 +381,31 @@ class BlueprintsPage(QtWidgets.QWidget):
             "system_persona": self.system_persona_in.toPlainText(),
             "skills": _split_csv(self.skills_in.text()),
             "reference_blueprint_ids": _split_csv(self.refs_in.text()),
-            "expected_version": self._current.get("version", 1),
         }
         self.save_btn.setEnabled(False)
+        if self._current is None:
+            # Create-on-save: the operator typed into the big form
+            # without first clicking + New.  Treat Save as "create this
+            # blueprint now" so they aren't stuck staring at a greyed
+            # button with no guidance.
+            self._set_status("Creating…")
+            try:
+                created = await self.client.call("blueprints.create", common)
+            except Exception as e:
+                self._set_status(f"Create failed: {e}", error=True)
+                self.save_btn.setEnabled(True)
+                return
+            self._current = created
+            await self._reload()
+            self._set_status(f"Created (v{created.get('version', 1)})")
+            self.save_btn.setEnabled(True)
+            return
+        # Existing path: update the selected blueprint.
+        params = {
+            "id": self._current["id"],
+            **common,
+            "expected_version": self._current.get("version", 1),
+        }
         self._set_status("Saving…")
         try:
             updated = await self.client.call("blueprints.update", params)
