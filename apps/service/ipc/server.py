@@ -23,7 +23,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from apps.service.dispatch.bus import EventBus
-from apps.service.ipc.sse import make_run_stream_route
+from apps.service.ipc.sse import make_drone_stream_route, make_run_stream_route
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +51,13 @@ class JsonRpcServer:
                 Route(
                     "/stream/runs/{run_id}",
                     make_run_stream_route(self.bus, token=self.token),
+                    methods=["GET"],
+                )
+            )
+            routes.append(
+                Route(
+                    "/stream/drones/{action_id}",
+                    make_drone_stream_route(self.bus, token=self.token),
                     methods=["GET"],
                 )
             )

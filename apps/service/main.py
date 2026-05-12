@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import contextlib
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -65,9 +66,20 @@ DEFAULT_DATA_DIR = Path.home() / ".local" / "share" / "agentorchestra"
 
 
 def _data_dir() -> Path:
-    p = DEFAULT_DATA_DIR
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        preferred = Path(local) / "agentorchestra" / "data" if local else None
+        for candidate in (preferred, DEFAULT_DATA_DIR):
+            if candidate is None:
+                continue
+            try:
+                candidate.mkdir(parents=True, exist_ok=True)
+                return candidate
+            except OSError:
+                continue
+        raise OSError("No writable data directory found")
+    DEFAULT_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return DEFAULT_DATA_DIR
 
 
 def _first_descriptive_line(text: str) -> str:
@@ -896,6 +908,7 @@ class Handlers:
             nodes=params.get("nodes", []),
             edges=params.get("edges", []),
             is_draft=bool(params.get("is_draft", False)),
+            is_flight=bool(params.get("is_flight", False)),
         )
         await self.store.insert_flow(flow)
         return {"id": flow.id}
@@ -916,6 +929,8 @@ class Handlers:
         flow.edges = params.get("edges", flow.edges)
         if "is_draft" in params:
             flow.is_draft = bool(params["is_draft"])
+        if "is_flight" in params:
+            flow.is_flight = bool(params["is_flight"])
         flow.updated_at = utc_now()
         try:
             await self.store.update_flow(flow, expected_version=expected_version)
@@ -1226,6 +1241,53 @@ class Handlers:
             self._action_send_locks.pop(params["id"], None)
         return {"deleted": bool(ok)}
 
+    async def drones_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Edit a deployed drone action's runtime properties.
+
+        ``params``:
+          id:                required.
+          workspace_id:      optional repo binding (None to unbind).
+          additional_skills: optional list of skills.
+          bound_chat_url:    optional pinned conversation URL.
+        """
+        action_id = params["id"]
+        async with await self._lock_for_action(action_id):
+            action = await self.store.get_drone_action(action_id)
+            if not action:
+                raise ValueError(f"unknown action: {action_id}")
+            if "name" in params:
+                action.name = str(params["name"]).strip() or None
+            if "workspace_id" in params:
+                wid = params["workspace_id"]
+                if wid:
+                    ws = await self.store.get_workspace(wid)
+                    if not ws:
+                        raise ValueError(f"unknown workspace: {wid}")
+                action.workspace_id = wid or None
+            if "additional_skills" in params:
+                action.additional_skills = [
+                    str(s) for s in (params["additional_skills"] or []) if s
+                ]
+            if "additional_reference_action_ids" in params:
+                action.additional_reference_action_ids = [
+                    str(r) for r in (params["additional_reference_action_ids"] or []) if r
+                ]
+            if "bound_chat_url" in params:
+                action.bound_chat_url = params["bound_chat_url"] or None
+            
+            # Bug: conversion support.  Allow patching the frozen snapshot
+            # when the operator explicitly re-identifies the drone (e.g. 
+            # converting a manual browser drone to an autonomous agent).
+            if not action.blueprint_snapshot:
+                action.blueprint_snapshot = {}
+            if "provider" in params:
+                action.blueprint_snapshot["provider"] = str(params["provider"])
+            if "model" in params:
+                action.blueprint_snapshot["model"] = str(params["model"])
+
+            await self.store.update_drone_action(action)
+            return action.model_dump(mode="json")
+
     async def drones_send(self, params: dict[str, Any]) -> dict[str, Any]:
         """Append the operator's message to a drone action's transcript
         and get a reply.  Multi-turn — every turn after the first builds
@@ -1300,6 +1362,34 @@ class Handlers:
                 system_lines.append(
                     "Operator-supplied skills you can invoke: " + " ".join(effective_skills)
                 )
+
+            # Bug: peer communication.  Fetch transcripts of referenced 
+            # actions and inject as 'Peer context'.
+            for ref_id in (action.additional_reference_action_ids or []):
+                ref_action = await self.store.get_drone_action(ref_id)
+                if not ref_action:
+                    continue
+                
+                ref_snap = ref_action.blueprint_snapshot or {}
+                ref_name = ref_action.name or ref_snap.get("name") or "Peer"
+                
+                # Format the peer's transcript.
+                ref_lines = []
+                for m in (ref_action.transcript or []):
+                    if m.get("role") in ("user", "assistant"):
+                        speaker = "User" if m.get("role") == "user" else f"Agent ({ref_name})"
+                        ref_lines.append(f"{speaker}: {m.get('content', '')}")
+                
+                if ref_lines:
+                    history_text = "\n".join(ref_lines)
+                    # Cap peer history to prevent blowing the context window.
+                    if len(history_text) > 20000:
+                        history_text = history_text[-20000:] + "\n(history truncated...)"
+                    
+                    system_lines.append(
+                        f"### PEER CONTEXT: Shared history with '{ref_name}'\n"
+                        + history_text
+                    )
 
             # Skip tool_call / tool_result transcript entries when
             # composing the LLM history — those are agent-loop visibility
@@ -1408,6 +1498,15 @@ class Handlers:
                 async for ev in session.send(message_body, attachments=[]):
                     if ev.kind == "text_delta":
                         text_buffer.append(ev.text)
+                        await self.store.append_event(
+                            Event(
+                                source=EventSource.DISPATCH_RUN,
+                                kind=EventKind.DRONE_TOKEN_DELTA,
+                                run_id=action_id,
+                                payload={"delta": ev.text[:1000]},
+                                text="",
+                            )
+                        )
                     elif ev.kind == "tool_call":
                         _flush_text()
                         p = ev.payload or {}
@@ -1634,47 +1733,74 @@ class Handlers:
 
         Returns ``{provider, skills, source}`` where:
           * ``provider`` is the requested provider name.
-          * ``skills`` is a list of ``{name, description, path}`` dicts.
+          * ``skills`` is a list of ``{name, description, path?, id?}`` dicts.
           * ``source`` is either ``"~/.claude/skills"`` (Claude) or
-            ``"none"`` (Gemini today — no first-class skills mechanism
-            in the Gemini CLI; the operator can still type free-form
-            ``/foo /bar`` directives that we inline as system text).
+            ``"none"`` (Gemini today).
 
-        For Claude (``claude-cli`` or ``anthropic``) we scan
-        ``~/.claude/skills/*.md`` for the operator's installed skills.
-        Each file's stem becomes the skill name.  The first non-empty
-        non-front-matter line of the body becomes the description so
-        the picker dialog has something to render under each name.
-        Skills directory missing → empty list (not an error).
+        Includes both 'first-class' skills found on disk AND custom
+        skill templates from the database.
         """
         provider = (params.get("provider") or "").strip()
+        
+        # 1. Load custom templates from DB.
+        db_skills = await self.store.list_skills()
+        entries: list[dict[str, Any]] = [
+            {"id": s.id, "name": s.name, "description": s.description}
+            for s in db_skills
+        ]
+
+        # 2. Append first-class skills from disk (Claude only).
+        source = "none"
         if provider in ("claude-cli", "anthropic"):
             skills_dir = Path.home() / ".claude" / "skills"
-            entries: list[dict[str, str]] = []
             if skills_dir.is_dir():
+                source = str(skills_dir)
                 for path in sorted(skills_dir.glob("*.md")):
                     try:
                         text = path.read_text(encoding="utf-8", errors="replace")
                     except OSError:
                         continue
-                    description = _first_descriptive_line(text)
+                    # Skip if we already have a template with this name.
+                    if any(e["name"] == path.stem for e in entries):
+                        continue
                     entries.append(
                         {
                             "name": path.stem,
-                            "description": description,
+                            "description": _first_descriptive_line(text),
                             "path": str(path),
                         }
                     )
-            return {
-                "provider": provider,
-                "skills": entries,
-                "source": str(skills_dir) if skills_dir.is_dir() else "none",
-            }
-        # Gemini / Ollama / API providers don't have a first-class
-        # skills mechanism the way Claude Code does.  Return empty
-        # so the GUI can render a helpful "no skills detected — type
-        # free-form" message.
-        return {"provider": provider, "skills": [], "source": "none"}
+        
+        return {
+            "provider": provider,
+            "skills": entries,
+            "source": source,
+        }
+
+    async def skills_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Create a new skill template."""
+        from apps.service.types import Skill
+        s = Skill(
+            name=params["name"],
+            description=params.get("description") or "",
+        )
+        await self.store.insert_skill(s)
+        return s.model_dump(mode="json")
+
+    async def skills_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Update an existing skill template."""
+        s = await self.store.get_skill(params["id"])
+        if not s:
+            raise ValueError(f"unknown skill: {params['id']}")
+        s.name = params.get("name", s.name)
+        s.description = params.get("description", s.description)
+        await self.store.update_skill(s)
+        return s.model_dump(mode="json")
+
+    async def skills_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Remove a skill template."""
+        ok = await self.store.delete_skill(params["id"])
+        return {"deleted": bool(ok)}
 
     async def limits_check(self, params: dict[str, Any]) -> dict[str, Any]:
         """Probe every locally-installed CLI for whatever subscription
@@ -1905,6 +2031,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("drones.get", h.drones_get)
     server.register("drones.deploy", h.drones_deploy)
     server.register("drones.delete", h.drones_delete)
+    server.register("drones.update", h.drones_update)
     server.register("drones.send", h.drones_send)
     server.register("drones.append_reference", h.drones_append_reference)
     server.register("drones.append_skill", h.drones_append_skill)
@@ -1914,6 +2041,9 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("drones.bind_chat_url", h.drones_bind_chat_url)
     server.register("drones.export", h.drones_export)
     server.register("skills.list", h.skills_list)
+    server.register("skills.create", h.skills_create)
+    server.register("skills.update", h.skills_update)
+    server.register("skills.delete", h.skills_delete)
     server.register("providers", h.providers)
     server.register("hook.received", h.hook_received)
     server.register("limits.check", h.limits_check)
@@ -1928,9 +2058,45 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("mcp.remove", h.mcp_remove)
     server.register("dictation.status", h.dictation_status)
     server.register("dictation.transcribe", h.dictation_transcribe)
+    log.info("registered %d RPC methods", len(server._methods))
 
 
 async def serve(args: argparse.Namespace) -> int:
+    def is_pid_alive(pid: int) -> bool:
+        import sys
+        if sys.platform == "win32":
+            import ctypes
+            PROCESS_QUERY_INFORMATION = 0x0400
+            STILL_ACTIVE = 259
+            try:
+                h = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
+                if not h:
+                    return False
+                status = ctypes.c_uint32()
+                ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(status))
+                ctypes.windll.kernel32.CloseHandle(h)
+                return status.value == STILL_ACTIVE
+            except Exception:
+                return True
+        else:
+            try:
+                import os
+                os.kill(pid, 0)
+                return True
+            except OSError:
+                return False
+
+    async def watch_parent() -> None:
+        if not getattr(args, "parent_pid", None):
+            return
+        import os
+        import signal
+        while True:
+            if not is_pid_alive(args.parent_pid):
+                log.warning("parent pid %s vanished, exiting", args.parent_pid)
+                os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(2)
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -1993,8 +2159,12 @@ async def serve(args: argparse.Namespace) -> int:
 
     server_task = asyncio.create_task(server.serve(), name="uvicorn")
     stop_task = asyncio.create_task(stop.wait(), name="stop-signal")
+    watch_task = asyncio.create_task(watch_parent(), name="watch-parent")
 
-    await asyncio.wait({server_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+    await asyncio.wait(
+        {server_task, stop_task, watch_task},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
     server.should_exit = True
     with contextlib.suppress(asyncio.CancelledError):
         await server_task
@@ -2011,6 +2181,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="agentorchestra-service")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--data-dir", type=str, default=None)
+    parser.add_argument("--parent-pid", type=int, default=None)
     args = parser.parse_args()
     return asyncio.run(serve(args))
 

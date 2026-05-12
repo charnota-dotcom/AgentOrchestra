@@ -104,7 +104,7 @@ class ContextGauge(QtWidgets.QWidget):
         # Start hidden — no data yet.
         self.setVisible(False)
 
-    def update(
+    def set_token_counts(
         self,
         transcript_tokens: int | None,
         context_window: int | None,

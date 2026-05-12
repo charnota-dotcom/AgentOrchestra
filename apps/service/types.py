@@ -479,6 +479,8 @@ class EventKind(StrEnum):
     SERVICE_STARTED = "service.started"
     SERVICE_STOPPED = "service.stopped"
     CLEANUP_FAILED = "cleanup.failed"
+    # Drones / Agents chat
+    DRONE_TOKEN_DELTA = "drone.token_delta"
     # Flow Canvas
     FLOW_NODE_QUEUED = "flow.node.queued"
     FLOW_NODE_STARTED = "flow.node.started"
@@ -654,6 +656,11 @@ class DroneAction(BaseModel):
     # be cleared and re-bound via ``drones.bind_chat_url``.  See
     # docs/BROWSER_PROVIDER_PLAN.md.
     bound_chat_url: str | None = None
+
+    # Instance-specific name override (e.g. for canvas topology).
+    # If None, the UI falls back to the blueprint snapshot's name.
+    name: str | None = None
+
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -716,6 +723,11 @@ class Flow(BaseModel):
     # nodes, simulate visually, but ``flows.dispatch`` refuses to
     # run them.  Promoting to Live = setting this to False.
     is_draft: bool = False
+    
+    # Flights are pre-set templates of grouped agents. They act as reusable
+    # architectural maps that can be deployed as cohesive units.
+    is_flight: bool = False
+    
     version: int = 1
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -741,6 +753,47 @@ class FlowRun(BaseModel):
     # Set only when state transitions to FAILED; surfaces to the GUI
     # via flow.completed.
     error: str | None = None
+
+
+class Skill(BaseModel):
+    """A reusable agent skill template.
+
+    Skills are 'superpowers' that can be picked and added to blueprints
+    or individual drone actions.  They provide high-level instructions
+    and capability hints to the external AI endpoint.
+    """
+
+    id: str = Field(default_factory=long_id)
+    name: str
+    description: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+# --- Prepopulated Agent Skills --------------------------------------------
+
+AGENT_SKILLS: tuple[tuple[str, str], ...] = (
+    ("research-deep", "In-depth web and file-based research with citations."),
+    ("code-review", "Detailed code analysis for bugs, logic, and style."),
+    ("bug-hunt", "Systematic search for logical flaws and edge cases."),
+    ("doc-gen", "Comprehensive technical documentation generation."),
+    ("unit-test", "Automated test case creation and verification."),
+    ("perf-audit", "Performance bottleneck and resource leak analysis."),
+    ("security-scan", "Vulnerability assessment and security hardening."),
+    ("refactor-dry", "Logic consolidation and DRY principle enforcement."),
+    ("api-design", "RESTful and idiomatic API specification design."),
+    ("data-extract", "Structured data parsing from unstructured raw text."),
+    ("summarize", "Concise extraction of key points from large contexts."),
+    ("translate", "Idiomatic translation between programming languages."),
+    ("ux-audit", "Accessibility and usability review for UI components."),
+    ("db-optim", "SQL query and database schema performance tuning."),
+    ("ci-pipeline", "DevOps and CI/CD configuration (GitHub Actions, etc)."),
+    ("git-fix", "Resolving complex merge conflicts and history cleanup."),
+    ("copy-edit", "Grammar, tone, and clarity refinement for prose."),
+    ("market-analysis", "Competitor research and industry trend identification."),
+    ("tech-stack", "Architectural recommendations for new project builds."),
+    ("root-cause", "Post-mortem analysis of complex system failures."),
+)
 
 
 def is_path_inside(child: Path, parent: Path) -> bool:

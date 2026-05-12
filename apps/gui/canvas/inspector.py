@@ -37,15 +37,22 @@ class InspectorPanel(QtWidgets.QWidget):
     # Selection-driven display
     # ------------------------------------------------------------------
 
-    def show_for(self, nodes: list[BaseNode]) -> None:
-        if not nodes:
+    def show_for(self, items: list[BaseNode | Edge]) -> None:
+        if not items:
             self._show_flow_panel(self._last_flow_name)
             return
         # Multi-select: show count, no per-node fields (V2 polish).
-        if len(nodes) > 1:
-            self._show_multi(nodes)
+        if len(items) > 1:
+            self._show_multi(items)
             return
-        self._show_node(nodes[0])
+        
+        from apps.gui.canvas.nodes.base import BaseNode
+        from apps.gui.canvas.edges import Edge
+        
+        if isinstance(items[0], BaseNode):
+            self._show_node(items[0])
+        elif isinstance(items[0], Edge):
+            self._show_edge(items[0])
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -161,7 +168,54 @@ class InspectorPanel(QtWidgets.QWidget):
 
         self._replace_body(body)
 
-    delete_requested = QtCore.Signal(object)  # BaseNode
+    def _show_edge(self, edge: Edge) -> None:
+        body = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(body)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(8)
+
+        v.addWidget(self._heading("Edge"))
+        v.addWidget(self._small(f"From: {edge.source.owner.title() if edge.source else '?'}"))
+        v.addWidget(self._small(f"To: {edge.target.owner.title() if edge.target else '?'}"))
+
+        v.addSpacing(6)
+        v.addWidget(self._small("Label (shown on the line):"))
+        label_input = QtWidgets.QLineEdit(edge.label)
+        label_input.setPlaceholderText("Optional label")
+
+        def commit_label() -> None:
+            edge.label = label_input.text().strip()
+            edge.update_path()
+            edge.update()
+
+        label_input.textChanged.connect(commit_label)  # type: ignore[arg-type]
+        v.addWidget(label_input)
+
+        v.addSpacing(6)
+        directional_cb = QtWidgets.QCheckBox("Directional (draw arrowhead)")
+        directional_cb.setChecked(edge.directional)
+
+        def toggle_directional(state: int) -> None:
+            edge.directional = (state == QtCore.Qt.CheckState.Checked.value)
+            edge.update()
+
+        directional_cb.stateChanged.connect(toggle_directional)  # type: ignore[arg-type]
+        v.addWidget(directional_cb)
+
+        v.addStretch(1)
+
+        delete_btn = QtWidgets.QPushButton("Delete edge")
+        delete_btn.setStyleSheet(
+            "QPushButton{padding:6px 14px;background:#f6f8fa;color:#5b6068;"
+            "border-radius:4px;border:1px solid #d0d3d9;}"
+            "QPushButton:hover{background:#fde8e7;border-color:#b3261e;color:#b3261e;}"
+        )
+        delete_btn.clicked.connect(lambda: self.delete_requested.emit(edge))  # type: ignore[arg-type]
+        v.addWidget(delete_btn)
+
+        self._replace_body(body)
+
+    delete_requested = QtCore.Signal(object)  # BaseNode | Edge
 
     def _fire_delete(self) -> None:
         if self._current_node is not None:

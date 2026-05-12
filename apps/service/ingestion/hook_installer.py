@@ -13,6 +13,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from apps.service.secrets.keyring_store import hook_token
 
@@ -41,7 +42,7 @@ def default_script_path() -> Path:
     return here.parents[3] / "packs" / "hooks" / "agentorchestra-hook.sh"
 
 
-def status(settings_path: Path | None = None) -> dict:
+def status(settings_path: Path | None = None) -> dict[str, Any]:
     """Inspect settings.json without modifying it.  Returns whether each
     event currently has an agentorchestra entry.
     """
@@ -57,7 +58,7 @@ def status(settings_path: Path | None = None) -> dict:
             "error": "settings.json is not valid JSON",
         }
     hooks = data.get("hooks") or {}
-    out = {}
+    out: dict[str, bool] = {}
     any_installed = False
     for ev in HOOK_EVENTS:
         entries = hooks.get(ev) or []
@@ -84,7 +85,7 @@ def install(
     if not script.exists():
         raise FileNotFoundError(f"hook script missing at {script}")
     sp.parent.mkdir(parents=True, exist_ok=True)
-    data: dict = {}
+    data: dict[str, Any] = {}
     if sp.exists():
         try:
             data = json.loads(sp.read_text())

@@ -181,6 +181,15 @@ Six decisions show up in every phase and have not been reversed:
   agent" dialog. Both registries are exported as tuples so a buggy consumer
   can't mutate them.
 
+### Phase 6 — Canvas stability & type safety (PR #14)
+
+**Theme:** technical debt remediation and performance.
+
+- **Canvas Memory Lifecycle** — resolved dangling C++ signal connections, fixed cross-boundary race conditions during scene teardown, and eliminated memory bloat from abandoned draft edges.
+- **LOD & Performance** — edge rendering now falls back to straight lines (`lineTo`) and skips labels/arrowheads at low zoom levels (<0.2) to save GPU cycles. Implemented a zero-shot repath timer to prevent CPU storms during multi-node drag events.
+- **Dict-based Data Routing** — the `FlowExecutor` now resolves inputs as a dict keyed by target ports instead of a flat list, fulfilling the original design goal (Gap 1) and enabling complex multi-input agents (e.g. separating `instructions` from `context`).
+- **Strict Typing (`mypy`)** — added a `type-check` CI job and resolved over 50 foundational typing errors across the project, including enforcing explicit generic arguments (`list[dict[str, Any]]`) and fixing protocol signature mismatches.
+
 ---
 
 ## 4. Where we are now

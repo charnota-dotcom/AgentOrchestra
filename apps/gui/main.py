@@ -14,18 +14,25 @@ import argparse
 import asyncio
 import logging
 import sys
+from typing import Any
 
-from apps.gui.service_supervisor import ensure_service_running
+from apps.gui.service_supervisor import spawn_if_needed, wait_for_service
 from apps.service.secrets.keyring_store import hook_token
 
 log = logging.getLogger(__name__)
 
 
-def _import_qt() -> tuple:
+def _import_qt() -> tuple[Any, Any, Any, Any]:
     """Import PySide6 lazily so non-GUI code paths don't pull it in."""
     try:
-        import qasync  # type: ignore[import-not-found]
-        from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore[import-not-found]
+        import os
+        import PySide6
+        import qasync
+        from PySide6 import QtCore, QtGui, QtWidgets
+
+        # Ensure Qt can find its plugins (Standardized workspace fix)
+        plugin_path = os.path.join(os.path.dirname(PySide6.__file__), "plugins")
+        QtCore.QCoreApplication.addLibraryPath(plugin_path)
 
         return QtCore, QtGui, QtWidgets, qasync
     except ImportError as exc:
@@ -51,10 +58,13 @@ def main() -> int:
     )
 
     if not args.no_spawn_service:
-        ensure_service_running(args.service_url)
+        spawn_if_needed()
+        if not wait_for_service(timeout=30.0):
+            log.error("service failed to become ready within 30s")
 
     _qt_core, _qt_gui, qt_widgets, qasync = _import_qt()
     from apps.gui.ipc.client import RpcClient  # local import (qasync after Qt)
+    from apps.gui.service_supervisor import reap
     from apps.gui.windows.main_window import MainWindow
 
     token = args.token or hook_token()
@@ -81,9 +91,10 @@ def main() -> int:
     with loop:
         loop.run_forever()
         try:
+            reap()
             loop.run_until_complete(client.aclose())
         except Exception:
-            log.exception("RpcClient aclose failed")
+            log.exception("Cleanup failed")
     return 0
 
 

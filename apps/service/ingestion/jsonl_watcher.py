@@ -19,7 +19,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apps.service.types import Event, EventKind, EventSource
 
@@ -58,7 +58,7 @@ class JSONLWatcher:
         self.root = (root or default_claude_projects_dir()).resolve()
         self.poll_interval = poll_interval
         self._offsets: dict[Path, _FileOffset] = {}
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[Any] | None = None
         self._stop = asyncio.Event()
 
     async def start(self) -> None:

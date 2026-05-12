@@ -82,6 +82,7 @@ rem /dev/null on Windows and the operator saw an empty "Send
 rem failed" dialog with no body.
 echo --- Recent service log (last 30 lines) ---
 set SVCLOG=%USERPROFILE%\.local\share\agentorchestra\logs\service.log
+if defined LOCALAPPDATA set SVCLOG=%LOCALAPPDATA%\agentorchestra\logs\service.log
 if exist "%SVCLOG%" (
     echo path: %SVCLOG%
     echo.

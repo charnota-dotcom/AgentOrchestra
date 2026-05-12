@@ -203,7 +203,7 @@ class DroneActionChatDialog(QtWidgets.QDialog):
         provider = snap.get("provider")
         model = snap.get("model")
         if not provider or not model:
-            self.context_gauge.update(None, None)
+            self.context_gauge.set_token_counts(None, None)
             return
         total = estimate_action_total(
             self.action,
@@ -211,7 +211,7 @@ class DroneActionChatDialog(QtWidgets.QDialog):
             provider=provider,
             model=model,
         )
-        self.context_gauge.update(total, context_window(provider, model))
+        self.context_gauge.set_token_counts(total, context_window(provider, model))
 
     def _send(self) -> None:
         # Ctrl+Return bypasses the visual disabled-button gate, so an
@@ -256,7 +256,7 @@ class DroneActionChatDialog(QtWidgets.QDialog):
         # Prefer the server's fresh totals; fall back to a local
         # estimate if the response is missing them (e.g. older service).
         if out.get("context_window") is not None:
-            self.context_gauge.update(
+            self.context_gauge.set_token_counts(
                 out.get("transcript_tokens"),
                 out.get("context_window"),
             )

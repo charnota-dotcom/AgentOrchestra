@@ -36,6 +36,7 @@ class ComposerPage(QtWidgets.QWidget):
         self._template: dict[str, Any] | None = None
         self._last_instruction_id: str | None = None
         self._last_rendered: str | None = None
+        self._reloading = False
 
         self.setStyleSheet("background:#fafbfc;")
         layout = QtWidgets.QHBoxLayout(self)
@@ -131,12 +132,19 @@ class ComposerPage(QtWidgets.QWidget):
         asyncio.ensure_future(self._reload_cards_async())
 
     async def _reload_cards_async(self) -> None:
+        if self._reloading:
+            return
+        self._reloading = True
         try:
             self._cards = await self.client.call("cards.list", {})
             self._workspaces = await self.client.call("workspaces.list", {})
         except Exception as exc:
-            QtWidgets.QMessageBox.warning(self, "RPC error", str(exc))
+            self.cards_list.clear()
+            self.workspace_combo.clear()
+            self.preview.setPlainText(f"RPC unavailable: {exc}")
             return
+        finally:
+            self._reloading = False
         self.cards_list.clear()
         for c in self._cards:
             badge = " · agentic" if c.get("mode") == "agentic" else ""
@@ -190,7 +198,7 @@ class ComposerPage(QtWidgets.QWidget):
         default: Any = None,
     ) -> None:
         if multiline:
-            w: QtWidgets.QWidget = QtWidgets.QPlainTextEdit()
+            w: QtWidgets.QPlainTextEdit | QtWidgets.QLineEdit = QtWidgets.QPlainTextEdit()
             w.setMinimumHeight(80)
             if default:
                 w.setPlainText(str(default))

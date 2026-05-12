@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from apps.service.providers.protocol import ChatSession, StreamEvent
 from apps.service.types import PersonalityCard, ProviderError, utc_now
@@ -130,7 +130,7 @@ class AnthropicChatSession(ChatSession):
 
 
 class AnthropicProvider:
-    name: str = "anthropic"
+    name: Literal["anthropic"] = "anthropic"
 
     def __init__(self) -> None:
         self._sdk = _import_sdk()

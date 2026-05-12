@@ -9,6 +9,7 @@ multiplier.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 # USD per 1M tokens.  Values pinned to mid-2026 published rates; the
 # update channel will refresh these on launch in production.
@@ -51,7 +52,7 @@ def forecast(
     *,
     rendered_prompt_tokens: int,
     archetype: str | None = None,
-    history: list[dict] | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> Forecast:
     """Estimate (low, high, expected) cost in USD for a Run."""
 

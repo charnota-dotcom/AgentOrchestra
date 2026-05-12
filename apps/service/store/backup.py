@@ -25,6 +25,7 @@ import tarfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from apps.service.types import utc_now
 
@@ -178,7 +179,7 @@ def restore_backup(*, archive_path: Path, target_db_path: Path) -> RestoreReport
     )
 
 
-def describe_backup(archive_path: Path) -> dict:
+def describe_backup(archive_path: Path) -> dict[str, Any]:
     """Read just the manifest from a backup without restoring."""
     with tarfile.open(archive_path, "r:gz") as tar:
         member = tar.extractfile(MANIFEST_NAME)

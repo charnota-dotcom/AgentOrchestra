@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from apps.gui.browser_bridge.clipboard_router import RouteDecision, route
 
 
@@ -10,7 +12,7 @@ def _drone(
     *,
     chat_url: str | None = None,
     bound: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     return {
         "id": drone_id,
         "bound_chat_url": bound,

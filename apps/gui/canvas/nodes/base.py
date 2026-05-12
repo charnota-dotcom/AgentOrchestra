@@ -17,7 +17,7 @@ Selection is rendered as a 2 px blue outline around the rounded body.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -80,6 +80,7 @@ class BaseNode(QtWidgets.QGraphicsObject):
         self._status = NodeStatus.IDLE
         self.input_ports: list[Port] = []
         self.output_ports: list[Port] = []
+        self._height = NODE_HEIGHT
 
         self.setFlags(
             QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -94,9 +95,9 @@ class BaseNode(QtWidgets.QGraphicsObject):
     # ------------------------------------------------------------------
 
     def boundingRect(self) -> QtCore.QRectF:
-        # Add a few pixels of slop so the selection outline isn't
-        # clipped at the very edge.
-        return QtCore.QRectF(-3, -3, NODE_WIDTH + 6, NODE_HEIGHT + 6)
+        # Bug 19: Increased slop to 5 pixels to accommodate selection outline
+        # and antialiasing bleed.
+        return QtCore.QRectF(-5, -5, NODE_WIDTH + 10, self._height + 10)
 
     def itemChange(
         self,
@@ -134,14 +135,41 @@ class BaseNode(QtWidgets.QGraphicsObject):
         return self._title
 
     def add_input_port(self, port: Port) -> None:
+        self.prepareGeometryChange()
         self.input_ports.append(port)
         port.setParentItem(self)
-        port.setPos(0, HEADER_HEIGHT + 12 + 18 * (len(self.input_ports) - 1))
+        self._update_layout()
 
     def add_output_port(self, port: Port) -> None:
+        self.prepareGeometryChange()
         self.output_ports.append(port)
         port.setParentItem(self)
-        port.setPos(NODE_WIDTH, HEADER_HEIGHT + 12 + 18 * (len(self.output_ports) - 1))
+        self._update_layout()
+
+    def _update_layout(self) -> None:
+        """Bug 18: Dynamically calculate node height based on port count."""
+        max_ports = max(len(self.input_ports), len(self.output_ports))
+        min_h = NODE_HEIGHT
+        needed_h = HEADER_HEIGHT + 24 + (max_ports * 18)
+        self._height = max(min_h, needed_h)
+
+        for i, p in enumerate(self.input_ports):
+            p.setPos(0, HEADER_HEIGHT + 12 + 18 * i)
+        for i, p in enumerate(self.output_ports):
+            p.setPos(NODE_WIDTH, HEADER_HEIGHT + 12 + 18 * i)
+        self.update()
+
+    def to_payload(self) -> dict[str, Any]:
+        """Gap 3: Default serialization for flow nodes."""
+        return {
+            "id": self.node_id,
+            "type": "base",  # subclasses should override
+            "pos": [self.pos().x(), self.pos().y()],
+            "title": self._title,
+            "subtitle": self._subtitle,
+            "body": self._body,
+            "params": {},
+        }
 
     # ------------------------------------------------------------------
     # Paint
@@ -163,20 +191,27 @@ class BaseNode(QtWidgets.QGraphicsObject):
         self._paint_full(painter)
 
     def _paint_dot(self, painter: QtGui.QPainter) -> None:
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        # Bug 13: Removed redundant setRenderHint(Antialiasing)
         painter.setBrush(_STATUS_COLOUR[self._status])
         painter.setPen(QtCore.Qt.PenStyle.NoPen)
-        painter.drawEllipse(QtCore.QRectF(NODE_WIDTH / 2 - 12, NODE_HEIGHT / 2 - 12, 24, 24))
+        # Bug 11: Offset dot to center it within the full node width/height
+        # to prevent 'jumping' during LOD transition.
+        painter.drawEllipse(QtCore.QRectF(NODE_WIDTH / 2 - 12, self._height / 2 - 12, 24, 24))
 
     def _paint_compact(self, painter: QtGui.QPainter) -> None:
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         body_rect = QtCore.QRectF(0, 0, NODE_WIDTH, HEADER_HEIGHT + 22)
         path = QtGui.QPainterPath()
         path.addRoundedRect(body_rect, RADIUS, RADIUS)
         painter.fillPath(path, QtGui.QColor("#ffffff"))
-        # Header strip
+
+        # Bug 21: Use clipping to ensure the header perfectly matches
+        # the top rounded corners of the body with a solid fill.
+        painter.save()
+        painter.setClipPath(path)
         header_rect = QtCore.QRectF(0, 0, NODE_WIDTH, HEADER_HEIGHT)
         painter.fillRect(header_rect, self.HEADER_COLOUR)
+        painter.restore()
+
         painter.setPen(QtGui.QColor("#ffffff"))
         font = painter.font()
         font.setPointSize(10)
@@ -195,19 +230,18 @@ class BaseNode(QtWidgets.QGraphicsObject):
 
     def _paint_full(self, painter: QtGui.QPainter) -> None:
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        body_rect = QtCore.QRectF(0, 0, NODE_WIDTH, NODE_HEIGHT)
+        # Bug 22: Use dynamic self._height instead of static NODE_HEIGHT.
+        body_rect = QtCore.QRectF(0, 0, NODE_WIDTH, self._height)
         path = QtGui.QPainterPath()
         path.addRoundedRect(body_rect, RADIUS, RADIUS)
         painter.fillPath(path, QtGui.QColor("#ffffff"))
 
-        # Header
+        # Bug 21: Header background via clipping for a solid, perfectly-fit look.
         header_rect = QtCore.QRectF(0, 0, NODE_WIDTH, HEADER_HEIGHT)
-        header_path = QtGui.QPainterPath()
-        header_path.addRoundedRect(header_rect, RADIUS, RADIUS)
-        # Square the bottom of the header so the rounded body shows
-        # below it.
-        header_path.addRect(QtCore.QRectF(0, HEADER_HEIGHT - RADIUS, NODE_WIDTH, RADIUS))
-        painter.fillPath(header_path, self.HEADER_COLOUR)
+        painter.save()
+        painter.setClipPath(path)
+        painter.fillRect(header_rect, self.HEADER_COLOUR)
+        painter.restore()
 
         painter.setPen(QtGui.QColor("#ffffff"))
         font = painter.font()
@@ -242,14 +276,15 @@ class BaseNode(QtWidgets.QGraphicsObject):
             painter.setPen(QtGui.QColor("#0f1115"))
             font.setPointSize(8)
             painter.setFont(font)
+            # Bug 22: Use dynamic height for the body text box.
             body_box = QtCore.QRectF(
-                10, HEADER_HEIGHT + 22, NODE_WIDTH - 20, NODE_HEIGHT - HEADER_HEIGHT - 30
+                10, HEADER_HEIGHT + 22, NODE_WIDTH - 20, self._height - HEADER_HEIGHT - 30
             )
             metrics = painter.fontMetrics()
             elided = metrics.elidedText(
                 self._body,
                 QtCore.Qt.TextElideMode.ElideRight,
-                int(body_box.width() * 4),  # ~4 lines
+                int(body_box.width() * 6),  # ~6 lines allowed in dynamic layout
             )
             painter.drawText(
                 body_box,

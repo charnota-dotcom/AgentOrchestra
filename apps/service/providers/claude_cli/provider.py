@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import shutil
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
 from apps.service.providers.protocol import ChatSession, StreamEvent
 from apps.service.types import PersonalityCard, ProviderError
@@ -37,7 +37,7 @@ def _claude_binary() -> str | None:
 
 
 class ClaudeCLIProvider:
-    name: str = "claude-cli"
+    name: Literal["claude-cli"] = "claude-cli"
 
     async def open_chat(
         self,

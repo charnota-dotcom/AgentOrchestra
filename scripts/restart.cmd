@@ -31,17 +31,18 @@ for /f "tokens=5" %%P in (
 )
 
 rem Belt-and-braces: kill any python.exe / pythonw.exe whose
-rem command line includes apps.service.main.  Catches orphan
-rem services from older sessions that the window-title and
-rem port-PID kills above can miss — e.g. a CREATE_NO_WINDOW
-rem service whose port binding was closed but the python process
-rem hasn't yet exited, or a service bound to a non-default port
-rem because :8765 was busy when it spawned.  These orphans are
-rem the documented root cause of "unknown method: limits.check"
-rem after multiple restarts (annotation #7) — the GUI's
-rem supervisor probes :8765, finds the orphan still answering,
-rem and attaches to its old in-memory RPC table.
-powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine -like '*apps.service.main*' } | ForEach-Object { Write-Host \"  killing orphan service PID $($_.ProcessId)\"; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+rem command line includes apps.service.main or the entrypoint
+rem agentorchestra-service.  Catches orphan services from older
+rem sessions that the window-title and port-PID kills above can
+rem miss — e.g. a CREATE_NO_WINDOW service whose port binding
+rem was closed but the python process hasn't yet exited, or a
+rem service bound to a non-default port because :8765 was busy
+rem when it spawned.  These orphans are the documented root cause
+rem of "unknown method: limits.check" after multiple restarts
+rem (annotation #7) — the GUI's supervisor probes :8765, finds
+rem the orphan still answering, and attaches to its old in-memory
+rem RPC table.
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and ($_.CommandLine -like '*apps.service.main*' -or $_.CommandLine -like '*agentorchestra-service*') } | ForEach-Object { Write-Host \"  killing orphan service PID $($_.ProcessId)\"; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 
 rem Tiny pause so the OS releases the port before the new GUI
 rem probes it.

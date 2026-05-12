@@ -30,6 +30,8 @@ Key contract notes pulled from
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +39,29 @@ if TYPE_CHECKING:
     from apps.gui.windows.main_window import MainWindow
 
 log = logging.getLogger(__name__)
+
+
+def _discover_library() -> None:
+    """Add the shared annotator package to sys.path if not already present."""
+    try:
+        import pyside6_annotator  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    # Development environment: look for a sibling Annotator directory.
+    # apps/gui/annotator.py is 2 levels deep from the AgentOrchestra root.
+    here = Path(__file__).resolve().parent
+    search_paths = [
+        here.parents[2] / "Annotator" / "pyside6_annotator_pkg",  # Sibling of AgentOrchestra/
+        Path(r"C:\Users\konst\OneDrive\Documents\GitHub\Annotator\pyside6_annotator_pkg"),
+    ]
+
+    for path in search_paths:
+        if path.is_dir():
+            sys.path.insert(0, str(path))
+            log.info("linked shared annotator from %s", path)
+            return
 
 
 # Display name and slug used when computing the per-app action-log
@@ -77,7 +102,9 @@ _SCREEN_TO_STACK_INDEX: dict[str, int] = {
     "CanvasPage": 6,
     "LimitsPage": 7,
     "BlueprintsPage": 8,
-    "DronesPage": 9,
+    "SkillsPage": 9,
+    "DronesPage": 10,
+    "AgentsPage": 11,
 }
 
 
@@ -129,6 +156,7 @@ def setup_annotator(window: MainWindow) -> tuple[Any, Any] | None:
     logged at WARNING level and never raised — the orchestrator GUI
     must keep working without the annotator.
     """
+    _discover_library()
     try:
         from pyside6_annotator import (  # type: ignore[import-not-found]
             AnnotationManager,
@@ -141,10 +169,58 @@ def setup_annotator(window: MainWindow) -> tuple[Any, Any] | None:
         )
         return None
 
+    # Bug fix: prevent crash in library's showEvent override.
+    # We set this at the class level so it's guaranteed to exist
+    # when the constructor runs (which may trigger showEvent).
+    FloatingAnnotationBar._screen_signal_connected = False
+
+    class _AgentMintingAnnotationManager(AnnotationManager):
+        def _save_annotation(self, widget: Any, index: int, comment: str, **kwargs: Any) -> None:
+            super()._save_annotation(widget, index, comment, **kwargs)
+            if not self._annotations:
+                return
+            ann = self._annotations[-1]
+
+            import asyncio
+            async def _mint_drone() -> None:
+                try:
+                    # 1. Look for an existing 'annotator' blueprint, or create it.
+                    bps = await window.client.call("blueprints.list", {})
+                    annotator_bp = next((bp for bp in bps if bp.get("name") == "Annotator"), None)
+                    if not annotator_bp:
+                        annotator_bp = await window.client.call("blueprints.create", {
+                            "name": "Annotator",
+                            "description": "Auto-created to handle screen annotations.",
+                            "provider": "claude-cli",
+                            "model": "claude-sonnet-3-5",
+                            "system_persona": "You are a helpful assistant analyzing screen annotations.",
+                        })
+
+                    # 2. Deploy a drone action
+                    action = await window.client.call("drones.deploy", {
+                        "blueprint_id": annotator_bp["id"],
+                    })
+
+                    # 3. Send the message
+                    prompt = f"Operator's note: {comment}\n\nSelected UI element context: {ann.text_snippet}"
+                    # Fire and forget; the backend will process it and update the DB
+                    asyncio.ensure_future(window.client.call("drones.send", {
+                        "action_id": action["id"],
+                        "message": prompt
+                    }))
+
+                    # 4. Navigate to DronesPage to show the newly created action
+                    navigate = _make_navigate_to(window)
+                    navigate("DronesPage")
+                except Exception as exc:
+                    log.warning(f"Failed to mint annotation drone: {exc}")
+
+            asyncio.ensure_future(_mint_drone())
+
     try:
         data_dir = _data_dir()
         action_log_path = _action_log_path()
-        manager = AnnotationManager(
+        manager = _AgentMintingAnnotationManager(
             window=window,
             data_dir=data_dir,
             app_name=APP_NAME,

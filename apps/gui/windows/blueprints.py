@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
 
+from apps.gui.presets import PROVIDER_MODELS, PROVIDERS, model_label_for
+
+
 _ROLE_LABELS: tuple[tuple[str, str], ...] = (
     # value, human label.  Order matches the Authority matrix in
     # docs/DRONE_MODEL.md so the dropdown reads the same way.
@@ -36,29 +39,9 @@ _ROLE_LABELS: tuple[tuple[str, str], ...] = (
     ("auditor", "Auditor — read-only, cannot mutate even self"),
 )
 
-# Subset of providers we currently route to.  Stays in sync with the
-# Agents tab's ``_AGENTS_TAB_PRESETS`` until PR #24 unifies them.
-_PROVIDERS: tuple[str, ...] = ("claude-cli", "gemini-cli", "browser")
-
 # Default chat URL pre-filled when the operator picks ``provider="browser"``.
 # Operator can change to ChatGPT / Gemini / anything URL-addressable.
 _DEFAULT_CHAT_URL = "https://claude.ai/new"
-
-# Per-provider model defaults.  An operator can type a custom model
-# string into the QLineEdit instead — these are just convenience picks.
-_MODEL_HINTS: dict[str, tuple[str, ...]] = {
-    "claude-cli": ("claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"),
-    "gemini-cli": ("gemini-2.5-pro", "gemini-2.5-flash"),
-    # Browser-mode shares model names with the underlying service; the
-    # operator picks whichever model they're paying for in the browser.
-    "browser": (
-        "claude-sonnet-4-6",
-        "claude-opus-4-7",
-        "claude-haiku-4-5",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-    ),
-}
 
 
 def _belongs_to_other_provider(model: str, provider: str) -> bool:
@@ -73,9 +56,9 @@ def _belongs_to_other_provider(model: str, provider: str) -> bool:
     """
     if not model:
         return False
-    if model in _MODEL_HINTS.get(provider, ()):
+    if model in PROVIDER_MODELS.get(provider, ()):
         return False
-    return any(model in hints for hints in _MODEL_HINTS.values())
+    return any(model in hints for hints in PROVIDER_MODELS.values())
 
 
 def _split_csv(text: str) -> list[str]:
@@ -127,15 +110,30 @@ class BlueprintsPage(QtWidgets.QWidget):
         title.setStyleSheet("font-size:14px;font-weight:600;color:#0f1115;")
         header.addWidget(title)
         header.addStretch(1)
-        new_btn = QtWidgets.QPushButton("+ New")
-        new_btn.setStyleSheet(
-            "QPushButton{padding:4px 10px;border:1px solid #d0d3d9;"
-            "border-radius:4px;background:#f6f8fa;font-size:12px;}"
+        
+        btns = QtWidgets.QHBoxLayout()
+        btns.setSpacing(4)
+        
+        new_drone_btn = QtWidgets.QPushButton("+ Drone")
+        new_drone_btn.setStyleSheet(
+            "QPushButton{padding:4px 8px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#f6f8fa;font-size:11px;}"
             "QPushButton:hover{background:#eef0f3;}"
         )
-        new_btn.clicked.connect(self._new_dialog)  # type: ignore[arg-type]
-        header.addWidget(new_btn)
+        new_drone_btn.clicked.connect(lambda: self._new_dialog(is_agent=False))
+        btns.addWidget(new_drone_btn)
+
+        new_agent_btn = QtWidgets.QPushButton("+ Agent")
+        new_agent_btn.setStyleSheet(
+            "QPushButton{padding:4px 8px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#f6f8fa;font-size:11px;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        new_agent_btn.clicked.connect(lambda: self._new_dialog(is_agent=True))
+        btns.addWidget(new_agent_btn)
+        
         v.addLayout(header)
+        v.addLayout(btns)
 
         hint = QtWidgets.QLabel(
             "Operator-only.  A blueprint is a reusable template; deploy from "
@@ -210,15 +208,15 @@ class BlueprintsPage(QtWidgets.QWidget):
         form.addRow("Role", self.role_in)
 
         self.provider_in = QtWidgets.QComboBox()
-        for p in _PROVIDERS:
+        for p in PROVIDERS:
             self.provider_in.addItem(p, p)
         self.provider_in.currentTextChanged.connect(self._refresh_model_hints)  # type: ignore[arg-type]
         self.provider_in.currentTextChanged.connect(self._refresh_provider_rows)  # type: ignore[arg-type]
         form.addRow("Provider", self.provider_in)
 
         self.model_in = QtWidgets.QComboBox()
-        self.model_in.setEditable(True)
-        self._refresh_model_hints(_PROVIDERS[0])
+        self.model_in.setEditable(False)
+        self._refresh_model_hints(PROVIDERS[0])
         self._model_label = QtWidgets.QLabel("Model")
         form.addRow(self._model_label, self.model_in)
 
@@ -250,6 +248,11 @@ class BlueprintsPage(QtWidgets.QWidget):
         )
         form.addRow("System persona", self.system_persona_in)
 
+        self._skills_label = QtWidgets.QLabel("Default skills")
+        self._skills_row_widget = QtWidgets.QWidget()
+        self._skills_row_widget.setContentsMargins(0, 0, 0, 0)
+        skills_h = QtWidgets.QHBoxLayout(self._skills_row_widget)
+        skills_h.setContentsMargins(0, 0, 0, 0)
         self.skills_in = QtWidgets.QLineEdit()
         self.skills_in.setPlaceholderText(
             "/research-deep, /cite-sources  (comma- or newline-separated tokens)"
@@ -259,7 +262,16 @@ class BlueprintsPage(QtWidgets.QWidget):
             "this blueprint.  Drones deployed from this blueprint can layer "
             "additional one-off skills but cannot remove these defaults."
         )
-        form.addRow("Default skills", self.skills_in)
+        skills_h.addWidget(self.skills_in, stretch=1)
+        browse_btn = QtWidgets.QPushButton("Browse…")
+        browse_btn.setStyleSheet(
+            "QPushButton{padding:3px 8px;font-size:11px;border:1px solid #d0d3d9;"
+            "border-radius:4px;background:#f6f8fa;color:#5b6068;}"
+            "QPushButton:hover{background:#eef0f3;}"
+        )
+        browse_btn.clicked.connect(self._browse_skills)  # type: ignore[arg-type]
+        skills_h.addWidget(browse_btn)
+        form.addRow(self._skills_label, self._skills_row_widget)
 
         self.refs_in = QtWidgets.QLineEdit()
         self.refs_in.setPlaceholderText(
@@ -298,7 +310,7 @@ class BlueprintsPage(QtWidgets.QWidget):
 
     def _refresh_model_hints(self, provider: str) -> None:
         current = self.model_in.currentText()
-        new_hints = _MODEL_HINTS.get(provider, ())
+        new_hints = PROVIDER_MODELS.get(provider, ())
         self.model_in.blockSignals(True)
         self.model_in.clear()
         for m in new_hints:
@@ -308,12 +320,16 @@ class BlueprintsPage(QtWidgets.QWidget):
             # to claude-cli) or initial empty state — pick the new
             # provider's first hint as a sensible default.
             if new_hints:
-                self.model_in.setEditText(new_hints[0])
+                self.model_in.setCurrentIndex(0)
         else:
             # Either matches the new provider already, or is a custom
             # operator-typed value not in any provider's hints —
             # preserve.
-            self.model_in.setEditText(current)
+            idx = self.model_in.findText(current)
+            if idx >= 0:
+                self.model_in.setCurrentIndex(idx)
+            elif new_hints:
+                self.model_in.setCurrentIndex(0)
         self.model_in.blockSignals(False)
 
     def _refresh_provider_rows(self, provider: str) -> None:
@@ -328,10 +344,46 @@ class BlueprintsPage(QtWidgets.QWidget):
         is_browser = provider == "browser"
         self.chat_url_in.setVisible(is_browser)
         self._chat_url_label.setVisible(is_browser)
+        
+        # Bug: restrict skills to agents only.
+        self._skills_label.setVisible(not is_browser)
+        self._skills_row_widget.setVisible(not is_browser)
+
         if is_browser and not self.chat_url_in.text().strip():
             # Pre-fill the default so the operator can hit Save without
             # touching this row.
             self.chat_url_in.setText(_DEFAULT_CHAT_URL)
+        
+        # Add a conversion button if it's a browser drone.
+        if is_browser and self._current:
+            if not hasattr(self, "_convert_btn"):
+                self._convert_btn = QtWidgets.QPushButton("Convert to Agent…")
+                self._convert_btn.setStyleSheet(
+                    "QPushButton{padding:6px 12px;background:#f6f8fa;color:#0f1115;"
+                    "border-radius:4px;border:1px solid #d0d3d9;font-size:11px;}"
+                    "QPushButton:hover{background:#eef0f3;}"
+                )
+                self._convert_btn.clicked.connect(self._on_convert_to_agent)
+                self.layout().itemAt(1).widget().layout().insertWidget(2, self._convert_btn)
+            self._convert_btn.setVisible(True)
+        elif hasattr(self, "_convert_btn"):
+            self._convert_btn.setVisible(False)
+
+    def _on_convert_to_agent(self) -> None:
+        if not self._current:
+            return
+        
+        from apps.gui.windows.drones import _ConvertDroneDialog
+        dlg = _ConvertDroneDialog(parent=self)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        
+        p = dlg.params()
+        # Update the form.
+        self.provider_in.setCurrentText(p["provider"])
+        self.model_in.setCurrentText(p["model"])
+        self._refresh_provider_rows(p["provider"])
+        self._set_status("Converted to Agent. Click Save to persist.")
 
     # ------------------------------------------------------------------
     # Data
@@ -386,10 +438,10 @@ class BlueprintsPage(QtWidgets.QWidget):
             if self.provider_in.itemData(i) == bp.get("provider"):
                 self.provider_in.setCurrentIndex(i)
                 break
-        self._refresh_model_hints(bp.get("provider") or _PROVIDERS[0])
-        self.model_in.setEditText(bp.get("model") or "")
+        self._refresh_model_hints(bp.get("provider") or PROVIDERS[0])
+        self.model_in.setCurrentText(bp.get("model") or "")
         self.chat_url_in.setText(bp.get("chat_url") or "")
-        self._refresh_provider_rows(bp.get("provider") or _PROVIDERS[0])
+        self._refresh_provider_rows(bp.get("provider") or PROVIDERS[0])
         self.system_persona_in.setPlainText(bp.get("system_persona") or "")
         self.skills_in.setText(", ".join(bp.get("skills") or []))
         self.refs_in.setText(", ".join(bp.get("reference_blueprint_ids") or []))
@@ -406,6 +458,24 @@ class BlueprintsPage(QtWidgets.QWidget):
         has_selection = self._current is not None
         has_name = bool(self.name_in.text().strip())
         self.save_btn.setEnabled(has_selection or has_name)
+
+    def _browse_skills(self) -> None:
+        from apps.gui.widgets.skills_picker import SkillsPicker
+
+        provider = self.provider_in.currentData()
+        dlg = SkillsPicker(self.client, provider=provider, parent=self)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        picked = dlg.picked_skills().split()
+        if not picked:
+            return
+
+        current = _split_csv(self.skills_in.text())
+        for p in picked:
+            if p not in current:
+                current.append(p)
+        self.skills_in.setText(", ".join(current))
 
     def _save(self) -> None:
         asyncio.ensure_future(self._save_async())
@@ -527,23 +597,26 @@ class BlueprintsPage(QtWidgets.QWidget):
 
 
 class _NewBlueprintDialog(QtWidgets.QDialog):
-    """Minimal create dialog — name + provider + model + role.
+    """Refined create dialog with distinct Drone/Agent paths.
 
-    The full set of fields lives on the editor form once the row is
-    in the sidebar.  Keeping creation low-friction so the operator
-    iterates on configs by editing rather than re-typing.
+    If is_agent=True: shows autonomous providers and a Skills browse popup.
+    If is_agent=False: locks to 'browser' provider and shows Chat URL.
     """
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, is_agent: bool, parent: BlueprintsPage) -> None:
         super().__init__(parent)
-        self.setWindowTitle("New blueprint")
+        self._page = parent
+        self._is_agent = is_agent
+        self.setWindowTitle("New Agent Blueprint" if is_agent else "New Drone Blueprint")
         self.setModal(True)
-        self.resize(440, 240)
+        self.resize(520, 340)
 
         v = QtWidgets.QVBoxLayout(self)
         form = QtWidgets.QFormLayout()
+        form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+
         self._name = QtWidgets.QLineEdit()
-        self._name.setPlaceholderText("e.g. Code reviewer")
+        self._name.setPlaceholderText("e.g. Research Assistant" if is_agent else "Claude.ai helper")
         form.addRow("Name", self._name)
 
         self._role = QtWidgets.QComboBox()
@@ -552,43 +625,99 @@ class _NewBlueprintDialog(QtWidgets.QDialog):
         form.addRow("Role", self._role)
 
         self._provider = QtWidgets.QComboBox()
-        for p in _PROVIDERS:
-            self._provider.addItem(p, p)
-        self._provider.currentTextChanged.connect(self._refresh_models)  # type: ignore[arg-type]
+        if is_agent:
+            # Autonomous only
+            for p in PROVIDERS:
+                if p != "browser":
+                    self._provider.addItem(p, p)
+        else:
+            # Drone only
+            self._provider.addItem("browser", "browser")
+        
+        self._provider.currentTextChanged.connect(self._refresh_models)
         form.addRow("Provider", self._provider)
 
         self._model = QtWidgets.QComboBox()
-        self._model.setEditable(True)
-        self._refresh_models(_PROVIDERS[0])
+        self._model.setEditable(False)
+        self._refresh_models(self._provider.currentText())
         form.addRow("Model", self._model)
+
+        if is_agent:
+            # Skills field with popup browse.
+            self._skills = QtWidgets.QLineEdit()
+            self._skills.setReadOnly(True)
+            self._skills.setPlaceholderText("Select skills via Browse button…")
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(self._skills, stretch=1)
+            browse_btn = QtWidgets.QPushButton("Browse…")
+            browse_btn.setStyleSheet(
+                "QPushButton{padding:3px 8px;font-size:11px;border:1px solid #d0d3d9;"
+                "border-radius:4px;background:#f6f8fa;color:#5b6068;}"
+                "QPushButton:hover{background:#eef0f3;}"
+            )
+            browse_btn.clicked.connect(self._browse_skills)
+            row.addWidget(browse_btn)
+            form.addRow("Skills", row)
+        else:
+            # Chat URL for manual drones.
+            self._chat_url = QtWidgets.QLineEdit()
+            self._chat_url.setText(_DEFAULT_CHAT_URL)
+            form.addRow("Chat URL", self._chat_url)
+
         v.addLayout(form)
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.accepted.connect(self.accept)  # type: ignore[arg-type]
-        buttons.rejected.connect(self.reject)  # type: ignore[arg-type]
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
         v.addWidget(buttons)
 
     def _refresh_models(self, provider: str) -> None:
         current = self._model.currentText()
-        new_hints = _MODEL_HINTS.get(provider, ())
+        new_hints = PROVIDER_MODELS.get(provider, ())
         self._model.blockSignals(True)
         self._model.clear()
         for m in new_hints:
             self._model.addItem(m, m)
         if _belongs_to_other_provider(current, provider) or not current:
             if new_hints:
-                self._model.setEditText(new_hints[0])
+                self._model.setCurrentIndex(0)
         else:
-            self._model.setEditText(current)
+            idx = self._model.findText(current)
+            if idx >= 0:
+                self._model.setCurrentIndex(idx)
+            elif new_hints:
+                self._model.setCurrentIndex(0)
         self._model.blockSignals(False)
 
+    def _browse_skills(self) -> None:
+        from apps.gui.widgets.skills_picker import SkillsPicker
+        provider = self._provider.currentText()
+        dlg = SkillsPicker(self._page.client, provider=provider, parent=self)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        picked = dlg.picked_skills().split()
+        if not picked:
+            return
+
+        current = _split_csv(self._skills.text())
+        for p in picked:
+            if p not in current:
+                current.append(p)
+        self._skills.setText(", ".join(current))
+
     def params(self) -> dict[str, Any]:
-        return {
+        p = {
             "name": self._name.text().strip() or "Untitled blueprint",
             "role": self._role.currentData(),
-            "provider": self._provider.currentData(),
-            "model": self._model.currentText().strip() or "claude-sonnet-4-6",
+            "provider": self._provider.currentText(),
+            "model": self._model.currentText(),
         }
+        if self._is_agent:
+            p["skills"] = _split_csv(self._skills.text())
+        else:
+            p["chat_url"] = self._chat_url.text().strip() or _DEFAULT_CHAT_URL
+        return p

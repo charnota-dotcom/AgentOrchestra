@@ -22,9 +22,13 @@ _PROVIDER_HEADER = {
 class AgentNode(BaseNode):
     """Visual node for an agent card.
 
-    Inputs accept upstream output (one port for now; multi-input fan-in
-    is handled by an explicit MergeNode).  Output is a single text
-    payload — the agent's reply.
+    Inputs:
+    * instructions: Primary goal or prompt.
+    * context: Supporting data (files, previous logs).
+    * in: Generic fallback (concatenated to instructions).
+
+    Output:
+    * out: The agent's reply.
     """
 
     def __init__(self, node_id: str, card: dict[str, Any]) -> None:
@@ -36,7 +40,12 @@ class AgentNode(BaseNode):
         )
         self.card = card
         self.HEADER_COLOUR = _PROVIDER_HEADER.get(card.get("provider", ""), QtGui.QColor("#3b4252"))
+
+        # Bug Gap 1: Multi-port inputs.
+        self.add_input_port(Port(self, PortDirection.INPUT, "instructions"))
+        self.add_input_port(Port(self, PortDirection.INPUT, "context"))
         self.add_input_port(Port(self, PortDirection.INPUT, "in"))
+
         self.add_output_port(Port(self, PortDirection.OUTPUT, "out"))
         self.goal_override: str = ""
 

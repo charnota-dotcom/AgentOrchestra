@@ -53,10 +53,11 @@ class NatsBridge:
     peer_id: str = "local"
     _nc: Any = None
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
-    _publish_task: asyncio.Task | None = None
-    _subscribe_task: asyncio.Task | None = None
+    _publish_task: asyncio.Task[Any] | None = None
+    _subscribe_task: asyncio.Task[Any] | None = None
 
     async def start(self) -> bool:
+
         nats_mod = _import_sdk()
         if nats_mod is None:
             return False
@@ -150,7 +151,7 @@ def _serialize(ev: Event) -> bytes:
     return json.dumps(payload).encode()
 
 
-def _deserialize(d: dict, *, peer_origin: str) -> Event | None:
+def _deserialize(d: dict[str, Any], *, peer_origin: str) -> Event | None:
     try:
         kind = EventKind(d["kind"])
     except Exception:

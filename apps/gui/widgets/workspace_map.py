@@ -10,7 +10,7 @@ isolated.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtWidgets
 
@@ -90,7 +90,7 @@ class WorkspaceMap(QtWidgets.QFrame):
             for run in ws_runs[:8]:
                 self.body.addWidget(_run_lane(run))
 
-    def _workspace_row(self, ws: dict) -> QtWidgets.QWidget:
+    def _workspace_row(self, ws: dict[str, Any]) -> QtWidgets.QWidget:
         row = QtWidgets.QWidget()
         h = QtWidgets.QHBoxLayout(row)
         h.setContentsMargins(0, 6, 0, 2)
@@ -139,7 +139,7 @@ class WorkspaceMap(QtWidgets.QFrame):
         await self.reload()
 
 
-def _run_lane(run: dict) -> QtWidgets.QWidget:
+def _run_lane(run: dict[str, Any]) -> QtWidgets.QWidget:
     state = run.get("state", "")
     color = _STATE_COLORS.get(state, "#5b6068")
     row = QtWidgets.QWidget()

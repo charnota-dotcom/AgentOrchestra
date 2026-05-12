@@ -49,13 +49,13 @@ class StreamEvent:
         "error",
     ]
     text: str = ""
-    payload: dict = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 class ChatSession(Protocol):
     """A multi-turn conversation with one provider/model."""
 
-    async def send(
+    def send(
         self,
         message: str,
         *,
@@ -73,7 +73,7 @@ class ChatSession(Protocol):
 
 
 class LLMProvider(Protocol):
-    name: Literal["anthropic", "google", "openai", "ollama"]
+    name: Literal["claude-cli", "gemini-cli", "anthropic", "google", "openai", "ollama"]
 
     async def open_chat(
         self,
@@ -89,7 +89,7 @@ class LLMProvider(Protocol):
         """
         ...
 
-    async def run_with_tools(
+    def run_with_tools(
         self,
         card: PersonalityCard,
         *,

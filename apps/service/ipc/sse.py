@@ -61,3 +61,43 @@ def make_run_stream_route(bus: EventBus, *, token: str):
         )
 
     return endpoint
+
+
+def make_drone_stream_route(bus: EventBus, *, token: str):
+    """Returns an async function suitable as a Starlette endpoint for
+    streaming token deltas for a specific drone action.
+    """
+
+    async def endpoint(request: Request) -> Response:
+        if not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {token}"):
+            return Response("unauthorized", status_code=401)
+        action_id = request.path_params["action_id"]
+
+        async def gen():
+            heartbeat = 15.0
+            try:
+                async for ev in bus.stream(by_run(action_id), timeout=heartbeat):
+                    if await request.is_disconnected():
+                        break
+                    payload = {
+                        "id": ev.id,
+                        "seq": ev.seq,
+                        "kind": ev.kind.value,
+                        "run_id": ev.run_id,
+                        "payload": ev.payload,
+                    }
+                    yield f"event: {ev.kind.value}\ndata: {json.dumps(payload)}\n\n"
+                    # No auto-break for drones; stay open until UI cancels or disconnect.
+            except asyncio.CancelledError:
+                return
+
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    return endpoint

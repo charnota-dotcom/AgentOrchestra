@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -35,7 +36,6 @@ from apps.gui.canvas.commands import (
 from apps.gui.canvas.drone_chat_dialog import DroneActionChatDialog
 from apps.gui.canvas.edges import DraftEdge, Edge
 from apps.gui.canvas.inspector import InspectorPanel
-from apps.gui.canvas.layout import auto_layout
 from apps.gui.canvas.minimap import Minimap
 from apps.gui.canvas.nodes.agent import AgentNode
 from apps.gui.canvas.nodes.base import BaseNode, NodeStatus
@@ -56,6 +56,8 @@ from apps.gui.ipc.sse_client import SseClient
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
 
+log = logging.getLogger(__name__)
+
 
 def _node_id() -> str:
     return secrets.token_hex(6)
@@ -75,7 +77,7 @@ class CanvasPage(QtWidgets.QWidget):
         super().__init__()
         self.client = client
         self._sse = SseClient(base_url=client.base_url, token=client.token)
-        self._stream_task: asyncio.Task | None = None
+        self._stream_task: asyncio.Task[Any] | None = None
         self._flow_id: str | None = None
         self._flow_name = "Untitled flow"
         self._draft_edge: DraftEdge | None = None
@@ -86,6 +88,7 @@ class CanvasPage(QtWidgets.QWidget):
         # Undo stack for Add/Remove/Move/Connect operations.  Bound
         # to Ctrl+Z / Ctrl+Shift+Z below.
         self.undo_stack = QtGui.QUndoStack(self)
+        self.undo_stack.indexChanged.connect(lambda _: self.view.sync_proxies())
         # Per-node "drag start" position so we can produce a single
         # MoveNodeCommand per drag rather than one per pixel of motion.
         self._drag_start: dict[str, QtCore.QPointF] = {}
@@ -98,18 +101,19 @@ class CanvasPage(QtWidgets.QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self.palette = PalettePanel(client)
-        self.palette.setFixedWidth(220)
+        self.palette_panel = PalettePanel(client)
+        self.palette_panel.setMinimumWidth(160)
+        self.palette_panel.setMaximumWidth(220)
         # When the operator clicks "Deploy" in the palette and the
         # drone is deployed server-side, the palette emits this signal
         # so we can drop a DroneActionNode onto
         # the canvas and auto-open the chat dialog.  Without this the
         # operator stared at an empty canvas wondering where the new
         # drone went — same UX story as the old conversation_created.
-        self.palette.drone_deployed.connect(  # type: ignore[arg-type]
+        self.palette_panel.drone_deployed.connect(  # type: ignore[arg-type]
             self._on_drone_deployed
         )
-        root.addWidget(self.palette)
+        root.addWidget(self.palette_panel)
 
         centre = QtWidgets.QWidget()
         c = QtWidgets.QVBoxLayout(centre)
@@ -155,16 +159,17 @@ class CanvasPage(QtWidgets.QWidget):
         root.addWidget(centre, stretch=1)
 
         self.inspector = InspectorPanel()
-        self.inspector.setFixedWidth(280)
+        self.inspector.setMinimumWidth(180)
+        self.inspector.setMaximumWidth(280)
         root.addWidget(self.inspector)
 
         self.scene.selection_changed.connect(self.inspector.show_for)  # type: ignore[arg-type]
         self.inspector.flow_name_changed.connect(self._on_flow_name_changed)  # type: ignore[arg-type]
         self.inspector.run_requested.connect(self._on_run_clicked)  # type: ignore[arg-type]
         self.inspector.cancel_requested.connect(self._on_cancel_clicked)  # type: ignore[arg-type]
-        self.inspector.delete_requested.connect(self._delete_node)  # type: ignore[arg-type]
+        self.inspector.delete_requested.connect(self._remove_item)  # type: ignore[arg-type]
 
-        self.view.installEventFilter(self)
+        self.view.viewport().installEventFilter(self)
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # type: ignore[override]
         """Refresh the palette's drones list every time the operator
@@ -176,8 +181,8 @@ class CanvasPage(QtWidgets.QWidget):
         switch.
         """
         super().showEvent(event)
-        if hasattr(self, "palette"):
-            asyncio.ensure_future(self.palette.reload_drones())
+        if hasattr(self, "palette_panel"):
+            asyncio.ensure_future(self.palette_panel.reload_drones())
 
     # ------------------------------------------------------------------
     # Toolbar
@@ -229,9 +234,6 @@ class CanvasPage(QtWidgets.QWidget):
         self.draft_btn.toggled.connect(self._on_draft_toggled)  # type: ignore[arg-type]
         h.addWidget(self.draft_btn)
         h.addSpacing(8)
-        # Visibility toggle + lineage clusters were Agent-specific
-        # (drone references are list-shaped, not single-parent).
-        # Re-implement for drones in a follow-up if useful.
 
         # Wire keyboard shortcuts up front so they fire even when the
         # toolbar buttons aren't focused.
@@ -276,6 +278,7 @@ class CanvasPage(QtWidgets.QWidget):
         except Exception:
             return
         kind = payload.get("kind")
+        node: BaseNode | None = None
         if kind == "control":
             cls = _CONTROL_FACTORY.get(payload.get("control_kind", ""))
             if cls is None:
@@ -301,10 +304,12 @@ class CanvasPage(QtWidgets.QWidget):
             node = DroneActionNode(_node_id(), action)
         else:
             return
-        node.setPos(scene_pos)
-        self._wire_node(node)
-        # Add via undo stack so a misclick is one Ctrl+Z away.
-        self.undo_stack.push(AddNodeCommand(self.scene, node))
+
+        if node:
+            node.setPos(scene_pos)
+            self._wire_node(node)
+            # Add via undo stack so a misclick is one Ctrl+Z away.
+            self.undo_stack.push(AddNodeCommand(self.scene, node))
 
     def _wire_node(self, node: BaseNode) -> None:
         for port in node.input_ports + node.output_ports:
@@ -312,12 +317,72 @@ class CanvasPage(QtWidgets.QWidget):
         node.geometry_changed.connect(  # type: ignore[arg-type]
             lambda nid=node.node_id: self._note_node_moved(nid)
         )
+        # Bug 15: Ensure annotator proxies follow the node as it is dragged.
+        node.geometry_changed.connect(self.view.sync_proxies)
+        self.view.sync_proxies()
         # Drone-action nodes get a double-click hook that opens the
-        # per-drone chat dialog.
+        # edit dialog for that specific deployed instance.
         if isinstance(node, DroneActionNode):
             node.double_clicked.connect(  # type: ignore[arg-type]
-                lambda n=node: self._open_chat_for(n)
+                lambda n=node: self._edit_drone_instance(n)
             )
+
+    # ------------------------------------------------------------------
+    # Per-drone instance editing
+    # ------------------------------------------------------------------
+
+    def _edit_drone_instance(self, node: DroneActionNode) -> None:
+        asyncio.ensure_future(self._edit_drone_instance_async(node))
+
+    async def _edit_drone_instance_async(self, node: DroneActionNode) -> None:
+        try:
+            workspaces = await self.client.call("workspaces.list", {})
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Cannot open edit dialog", str(e))
+            return
+
+        from apps.gui.windows.drones import _EditDroneDialog
+        dlg = _EditDroneDialog(node.action, workspaces, parent=self)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        params = dlg.params()
+        params["id"] = node.action["id"]
+        try:
+            action = await self.client.call("drones.update", params)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Update failed", str(e))
+            return
+
+        # Refresh the node's internal action state and visual labels.
+        self._refresh_drone_node(node, action)
+        # Ensure the palette is also aware of the rename/change.
+        asyncio.ensure_future(self.palette_panel.reload_drones())
+
+    def _convert_drone_instance(self, node: DroneActionNode) -> None:
+        asyncio.ensure_future(self._convert_drone_async(node))
+
+    async def _convert_drone_async(self, node: DroneActionNode) -> None:
+        from apps.gui.windows.drones import _ConvertDroneDialog
+
+        dlg = _ConvertDroneDialog(parent=self)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        params = dlg.params()
+        params["id"] = node.action["id"]
+        try:
+            action = await self.client.call("drones.update", params)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Conversion failed", str(e))
+            return
+
+        # Success: refresh the node and the palette.
+        self._refresh_drone_node(node, action)
+        asyncio.ensure_future(self.palette_panel.reload_drones())
+        QtWidgets.QMessageBox.information(
+            self, "Converted", f"Drone '{node._title}' is now an autonomous agent."
+        )
 
     # ------------------------------------------------------------------
     # Per-drone chat dialog
@@ -372,21 +437,7 @@ class CanvasPage(QtWidgets.QWidget):
 
     def _refresh_drone_node(self, node: DroneActionNode, updated_action: dict[str, Any]) -> None:
         node.action = updated_action
-        snapshot = updated_action.get("blueprint_snapshot") or {}
-        transcript = updated_action.get("transcript") or []
-        last = next(
-            (m.get("content", "") for m in reversed(transcript) if m.get("role") == "assistant"),
-            "",
-        )
-        node._subtitle = (
-            f"{snapshot.get('role', 'worker')} · {snapshot.get('model', '?')} · "
-            f"{len(transcript)} turns"
-        )
-        node.set_body((last or "(no replies yet — double-click to chat)").strip())
-
-    # ------------------------------------------------------------------
-    # Lineage edges
-    # ------------------------------------------------------------------
+        node.refresh_visuals()
 
     # ------------------------------------------------------------------
     # Visibility toggle — dims nodes outside the selected lineage
@@ -442,20 +493,20 @@ class CanvasPage(QtWidgets.QWidget):
             and watched is self.minimap.parentWidget()
         ):
             self._reposition_minimap()
-        if watched is self.view and self._draft_edge is not None:
+        if watched is self.view.viewport() and self._draft_edge is not None:
             if event.type() == QtCore.QEvent.Type.MouseMove:
-                pos = self.view.mapToScene(event.position().toPoint())  # type: ignore[attr-defined]
+                mev = cast(QtGui.QMouseEvent, event)
+                pos = self.view.mapToScene(mev.position().toPoint())
                 self._draft_edge.update_to(pos)
                 return True
             if event.type() == QtCore.QEvent.Type.MouseButtonRelease:
-                self._finish_edge_drag(
-                    self.view.mapToScene(event.position().toPoint())  # type: ignore[attr-defined]
-                )
+                mev = cast(QtGui.QMouseEvent, event)
+                self._finish_edge_drag(self.view.mapToScene(mev.position().toPoint()))
                 return True
         # Mouse-up on the view (without a draft edge) is the end of
         # a node drag — push the accumulated move command.
         if (
-            watched is self.view
+            watched is self.view.viewport()
             and event.type() == QtCore.QEvent.Type.MouseButtonRelease
             and self._drag_start
         ):
@@ -490,11 +541,14 @@ class CanvasPage(QtWidgets.QWidget):
         self._draft_source = None
 
     # ------------------------------------------------------------------
-    # Node deletion
+    # Item deletion
     # ------------------------------------------------------------------
 
-    def _delete_node(self, node: BaseNode) -> None:
-        self.undo_stack.push(RemoveNodeCommand(self.scene, node))
+    def _remove_item(self, item: BaseNode | Edge) -> None:
+        if isinstance(item, BaseNode):
+            self.undo_stack.push(RemoveNodeCommand(self.scene, item))
+        elif isinstance(item, Edge):
+            self.undo_stack.push(RemoveEdgeCommand(self.scene, item))
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         if event.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace):
@@ -542,7 +596,15 @@ class CanvasPage(QtWidgets.QWidget):
         # command per node that actually moved.  Wrapped in a macro
         # so a single undo reverts the whole thing.
         old_positions = {n.node_id: QtCore.QPointF(n.pos()) for n in nodes}
-        auto_layout(nodes, edges)
+
+        from apps.gui.canvas.layout import LayoutCycleError, auto_layout
+        try:
+            auto_layout(nodes, edges)
+        except LayoutCycleError as exc:
+            # Bug 16: Surface validation error.
+            QtWidgets.QMessageBox.warning(self, "Auto-layout Failed", str(exc))
+            return
+
         moves: list[tuple[BaseNode, QtCore.QPointF, QtCore.QPointF]] = []
         for n in nodes:
             old = old_positions[n.node_id]
@@ -586,6 +648,7 @@ class CanvasPage(QtWidgets.QWidget):
         self._flow_id = None
         self._flow_name = "Untitled flow"
         self.inspector.show_for([])
+        self.view.sync_proxies()
 
     def _save_flow(self) -> None:
         asyncio.ensure_future(self._save_flow_async())
@@ -658,6 +721,7 @@ class CanvasPage(QtWidgets.QWidget):
         for n in flow.get("nodes", []) or []:
             node_type = n.get("type")
             node_id = n.get("id") or _node_id()
+            node: BaseNode | None = None
             if node_type == "agent":
                 card_id = n.get("card_id")
                 # We don't have a cards.get RPC; pull from the cards
@@ -665,17 +729,15 @@ class CanvasPage(QtWidgets.QWidget):
                 card = next(
                     (
                         c.data(QtCore.Qt.ItemDataRole.UserRole)["card"]
-                        for c in [
-                            self.palette.cards_list.item(i)
-                            for i in range(self.palette.cards_list.count())
-                        ]
-                        if c is not None
+                        for i in range(self.palette_panel.cards_list.count())
+                        if (c := self.palette_panel.cards_list.item(i)) is not None
                         and c.data(QtCore.Qt.ItemDataRole.UserRole)["card"].get("id") == card_id
                     ),
                     {"id": card_id, "name": "Missing card"},
                 )
-                node = AgentNode(node_id, card)
-                node.goal_override = (n.get("params") or {}).get("goal", "")
+                agent_node = AgentNode(node_id, card)
+                agent_node.goal_override = (n.get("params") or {}).get("goal", "")
+                node = agent_node
             elif node_type in _CONTROL_FACTORY:
                 node = _CONTROL_FACTORY[node_type](node_id)
                 if node_type == "branch" and isinstance(node, BranchNode):
@@ -688,11 +750,8 @@ class CanvasPage(QtWidgets.QWidget):
                 action = next(
                     (
                         c.data(QtCore.Qt.ItemDataRole.UserRole)["action"]
-                        for c in [
-                            self.palette.drones_list.item(i)
-                            for i in range(self.palette.drones_list.count())
-                        ]
-                        if c is not None
+                        for i in range(self.palette_panel.drones_list.count())
+                        if (c := self.palette_panel.drones_list.item(i)) is not None
                         and c.data(QtCore.Qt.ItemDataRole.UserRole)["action"].get("id") == action_id
                     ),
                     {"id": action_id, "blueprint_snapshot": {"name": "Missing drone"}},
@@ -700,10 +759,13 @@ class CanvasPage(QtWidgets.QWidget):
                 node = DroneActionNode(node_id, action)
             else:
                 continue
-            node.setPos(n.get("x", 0), n.get("y", 0))
-            self._wire_node(node)
-            self.scene.add_node(node)
-            node_index[node_id] = node
+
+            if node:
+                node.setPos(n.get("x", 0), n.get("y", 0))
+                self._wire_node(node)
+                self.scene.add_node(node)
+                node_index[node_id] = node
+
         for e in flow.get("edges", []) or []:
             src_node = node_index.get(e.get("from_node", ""))
             dst_node = node_index.get(e.get("to_node", ""))
@@ -718,7 +780,9 @@ class CanvasPage(QtWidgets.QWidget):
                 dst_node.input_ports[0] if dst_node.input_ports else None,
             )
             if src_port and dst_port:
-                self.scene.add_edge(Edge(src_port, dst_port))
+                edge = Edge(src_port, dst_port)
+                edge.directional = bool(e.get("directional", False))
+                self.scene.add_edge(edge)
         self.inspector.show_for([])
         self.view.fit_all()
 
@@ -800,17 +864,131 @@ class CanvasPage(QtWidgets.QWidget):
                 node.set_body(err[:200])
 
 
+class NodeAnnotationProxy(QtWidgets.QLabel):
+    """Hidden widget that overlays a canvas node to make it 'visible'
+    to the annotator.  Passes all mouse events through to the
+    viewport so canvas interaction remains unbroken.
+    """
+
+    def __init__(self, node: BaseNode, parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self.node = node
+        self.setObjectName(node.node_id)
+        # Bug 16: Removed self.setText() as it was causing UI overlap.
+        # The annotator can use objectName or parent titles for context.
+        self.setStyleSheet("background:transparent;")
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_NoSystemBackground)
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        # Invisible target.
+        pass
+
+    # Forward all interaction to the viewport parent.
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        event.ignore()
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        event.ignore()
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        event.ignore()
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        event.ignore()
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        event.ignore()
+
+    def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
+        from apps.gui.canvas.nodes.drone_action import DroneActionNode
+
+        if not isinstance(self.node, DroneActionNode):
+            event.ignore()
+            return
+
+        action = self.node.action
+        snapshot = action.get("blueprint_snapshot") or {}
+        if snapshot.get("provider") != "browser":
+            # Already autonomous.
+            event.ignore()
+            return
+
+        menu = QtWidgets.QMenu(self)
+        convert_act = menu.addAction("Convert to autonomous Agent...")
+
+        # Find the page to call the conversion logic.
+        # proxy -> viewport -> view -> layout -> page
+        view = self.parent().parent()
+        from apps.gui.canvas.page import CanvasPage
+        page = None
+        if isinstance(view, _CanvasViewWithDrop):
+            page = view._page
+
+        if page:
+            picked = menu.exec(event.globalPos())
+            if picked == convert_act:
+                page._convert_drone_instance(self.node)
+        else:
+            event.ignore()
+
+
 class _CanvasViewWithDrop(CanvasView):
     """View subclass that accepts palette drops.
 
     Lives in this file rather than ``view.py`` because it needs a
     reference to the page (to forward ``handle_drop``); keeping it
     here avoids a circular import.
+
+    Bug 15: Manages a set of ``NodeAnnotationProxy`` widgets that
+    shadow the scene's ``BaseNode`` items, allowing the annotator
+    overlay to 'see' and select individual cards.
     """
 
     def __init__(self, scene: QtWidgets.QGraphicsScene, page: CanvasPage) -> None:
         super().__init__(scene)
         self._page = page
+        self._proxies: dict[str, NodeAnnotationProxy] = {}
+        self.zoom_changed.connect(self.sync_proxies)
+
+    def sync_proxies(self) -> None:
+        """Update proxy geometries to match scene items."""
+        scene = self.scene()
+        if not scene or not isinstance(scene, CanvasScene):
+            return
+
+        nodes = scene.nodes()
+        node_ids = {n.node_id for n in nodes}
+
+        # 1. Purge orphaned proxies.
+        for nid in list(self._proxies.keys()):
+            if nid not in node_ids:
+                proxy = self._proxies.pop(nid)
+                proxy.deleteLater()
+
+        # 2. Add or update proxies for current nodes.
+        viewport = self.viewport()
+        for node in nodes:
+            if node.node_id not in self._proxies:
+                proxy = NodeAnnotationProxy(node, viewport)
+                proxy.show()
+                self._proxies[node.node_id] = proxy
+
+            p = self._proxies[node.node_id]
+            # Map node bounding rect (in scene coords) to viewport pixel coords.
+            scene_rect = node.sceneBoundingRect()
+            view_rect = self.mapFromScene(scene_rect).boundingRect()
+
+            if p.geometry() != view_rect:
+                p.setGeometry(view_rect)
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
+        self.sync_proxies()
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.sync_proxies()
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:
         if event.mimeData().hasFormat(PALETTE_MIME):
@@ -830,5 +1008,5 @@ class _CanvasViewWithDrop(CanvasView):
             super().dropEvent(event)
             return
         scene_pos = self.mapToScene(event.position().toPoint())
-        self._page.handle_drop(mime.data(PALETTE_MIME).data(), scene_pos)
+        self._page.handle_drop(bytes(mime.data(PALETTE_MIME).data()), scene_pos)
         event.acceptProposedAction()

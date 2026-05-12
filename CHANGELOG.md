@@ -1,5 +1,19 @@
 # Changelog
 
+## Phase 7 — Agents, Skills & Stability (2026-05)
+
+Significant UX and reliability overhaul, refining the Drone model and
+introducing first-class autonomous Agent workflows.
+
+- **Drones vs. Agents Split** — Separate UI sections for manual browser-based units ("Drones") and autonomous CLI-based units ("Agents").
+- **Standalone Skills Management** — Dedicated "Skills" tab for full CRUD management of agent superpower templates.  Auto-seeded with 20 popular templates (research, security, devops).
+- **Blueprint Refinement** — Context-aware creation workflow with "+ Drone" and "+ Agent" buttons.  Agents now use a mandatory popup skill selector instead of manual entry.
+- **Drone-to-Agent Conversion** — "Convert to Agent" workflow on the canvas and in the blueprint editor, allowing manual conversations to be upgraded to autonomous workflows while preserving history.
+- **Real-Time Streaming** — SSE-backed token deltas for both stand-alone chat and the Flow Canvas, mirroring the CLI's responsiveness.
+- **Peer-to-Peer "Talk"** — Cross-context communication enabled via User-set references. Agents can now "see" and build upon the conversation history of linked peers across different models.
+- **Core Stability Fixes** — Resolved parallel execution data races, hardened human approval gates, implemented optimistic concurrency locks for flow runs, and added a parent-PID watchdog to prevent orphaned service processes.
+- **UX Polish** — Relaxed horizontal window width constraints, fixed node header rendering, and added a 10-year-old level User Manual linked in the sidebar.
+
 ## Phase 6 — Drone model (2026-05)
 
 The "Agent" abstraction has been replaced by the **Drone** model.

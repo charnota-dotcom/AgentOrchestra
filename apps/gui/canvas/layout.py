@@ -33,9 +33,15 @@ NODE_W = 200
 NODE_H = 110
 
 
+class LayoutCycleError(Exception):
+    """Raised when the graph contains a cycle and cannot be auto-laid out."""
+
+
 def auto_layout(nodes: list[BaseNode], edges: list[Edge]) -> None:
-    """Mutates each node's position in place.  No-ops on an empty
-    graph or one that contains a cycle (per the topo check)."""
+    """Mutates each node's position in place.
+
+    Raises LayoutCycleError if a cycle is detected.
+    """
     if not nodes:
         return
     indegree: dict[str, int] = {n.node_id: 0 for n in nodes}
@@ -62,8 +68,8 @@ def auto_layout(nodes: list[BaseNode], edges: list[Edge]) -> None:
             if indegree_local[nxt] == 0:
                 ready.append(nxt)
     if len(order) != len(nodes):
-        # Cycle detected — leave positions alone.
-        return
+        # Bug 16: Surface cycle detection.
+        raise LayoutCycleError("Cycle detected — auto-layout only supports acyclic graphs.")
 
     rank: dict[str, int] = {nid: 0 for nid in indegree}
     for nid in order:

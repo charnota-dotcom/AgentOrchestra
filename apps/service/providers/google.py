@@ -109,7 +109,7 @@ class GeminiChatSession(ChatSession):
 
 
 class GoogleProvider:
-    name: str = "google"
+    name: Literal["google"] = "google"
 
     def __init__(self) -> None:
         self._sdk = _import_sdk()

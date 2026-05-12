@@ -148,7 +148,7 @@ Per-node Step rows still go to the existing `steps` table so the
 existing History / search machinery keeps working. The flow-run wraps
 them with a `flow_run_id` foreign key.
 
-### 4.4 Executor model
+### 4.4 Executor model & Isolation
 
 A flow run is N coordinated single-agent runs. The executor:
 
@@ -160,16 +160,27 @@ A flow run is N coordinated single-agent runs. The executor:
 3. **Resolves inputs**: each node receives a dict of `{from_port:
    upstream_output}` from its incoming edges. The node's adapter
    formats this into the prompt for its underlying card.
-4. **Emits events**: `flow.node.queued / started / completed / failed`
+4. **Isolated Parallel Execution**: For parallel agents, `_run_agent` is called
+   concurrently. Under the hood, providers like `claude_cli` and `gemini_cli`
+   spawn **completely separate OS-level subprocesses** (`asyncio.create_subprocess_exec`).
+   This natively guarantees that each agent instance has an entirely isolated
+   context window and environment, preventing any cross-contamination.
+5. **Emits events**: `flow.node.queued / started / completed / failed`
    plus the existing per-card `run.*` events, all on the same SSE
    bus. The canvas subscribes per-flow-run and updates node visuals
    in real time.
-5. **Persists** every node's output as a normal `Run` (so
+6. **Persists** every node's output as a normal `Run` (so
    History / search / replay all work) plus a `flow_node_run` row
    linking it back to the flow.
 
 Reuses the existing `dispatcher.py` for the actual provider calls.
 The flow executor is a thin coordinator on top.
+
+### 4.5 Flights (Multi-Agent Templates)
+
+A "Flight" is a pre-set template of grouped agents (a saved Flow) designed to be deployed as a cohesive unit. While individual agents are generated from "Blueprints", a "Flight" is a top-level architectural map that stamps out multiple instances and their routing at once.
+- Saved flows can be marked as `is_flight = True`.
+- Flights act as reusable, multi-agent deployment patterns.
 
 ### 4.5 Live updates without polling
 

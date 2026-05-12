@@ -1,0 +1,753 @@
+2026-05-12 10:44:53,666 INFO apps.gui.service_supervisor supervised service spawned (pid 52952) -> C:\Users\konst\AppData\Local\agentorchestra\logs\service.log
+2026-05-12 10:45:04,183 ERROR __main__ service failed to become ready within 10s
+2026-05-12 10:45:05,738 WARNING apps.gui.annotator failed to attach annotation overlay: Error calling Python override of QWidget::showEvent(): 'FloatingAnnotationBar' object has no attribute '_screen_signal_connected'
+2026-05-12 10:45:08,159 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<Future finished result=None>)
+handle: <Handle Task.task_wakeup(<Future finished result=None>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='Task-3' coro=<WorkspaceMap.reload() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\widgets\workspace_map.py:71> wait_for=<Future finished result=None>> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.
+2026-05-12 10:45:08,173 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<_OverlappedF..., 1225, None)>)
+handle: <Handle Task.task_wakeup(<_OverlappedF..., 1225, None)>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='anyio._core._sockets.connect_tcp.<locals>.try_connect' coro=<connect_tcp.<locals>.try_connect() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_core\_sockets.py:182> wait_for=<_OverlappedFuture finished exception=ConnectionRefusedError(22, 'The remote computer refused the network connection', None, 1225, None)> cb=[TaskGroup._spawn.<locals>.task_done() at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:821]> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.
+2026-05-12 10:45:08,178 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<_OverlappedF..., 1225, None)>)
+handle: <Handle Task.task_wakeup(<_OverlappedF..., 1225, None)>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='anyio._core._sockets.connect_tcp.<locals>.try_connect' coro=<connect_tcp.<locals>.try_connect() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_core\_sockets.py:182> wait_for=<_OverlappedFuture finished exception=ConnectionRefusedError(22, 'The remote computer refused the network connection', None, 1225, None)> cb=[TaskGroup._spawn.<locals>.task_done() at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:821]> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.
+2026-05-12 10:45:08,182 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<_OverlappedF..., 1225, None)>)
+handle: <Handle Task.task_wakeup(<_OverlappedF..., 1225, None)>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='anyio._core._sockets.connect_tcp.<locals>.try_connect' coro=<connect_tcp.<locals>.try_connect() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_core\_sockets.py:182> wait_for=<_OverlappedFuture finished exception=ConnectionRefusedError(22, 'The remote computer refused the network connection', None, 1225, None)> cb=[TaskGroup._spawn.<locals>.task_done() at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:821]> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.
+2026-05-12 10:45:08,186 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<_OverlappedF..., 1225, None)>)
+handle: <Handle Task.task_wakeup(<_OverlappedF..., 1225, None)>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='anyio._core._sockets.connect_tcp.<locals>.try_connect' coro=<connect_tcp.<locals>.try_connect() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_core\_sockets.py:182> wait_for=<_OverlappedFuture finished exception=ConnectionRefusedError(22, 'The remote computer refused the network connection', None, 1225, None)> cb=[TaskGroup._spawn.<locals>.task_done() at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:821]> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.
+2026-05-12 10:45:08,190 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<_OverlappedF..., 1225, None)>)
+handle: <Handle Task.task_wakeup(<_OverlappedF..., 1225, None)>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='anyio._core._sockets.connect_tcp.<locals>.try_connect' coro=<connect_tcp.<locals>.try_connect() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_core\_sockets.py:182> wait_for=<_OverlappedFuture finished exception=ConnectionRefusedError(22, 'The remote computer refused the network connection', None, 1225, None)> cb=[TaskGroup._spawn.<locals>.task_done() at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:821]> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.
+2026-05-12 10:45:08,195 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<_OverlappedF..., 1225, None)>)
+handle: <Handle Task.task_wakeup(<_OverlappedF..., 1225, None)>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='anyio._core._sockets.connect_tcp.<locals>.try_connect' coro=<connect_tcp.<locals>.try_connect() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_core\_sockets.py:182> wait_for=<_OverlappedFuture finished exception=ConnectionRefusedError(22, 'The remote computer refused the network connection', None, 1225, None)> cb=[TaskGroup._spawn.<locals>.task_done() at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:821]> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.
+2026-05-12 10:45:08,199 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<_OverlappedF..., 1225, None)>)
+handle: <Handle Task.task_wakeup(<_OverlappedF..., 1225, None)>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='anyio._core._sockets.connect_tcp.<locals>.try_connect' coro=<connect_tcp.<locals>.try_connect() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_core\_sockets.py:182> wait_for=<_OverlappedFuture finished exception=ConnectionRefusedError(22, 'The remote computer refused the network connection', None, 1225, None)> cb=[TaskGroup._spawn.<locals>.task_done() at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:821]> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.
+2026-05-12 10:45:08,203 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<_OverlappedF..., 1225, None)>)
+handle: <Handle Task.task_wakeup(<_OverlappedF..., 1225, None)>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='anyio._core._sockets.connect_tcp.<locals>.try_connect' coro=<connect_tcp.<locals>.try_connect() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_core\_sockets.py:182> wait_for=<_OverlappedFuture finished exception=ConnectionRefusedError(22, 'The remote computer refused the network connection', None, 1225, None)> cb=[TaskGroup._spawn.<locals>.task_done() at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:821]> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.
+2026-05-12 10:45:08,207 ERROR qasync._QEventLoop Exception in callback Task.task_wakeup(<_OverlappedF..., 1225, None)>)
+handle: <Handle Task.task_wakeup(<_OverlappedF..., 1225, None)>)>
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py", line 86, in _reload_async
+    runs = await self.client.call("runs.list", {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\ipc\client.py", line 21, in call
+    r = await self._client.post("/rpc", json={"method": method, "params": params or {}})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\konst\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+RuntimeError: Cannot enter into task <Task pending name='anyio._core._sockets.connect_tcp.<locals>.try_connect' coro=<connect_tcp.<locals>.try_connect() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_core\_sockets.py:182> wait_for=<_OverlappedFuture finished exception=ConnectionRefusedError(22, 'The remote computer refused the network connection', None, 1225, None)> cb=[TaskGroup._spawn.<locals>.task_done() at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:821]> while another task <Task pending name='Task-4' coro=<HomePage._reload_async() running at C:\Users\konst\OneDrive\Documents\GitHub\AgentOrchestra\apps\gui\windows\home.py:88>> is being executed.

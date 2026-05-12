@@ -86,6 +86,29 @@ MODE_FILE = "File / artifact"
 MODE_IMAGE = "Image prompt"
 
 
+# --- Provider/Model Source of Truth ----------------------------------------
+
+# Subset of providers we currently route to.
+PROVIDERS: tuple[str, ...] = ("claude-cli", "gemini-cli", "browser")
+
+# Canonical model IDs for each provider.  Used by the Blueprints editor
+# and creation dialogs to ensure only valid models are selectable.
+PROVIDER_MODELS: dict[str, tuple[str, ...]] = {
+    "claude-cli": ("claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"),
+    "gemini-cli": ("gemini-2.5-pro", "gemini-2.5-flash"),
+    "browser": (
+        "claude-sonnet-4-6",
+        "claude-opus-4-7",
+        "claude-haiku-4-5",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+    ),
+}
+
+
+# --- Agent Skill Templates (OBSOLETE: Moved to service.types) -------------
+
+
 # Frozen registries — exported as tuples so a buggy consumer can't
 # .append() / setitem one of these and corrupt every other importer.
 # Indexing semantics are unchanged (canvas + chat already iterate or

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentorchestra"
-version = "0.1.0"
+version = "0.1.2"
 description = "Desktop orchestrator for multi-vendor AI sub-agents with branch-per-agent isolation"
 readme = "README.md"
 requires-python = ">=3.11"

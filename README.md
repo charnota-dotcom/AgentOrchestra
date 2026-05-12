@@ -14,7 +14,7 @@ Subscription-only by default — no API keys are required for the day-to-day flo
 2. [Install & first run](#install--first-run)
 3. [Operator panel (Windows .cmd scripts)](#operator-panel-windows-cmd-scripts)
 4. [The GUI tabs in detail](#the-gui-tabs-in-detail)
-   - [Home](#home) · [Chat](#chat) · [Agents](#agents) · [Compose](#compose) · [Canvas](#canvas) · [History](#history) · [Limits](#limits) · [Settings](#settings)
+   - [Home](#home) · [Drones](#drones) · [Agents](#agents) · [Blueprints](#blueprints) · [Skills](#skills) · [Compose](#compose) · [Canvas](#canvas) · [History](#history) · [Limits](#limits) · [Settings](#settings)
 5. [Subsystems](#subsystems)
    - [Repo-aware coding sessions](#repo-aware-coding-sessions)
    - [Attachments (images + spreadsheets)](#attachments-images--spreadsheets)
@@ -45,7 +45,7 @@ The service does five things:
 4. **Watches the host** — Claude session JSONL files and Claude Code hooks — so what you do interactively shows up in the orchestrator's history too.
 5. **Exposes ~50 RPC methods** the GUI calls into. The full list is below.
 
-The GUI presents this as **eight rail tabs** (Home, Chat, Agents, Compose, Canvas, History, Limits, Settings) plus two stack pages (Live, Review) reached when you dispatch a Run from Compose.
+The GUI presents this as **ten rail tabs** (Home, Drones, Agents, Blueprints, Skills, Compose, Canvas, History, Limits, Settings) plus two stack pages (Live, Review) reached when you dispatch a Run from Compose.
 
 ---
 
@@ -102,37 +102,24 @@ The Operator Panel (`scripts/ops.py`) reads `manifest.json` so adding a new `.cm
 
 Landing page. Shows a **Workspaces map** (registered repos with their last activity), an **Active runs** table (in-flight Runs across all workspaces), and a **Recent runs** table with one-row-per-Run history. A Refresh button re-pulls all three. The first time you open the app, a **first-run wizard** (`first_run.py`) walks you through the three CLI smoke tests so you know your subscriptions work before sending real prompts.
 
-### Chat
+### Drones
 
-A lay-person chat box — pick a model preset, type a message, get a reply. Designed to feel exactly like the standard Claude.ai or Gemini web app, but routed through your local CLIs so you keep your subscription auth.
-
-**Controls:**
-
-- **Model picker** — entries from the shared `MODEL_PRESETS` registry in `apps/gui/presets.py` (12 rows: 3 Claude + 2 Gemini for Coding, plus 2 Claude + 1 Gemini for General Chat, plus 1 Claude + 1 Gemini each for File / artifact and Image prompt modes). Each preset is a `ModelPreset(label, provider, model, mode, system)` frozen dataclass. Switching presets mid-thread starts a new chat (a fresh Agent is minted on the next send) because the backend doesn't currently model-swap an existing Agent. The same registry powers the Canvas "+ New conversation" dialog and the Agents-tab "+ New agent" dialog so the three surfaces stay in sync.
-- **Thinking** — four steps from `THINKING_PRESETS`: Off / Normal / Hard / Very hard. Adds a directive to the system prompt. Default is Normal. Mid-thread changes apply to the next new chat (the system prompt is locked at agent creation).
-- **Skills** — free-form `/foo /bar baz` field. Inlined into the system prompt as instructions; not a real Skills invocation (that's interactive-only on the CLI side).
-- **Repo:** picker — bind this conversation to a git repo workspace. When set, the underlying CLI runs with `cwd=<repo_path>` so the model's built-in `Read` / `Bash` / `Edit` / `Grep` tools operate against the project. **Add repo…** picks an existing local directory; **Clone from git…** opens a URL/branch/depth dialog and runs `git clone` into `<data_dir>/clones/`. Switching the repo restarts the chat (same constraint as the model picker).
-- **Paperclip 📎** (or `Ctrl+Shift+A`) — attach an image (`.png/.jpg/.jpeg/.gif/.webp`) or spreadsheet (`.xlsx/.xls/.csv`) to the next message. You can also **drag a file from File Explorer onto the chat area**. Local files are cached on disk and uploaded only at send time (so they never orphan if you cancel). Attached chips wrap in a horizontal scroll so 50 files can't push the dialog off-screen.
-- **Send** (or `Ctrl+Return`) — fires `agents.send`. The first message of a session auto-creates a persistent `Agent` so the conversation shows up in the Agents tab and the Canvas Conversations palette. Subsequent sends append to the same Agent's transcript. Empty messages with attachments are accepted (we synthesise *"Please review the attached file: x.png"*).
-- **Save last reply…** — saves the most recent assistant turn to a file. Honours the leading `# filename.ext` header of File / artifact preset replies.
-- **New chat (clear history)** — clears the in-memory mirror so the next send mints a fresh Agent. Pending uploaded attachments are deleted on the previous agent so they don't orphan.
+A dedicated tab for manual, browser-based robot friends.  These units use the `browser` provider and require the operator to copy/paste messages through their standard web browser (Claude.ai, ChatGPT, etc.).  Ideal for simple tasks or when you want to remain in control of every turn.
 
 ### Agents
 
-Browse, manage, and follow up on every persistent conversation. List view is sorted by recency; selecting an agent shows its transcript, parent (if any), workspace binding, references, and a **Spawn follow-up** panel.
+A dedicated tab for autonomous robot friends.  These units use CLI-based providers (`claude-cli`, `gemini-cli`) to run all by themselves on your computer.  They can read your files, run code, and solve complex problems without any manual copy-pasting.
 
-**Spawn follow-up presets** (`FOLLOWUP_PRESETS` in `apps/service/agents/__init__.py`):
+### Blueprints
 
-| Preset | Instruction the new agent receives |
-|---|---|
-| `summarise` | Produce a tight summary of the prior conversation. |
-| `annotate` | Walk through the prior conversation and add inline notes. |
-| `deep_dive` | Pick the most interesting thread and go deeper. |
-| `critique` | Find weaknesses in the prior conversation's reasoning. |
-| `verify` | Cross-check the prior conversation's facts. |
-| `custom` | Operator-supplied instruction. |
+The **"Robot Plan"** workshop.  Create frozen templates for your friends:
+- **+ Drone** — Start a manual browser plan.
+- **+ Agent** — Start an autonomous CLI plan with integrated skill selection.
+- **Convert to Agent** — Select any Drone blueprint and upgrade it to an Agent brain at any time.
 
-The new Agent inherits the parent's provider + model by default but you can override either. The follow-up shows up on the Canvas as a directed lineage edge labelled with the preset name.
+### Skills
+
+The **"Superpower"** management library.  Create, edit, and delete instruction templates (e.g. `/research-deep`, `/code-review`).  These are database-backed and can be easily picked from a popup window whenever you are making or deploying an Agent.
 
 ### Compose
 
@@ -149,29 +136,14 @@ The **operator-grade** instruction builder — for when you want a card-driven R
 
 Drag-and-drop graph editor. Two distinct things live on the canvas:
 
-1. **AgentNodes** — wrap a `PersonalityCard` template. Used by the Flow executor to dispatch a fresh single-shot run when a Flow runs.
-2. **ConversationNodes** — wrap a persistent `Agent`. Drop one onto the canvas and double-click to open its chat dialog. A 📂 marker shows in the subtitle when the agent is bound to a repo workspace; the tooltip spells out provider, model, turn count, repo + branch, parent (if a follow-up), and the visibility model.
+1. **BlueprintNodes** — wrap a `DroneBlueprint` template. Used by the Flow executor to dispatch a fresh single-shot run when a Flow runs.
+2. **DroneNodes** — wrap a persistent `DroneAction`. Drop one onto the canvas and double-click to reconfigure it. A 📂 marker shows in the subtitle when bound to a repo; the tooltip spells out provider, model, turn count, and repo.
 
-**Lineage** — when a parent ConversationNode plus one or more of its descendants are on the canvas, AgentOrchestra auto-draws a translucent **LineageBox** around the cluster (so you can see who-belongs-with-whom at a glance) and labelled directional **edges** between them carrying the follow-up preset name. Cosmetic only; recomputes on every drag.
-
-**Visibility toggle** — when one ConversationNode is selected, every other node dims so the cluster reads at a glance. The reverse highlight click clears it.
-
-**Palette** — left panel lets you drop new AgentNodes (from card archetypes), Trigger / Branch / Merge / Human / Output flow nodes, and a **+ New Conversation** button that opens a dialog with name + model preset + workspace picker (with **Add…** and **Clone…** buttons reusing the same RPCs as the Chat tab). New conversations land on the canvas immediately.
-
-**Draft mode** — the Flow's `is_draft` toggle. When draft, the **Run** button is greyed out so you can wire up a graph in a separate canvas without accidentally executing it.
-
-**Edges** — drag from a node's output port to another's input. Edges have an arrowhead at the target (tangent-aware so it doesn't glitch on tight curves) and an optional rounded white pill label.
-
-**Save / Run** — `Save` calls `flows.update`. `Run` calls `flows.dispatch` which kicks the FlowExecutor; events stream over SSE for the run-id.
-
-**Per-Agent chat dialog** (double-click a ConversationNode):
-
-- Header shows name, model, provider, parent (if any).
-- **References** label + Edit references button — pick other Agents whose transcripts are inlined as a context preamble on every send (cross-provider safe). Capped at 100 KB total to avoid blowing the context window.
-- **Workspace banner** (green) — `📂 Working in: <name> (<path>)`. Always-visible when bound. **Change repo** button opens a list of registered workspaces with **Add new repo…**.
-- **Live git status banner** — when the workspace is a real git repo: `git: <branch> ↑2 ↓1 · 3 modified · last: abcd1234 …`. Refreshes on open and after every send.
-- **Switch branch** button — opens a small input. `feature/x` switches; prefix with `+` (`+feature/new`) to `git switch -c`.
-- Transcript above, paperclip + input + Send below. Same drag-drop and shortcut behaviour as the Chat tab.
+**Key Features:**
+- **Edit on Double-Click:** Double-clicking any drone node opens the **Edit Drone** dialog (name, workspace, skills) without changing the original blueprint.
+- **Convert to Agent:** Right-click any manual browser drone to "promote" it to an autonomous CLI agent, preserving the full transcript.
+- **Peer References:** Non-directional edges between drone nodes act as implicit context providers, allowing agents to "talk" across different windows and models.
+- **Lineage:** Auto-draws translucent boxes around parent/child drone clusters.
 
 ### History
 
@@ -237,11 +209,15 @@ When an Agent references another Agent (see below), the referencing Agent's prom
 
 The **Limits → Attachment storage** card surfaces total disk usage broken down by agent.
 
-### Cross-chat references
+### Peer Communication (References)
 
-Every Agent has `reference_agent_ids: list[str]`. Each referenced Agent's full transcript is wrapped in `=== Reference: <name> ===` markers and prepended to every prompt as read-only context. Cross-provider safe: a Gemini-CLI Agent reading a Claude-CLI Agent's transcript just sees plain text.
+Agents from independent contexts can "talk" to each other when linked by the operator. Each referenced unit's full conversation history is injected into the agent's system prompt as read-only context. This is cross-provider safe: a Gemini-CLI Agent reading a Claude-CLI Agent's transcript just sees plain text.
 
-Set up via the **Edit references** button on the canvas chat dialog. Self-references are rejected.
+Established via:
+- **Standalone:** "Edit references" button in the Drones or Agents chat pane.
+- **Canvas:** Drawing a non-directional edge between two drone nodes.
+
+Peer history is capped at 20,000 characters to prevent blowing the context window while still providing deep shared memory.
 
 ### Flow Canvas (executable graphs)
 

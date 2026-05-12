@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from apps.service.store.events import EventStore
 from apps.service.templates.engine import load_template
@@ -28,7 +29,7 @@ PACK_PATH = Path(__file__).resolve().parents[2].parent / "packs" / "archetypes"
 
 # Archetype-specific defaults.  Cards bind a template to a provider, model,
 # budget, and policy.
-_CARD_DEFAULTS: dict[str, dict] = {
+_CARD_DEFAULTS: dict[str, dict[str, Any]] = {
     "broad-research": dict(
         name="Broad Research",
         description="Wide-net research with indexed findings.",
@@ -181,7 +182,7 @@ _CARD_DEFAULTS: dict[str, dict] = {
 # parallelism works out of the box (Claude + Gemini side-by-side via
 # their respective CLIs, no API keys).  These reuse the same template
 # as the primary card; only the card-level provider/model differ.
-_GEMINI_VARIANTS: dict[str, dict] = {
+_GEMINI_VARIANTS: dict[str, dict[str, Any]] = {
     "broad-research": dict(
         name="Broad Research (Gemini)",
         description="Wide-net research with indexed findings — via Gemini CLI.",

@@ -42,6 +42,7 @@ from apps.service.types import (
     PersonalityCard,
     Run,
     RunState,
+    Skill,
     Step,
     Workspace,
     utc_now,
@@ -115,7 +116,39 @@ class EventStore:
         # a no-op.  See docs/BROWSER_PROVIDER_PLAN.md (PR 2).
         await self._add_column_if_missing("drone_blueprints", "chat_url", "TEXT")
         await self._add_column_if_missing("drone_actions", "bound_chat_url", "TEXT")
+        await self._add_column_if_missing("drone_actions", "name", "TEXT")
+        await self._add_column_if_missing("flows", "is_flight", "INTEGER NOT NULL DEFAULT 0")
         await self.db.commit()
+
+        # Seed initial skills if the table is empty.
+        await self.seed_initial_skills()
+
+    async def seed_initial_skills(self) -> None:
+        """Populate the 20 popular agent skill templates if none exist."""
+        from apps.service.types import AGENT_SKILLS
+
+        async with self._lock:
+            cur = await self.db.execute("SELECT COUNT(*) FROM skills")
+            row = await cur.fetchone()
+            if row and row[0] > 0:
+                return
+
+            for name, description in AGENT_SKILLS:
+                skill = Skill(name=name, description=description)
+                await self.db.execute(
+                    """
+                    INSERT INTO skills (id, name, description, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        skill.id,
+                        skill.name,
+                        skill.description,
+                        skill.created_at.isoformat(),
+                        skill.updated_at.isoformat(),
+                    ),
+                )
+            await self.db.commit()
 
     async def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         """Idempotent ``ALTER TABLE table ADD COLUMN column decl`` —
@@ -929,8 +962,8 @@ class EventStore:
                 INSERT INTO drone_actions (
                     id, blueprint_id, blueprint_snapshot, workspace_id,
                     additional_skills, additional_reference_action_ids,
-                    transcript, bound_chat_url, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    transcript, bound_chat_url, name, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     action.id,
@@ -941,6 +974,7 @@ class EventStore:
                     json.dumps(action.additional_reference_action_ids),
                     json.dumps(action.transcript),
                     action.bound_chat_url,
+                    action.name,
                     action.created_at.isoformat(),
                     action.updated_at.isoformat(),
                 ),
@@ -954,20 +988,24 @@ class EventStore:
             await self.db.execute(
                 """
                 UPDATE drone_actions
-                   SET workspace_id = ?,
+                   SET blueprint_snapshot = ?,
+                       workspace_id = ?,
                        additional_skills = ?,
                        additional_reference_action_ids = ?,
                        transcript = ?,
                        bound_chat_url = ?,
+                       name = ?,
                        updated_at = ?
                  WHERE id = ?
                 """,
                 (
+                    json.dumps(action.blueprint_snapshot),
                     action.workspace_id,
                     json.dumps(action.additional_skills),
                     json.dumps(action.additional_reference_action_ids),
                     json.dumps(action.transcript),
                     action.bound_chat_url,
+                    action.name,
                     action.updated_at.isoformat(),
                     action.id,
                 ),
@@ -1005,6 +1043,63 @@ class EventStore:
     async def delete_drone_action(self, action_id: str) -> bool:
         async with self._lock:
             cur = await self.db.execute("DELETE FROM drone_actions WHERE id = ?", (action_id,))
+            await self.db.commit()
+        return (cur.rowcount or 0) > 0
+
+    # ------------------------------------------------------------------
+    # Skills
+    # ------------------------------------------------------------------
+
+    async def insert_skill(self, s: Skill) -> Skill:
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO skills (id, name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    s.id,
+                    s.name,
+                    s.description,
+                    s.created_at.isoformat(),
+                    s.updated_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
+        return s
+
+    async def update_skill(self, s: Skill) -> Skill:
+        s.updated_at = utc_now()
+        async with self._lock:
+            await self.db.execute(
+                """
+                UPDATE skills
+                   SET name = ?, description = ?, updated_at = ?
+                 WHERE id = ?
+                """,
+                (
+                    s.name,
+                    s.description,
+                    s.updated_at.isoformat(),
+                    s.id,
+                ),
+            )
+            await self.db.commit()
+        return s
+
+    async def get_skill(self, skill_id: str) -> Skill | None:
+        cur = await self.db.execute("SELECT * FROM skills WHERE id = ?", (skill_id,))
+        row = await cur.fetchone()
+        return Skill.model_validate(dict(row)) if row else None
+
+    async def list_skills(self) -> list[Skill]:
+        cur = await self.db.execute("SELECT * FROM skills ORDER BY updated_at DESC")
+        rows = await cur.fetchall()
+        return [Skill.model_validate(dict(r)) for r in rows]
+
+    async def delete_skill(self, skill_id: str) -> bool:
+        async with self._lock:
+            cur = await self.db.execute("DELETE FROM skills WHERE id = ?", (skill_id,))
             await self.db.commit()
         return (cur.rowcount or 0) > 0
 

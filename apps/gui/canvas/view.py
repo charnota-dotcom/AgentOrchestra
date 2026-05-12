@@ -47,6 +47,9 @@ class CanvasView(QtWidgets.QGraphicsView):
         self._panning = False
         self._pan_anchor = QtCore.QPoint()
 
+        # Bug 6: Dedicated zoom variable to prevent rounding error accumulation.
+        self._zoom = 1.0
+
     # ------------------------------------------------------------------
     # Zoom
     # ------------------------------------------------------------------
@@ -55,28 +58,29 @@ class CanvasView(QtWidgets.QGraphicsView):
         if not (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier):
             super().wheelEvent(event)
             return
-        # Zoom anchored to cursor: translate so the scene point under
-        # the cursor stays put across the scale change.  Map through
-        # the inverted viewport transform so we keep sub-pixel accuracy
-        # — toPoint() was discarding fractional pixels each tick, which
-        # accumulated into visible drift away from the cursor.
+
+        # Zoom anchored to cursor.
         cursor_pos = event.position()
         old_pos = self._map_to_scene_f(cursor_pos)
-        current = self._current_zoom()
+
         raw_factor = _ZOOM_STEP if event.angleDelta().y() > 0 else 1.0 / _ZOOM_STEP
-        # Clamp the target zoom into the allowed range and derive the
-        # actual factor from the clamped target.  The old "abort the
-        # whole event if it overshoots" branch stranded users near the
-        # edges (e.g. 3.9x could never reach exactly 4.0).
-        target_zoom = max(_MIN_ZOOM, min(_MAX_ZOOM, current * raw_factor))
-        if target_zoom == current:
+
+        # Bug 6: Update dedicated zoom variable and rebuild transform.
+        new_zoom = max(_MIN_ZOOM, min(_MAX_ZOOM, self._zoom * raw_factor))
+        if new_zoom == self._zoom:
             return
-        factor = target_zoom / current
-        self.scale(factor, factor)
+
+        self._zoom = new_zoom
+        transform = QtGui.QTransform()
+        transform.scale(self._zoom, self._zoom)
+        self.setTransform(transform)
+
+        # Re-anchor
         new_pos = self._map_to_scene_f(cursor_pos)
         delta = new_pos - old_pos
         self.translate(delta.x(), delta.y())
-        self.zoom_changed.emit(self._current_zoom())
+
+        self.zoom_changed.emit(self._zoom)
 
     def _map_to_scene_f(self, view_point: QtCore.QPointF) -> QtCore.QPointF:
         """``mapToScene`` for a QPointF, preserving sub-pixel precision."""
@@ -86,7 +90,7 @@ class CanvasView(QtWidgets.QGraphicsView):
         return inverted.map(view_point)
 
     def _current_zoom(self) -> float:
-        return float(self.transform().m11())
+        return self._zoom
 
     def fit_all(self) -> None:
         scene = self.scene()
@@ -97,10 +101,12 @@ class CanvasView(QtWidgets.QGraphicsView):
             return
         rect = scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self.fitInView(rect, QtCore.Qt.AspectRatioMode.KeepAspectRatio)
-        self.zoom_changed.emit(self._current_zoom())
+        self._zoom = float(self.transform().m11())
+        self.zoom_changed.emit(self._zoom)
 
     def reset_zoom(self) -> None:
         self.resetTransform()
+        self._zoom = 1.0
         self.zoom_changed.emit(1.0)
 
     # ------------------------------------------------------------------
@@ -172,4 +178,11 @@ class CanvasView(QtWidgets.QGraphicsView):
             self._space_held = False
             self._panning = False
             self.viewport().setCursor(QtCore.Qt.CursorShape.ArrowCursor)
+
+        # Bug 15: Clear orphaned draft edges.
+        scene = self.scene()
+        from apps.gui.canvas.scene import CanvasScene
+        if isinstance(scene, CanvasScene):
+            scene.clear_draft_edges()
+
         super().focusOutEvent(event)

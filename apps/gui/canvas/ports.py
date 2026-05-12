@@ -65,7 +65,7 @@ class Port(QtWidgets.QGraphicsObject):
         _option: QtWidgets.QStyleOptionGraphicsItem,
         _widget: QtWidgets.QWidget | None = None,
     ) -> None:
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        # Bug 13: Removed redundant setRenderHint(Antialiasing)
         colour = QtGui.QColor("#1f6feb") if self._hover else QtGui.QColor("#5b6068")
         painter.setBrush(colour)
         painter.setPen(QtGui.QPen(QtGui.QColor("#ffffff"), 1.5))
@@ -99,7 +99,11 @@ class Port(QtWidgets.QGraphicsObject):
             self.edge_drag_started.emit(self)
             event.accept()
             return
-        super().mousePressEvent(event)
+
+        # Bug 12: Ignore non-left clicks so they bubble up to the view
+        # (e.g. for middle-click pan).
+        event.ignore()
 
     def scene_position(self) -> QtCore.QPointF:
-        return self.mapToScene(QtCore.QPointF(0, 0))
+        # Bug 7: Use scenePos() directly for optimized, group-aware coordinates.
+        return self.scenePos()

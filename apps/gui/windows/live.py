@@ -10,7 +10,7 @@ Streams events for a single Run via SSE.  Shows:
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -27,7 +27,7 @@ class LivePage(QtWidgets.QWidget):
         super().__init__()
         self.client = client
         self._sse = SseClient(base_url=client.base_url, token=client.token)
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[Any] | None = None
         self._run_id: str | None = None
 
         self.setStyleSheet("background:#fafbfc;")

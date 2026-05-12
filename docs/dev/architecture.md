@@ -14,6 +14,26 @@ the same token the service generated on startup).
 - The GUI process can be reloaded during development while the
   service stays warm.
 
+## GUI process
+
+The GUI is a PySide6 application using `qasync` to bridge the Qt event
+loop with `asyncio`.  It is a single-window interface with a left-side
+rail providing access to **ten core tabs**:
+
+1.  **Home**: Dashboards for runs and workspaces.
+2.  **Drones**: Manual browser-bridged chat instances.
+3.  **Agents**: Autonomous CLI-bridged chat instances.
+4.  **Blueprints**: Reusable template management (plans).
+5.  **Skills**: Standing library of superpower templates.
+6.  **Compose**: Card-driven instruction builder.
+7.  **Canvas**: Drag-and-drop flow orchestration.
+8.  **History**: Persistent run archive and search.
+9.  **Limits**: Subscription and usage monitoring.
+10. **Settings**: Service config, MCP, and hooks.
+
+Plus two ephemeral stack pages (**Live** and **Review**) for driving
+active dispatches.
+
 ## Subsystems inside the service
 
 ```
@@ -21,6 +41,7 @@ the same token the service generated on startup).
 │ DISPATCH                                                  │
 │   ChatSession  — in-process SDK calls (no worktree)        │
 │   Run          — worktree-bound, full lifecycle            │
+│   FlowExecutor — parallel topological dispatch with locks  │
 ├───────────────────────────────────────────────────────────┤
 │ INGESTION                                                 │
 │   JSONLWatcher — Claude session files                      │
@@ -30,9 +51,10 @@ the same token the service generated on startup).
 │   SDKAdapter   — orchestrator-driven SDK iterators          │
 ├───────────────────────────────────────────────────────────┤
 │ SUPERVISION & REGISTRY                                     │
-│   EventStore (SQLite + FTS5)                               │
+│   Supervisor   — GUI auto-spawn with parent-pid watchdog   │
+│   EventStore (SQLite + FTS5) with cascade deletions        │
 │   WorktreeManager                                          │
-│   Cards / Templates                                        │
+│   Cards / Blueprints / Skills                              │
 │   Cost meter                                               │
 │   Keyring                                                  │
 │   MCP server registry                                      │
@@ -42,6 +64,14 @@ the same token the service generated on startup).
 Every dispatch and every ingestion path lands in one normalized
 event schema in `EventStore`.  The GUI reads through the RPC surface
 and never touches the database directly.
+
+## Execution Integrity
+The orchestrator maintains rigorous execution boundaries:
+- **Parallel Dispatch**: FlowExecutor ensures parallel node dispatch (using `asyncio.gather`), distinguishing between synchronous directional edges and parallel non-directional edges to prevent data races.
+- **Peer Communication**: Agents from independent contexts can "talk" to each other when linked by the operator. The orchestrator fetches referenced transcripts and injects them into the system prompt, enabling cross-model collaboration.
+- **Strict Human Gates**: Human rejection in a flow acts as a hard failure, aborting the run instead of merely skipping the node.
+- **Concurrency Locks**: Flow run state updates are protected by dedicated `run_lock`s to prevent silent overwrites during high-throughput parallel execution.
+- **Lifecycle Cleanup**: Background services are tied to the GUI via a parent-PID watchdog, and deleting orchestrator entities like Flows guarantees cascading deletion of underlying events and search indexes to prevent data leaks.
 
 See `docs/dev/worktree-design.md` for the worktree subsystem in
 detail.

@@ -159,10 +159,13 @@ class FlowExecutor:
         nodes: dict[str, dict[str, Any]] = {n["id"]: n for n in flow.nodes}
         # Adjacency and in-degree for topo waves.
         outgoing: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        indegree: dict[str, int] = {nid: 0 for nid in nodes}
+        # Sequential in-degree (directional edges only)
+        seq_indegree: dict[str, int] = {nid: 0 for nid in nodes}
         for e in flow.edges:
             outgoing[e["from_node"]].append(e)
-            indegree[e["to_node"]] += 1
+            if e.get("directional"):
+                seq_indegree[e["to_node"]] += 1
+        
         outputs: dict[str, str] = {}
         # Edges that were "blocked" by a Branch routing decision —
         # we treat downstream nodes whose only inputs are blocked as
@@ -174,7 +177,10 @@ class FlowExecutor:
         for e in flow.edges:
             incoming[e["to_node"]].append(e)
 
-        ready: list[str] = [nid for nid, deg in indegree.items() if deg == 0]
+        # A node is 'ready' if all its *directional* (sequential) 
+        # dependencies are satisfied. Non-directional edges act as 
+        # data references but don't block the wave.
+        ready: list[str] = [nid for nid, deg in seq_indegree.items() if deg == 0]
         completed: set[str] = set()
 
         # Cards loaded once — pre-populate so concurrent agent nodes
@@ -188,17 +194,27 @@ class FlowExecutor:
 
         async def execute(node_id: str) -> None:
             node = nodes[node_id]
-            # Determine effective inputs.
-            inputs: list[str] = []
+
+            inputs: dict[str, list[str]] = defaultdict(list)
             for e in incoming[node_id]:
-                if (e["from_node"], e.get("from_port", ""), node_id) in blocked_edges:
+
+                from_nid = e["from_node"]
+                from_port = e.get("from_port", "")
+                to_port = e.get("to_port", "")
+
+                if (from_nid, from_port, node_id) in blocked_edges:
                     continue
-                if e["from_node"] in skipped:
+                if from_nid in skipped:
                     continue
-                if e["from_node"] in outputs:
-                    inputs.append(outputs[e["from_node"]])
+                
+                # We pull data from any upstream node that has finished,
+                # whether the edge was directional or not.
+                if from_nid in outputs:
+                    inputs[to_port].append(outputs[from_nid])
+
             # If every incoming edge is blocked or skipped, the node
             # itself is skipped.
+            # (Trigger nodes have no incoming edges in V1)
             if incoming[node_id] and not inputs and node["type"] != "trigger":
                 skipped.add(node_id)
                 await self._emit(
@@ -236,9 +252,9 @@ class FlowExecutor:
                             payload={"node_id": node_id, "reason": "rejected"},
                         )
                         return
-                    output = inputs[0] if inputs else ""
+                    output = self._flatten_inputs(inputs)
                 elif node["type"] == "output":
-                    output = inputs[0] if inputs else ""
+                    output = self._flatten_inputs(inputs)
                 else:
                     raise FlowValidationError(f"unknown node type: {node['type']}")
             except Exception as exc:
@@ -260,10 +276,7 @@ class FlowExecutor:
                 payload={"node_id": node_id, "output": output[:2000]},
             )
 
-        # Walk in waves.  This is intentionally simple: we don't
-        # build a full DAG scheduler here — the nodes-per-wave model
-        # is correct for the kinds of graphs operators will draw
-        # (tens of nodes, mostly shallow).
+        # Walk in waves.
         while ready:
             wave = ready
             ready = []
@@ -271,29 +284,28 @@ class FlowExecutor:
             try:
                 results = await asyncio.gather(*tasks.values(), return_exceptions=True)
             except asyncio.CancelledError:
-                # External cancel landed on the supervisor.  Cancel every
-                # in-flight node and wait for their teardown so child
-                # subprocesses (claude/gemini CLIs) get reaped instead of
-                # being left orphaned.
                 for t in tasks.values():
                     t.cancel()
                 await asyncio.gather(*tasks.values(), return_exceptions=True)
                 raise
             for nid, res in zip(wave, results, strict=False):
                 if isinstance(res, BaseException) and not isinstance(res, asyncio.CancelledError):
-                    run.state = FlowState.FAILED
-                    run.error = repr(res)
+                    async with run_lock:
+                        run.state = FlowState.FAILED
+                        run.error = repr(res)
                 if nid not in skipped:
                     completed.add(nid)
-            if run.state == FlowState.FAILED:
-                return
-            # Anything whose inputs are now satisfied (all upstream
-            # either completed or skipped) joins the next wave.
+            
+            async with run_lock:
+                if run.state == FlowState.FAILED:
+                    return
+            # Anything whose *directional* inputs are now satisfied joins the next wave.
             for nid in nodes:
                 if nid in completed or nid in skipped or nid in ready:
                     continue
-                upstream_ids = [e["from_node"] for e in incoming[nid]]
-                if upstream_ids and all(u in completed or u in skipped for u in upstream_ids):
+                # Sequential dependencies: only wait for directional edges.
+                seq_upstream = [e["from_node"] for e in incoming[nid] if e.get("directional")]
+                if seq_upstream and all(u in completed or u in skipped for u in seq_upstream):
                     ready.append(nid)
 
     # ------------------------------------------------------------------
@@ -304,32 +316,88 @@ class FlowExecutor:
         self,
         run_id: str,
         node: dict[str, Any],
-        inputs: list[str],
+        inputs: dict[str, list[str]],
         card_cache: dict[str, PersonalityCard],
     ) -> str:
         card_id = node.get("card_id")
         if not card_id:
             raise FlowValidationError(f"agent node {node['id']} has no card_id")
-        # card_cache is pre-populated in _run_graph; missing means a
-        # node references a card that was deleted between save + run.
         card = card_cache.get(card_id)
         if card is None:
             raise FlowValidationError(f"card not found: {card_id}")
 
         params = node.get("params") or {}
         goal_override = (params.get("goal") or "").strip()
-        if goal_override:
-            prompt = goal_override
-        elif inputs:
-            prompt = "\n\n".join(inputs)
-        else:
+
+        # Bug Gap 1: Handle port-specific inputs for Agents.
+        # If 'instructions' port is connected, use it as the primary prompt.
+        # Otherwise use goal override.
+        # If 'context' port is connected, append it as context.
+        instructions = goal_override
+        if "instructions" in inputs:
+            instructions = "\n\n".join(inputs["instructions"])
+
+        context = ""
+        if "context" in inputs:
+            context = "\n\n".join(inputs["context"])
+
+        # FALLBACK for generic inputs (unnamed ports or backward compat)
+        generic = "\n\n".join(inputs.get("", []))
+
+        # Peer context: Fetch transcripts of other live drones linked
+        # on the canvas (enabled by the user via non-directional links).
+        peer_lines = []
+        for e in incoming[node["id"]]:
+            # We already handled directional (synchronous data) edges
+            # in Wave calculation. Non-directional edges here serve
+            # as context/reference providers.
+            if e.get("directional"):
+                continue
+            
+            from_nid = e["from_node"]
+            from_node = nodes.get(from_nid)
+            if not from_node or from_node["type"] != "drone_action":
+                continue
+                
+            aid = from_node.get("action_id")
+            if not aid:
+                continue
+                
+            ref_action = await self.store.get_drone_action(aid)
+            if not ref_action:
+                continue
+            
+            ref_snap = ref_action.blueprint_snapshot or {}
+            ref_name = ref_action.name or ref_snap.get("name") or "Peer"
+            
+            ref_turns = []
+            for m in (ref_action.transcript or []):
+                if m.get("role") in ("user", "assistant"):
+                    speaker = "User" if m.get("role") == "user" else f"Agent ({ref_name})"
+                    ref_turns.append(f"{speaker}: {m.get('content', '')}")
+            
+            if ref_turns:
+                peer_lines.append(
+                    f"### PEER CONTEXT: Shared history with '{ref_name}'\n"
+                    + "\n".join(ref_turns)
+                )
+
+        prompt_parts = []
+        if instructions:
+            prompt_parts.append(instructions)
+        if context:
+            prompt_parts.append("### CONTEXT\n" + context)
+        if generic:
+            prompt_parts.append(generic)
+        if peer_lines:
+            prompt_parts.append("\n\n".join(peer_lines))
+
+        prompt = "\n\n".join(prompt_parts)
+        if not prompt:
             raise FlowValidationError(
-                f"agent node {node['id']} has neither a goal override nor an upstream input"
+                f"agent node {node['id']} has no goal override or connected inputs"
             )
 
-        # Look up via the module attribute (not a local binding) so
-        # tests that monkeypatch ``provider_registry.get_provider``
-        # actually hit our path.
         provider = provider_registry.get_provider(card.provider)
         session = await provider.open_chat(card)
         accumulated: list[str] = []
@@ -337,10 +405,20 @@ class FlowExecutor:
             async for ev in session.send(prompt):
                 if ev.kind == "text_delta":
                     accumulated.append(ev.text)
+                    # Support both Flow Canvas (node body) and live chat tabs.
                     await self._emit(
                         run_id,
                         "flow.node.token_delta",
                         payload={"node_id": node["id"], "delta": ev.text[:1000]},
+                    )
+                    await self.store.append_event(
+                        Event(
+                            source=EventSource.DISPATCH_RUN,
+                            kind=EventKind.DRONE_TOKEN_DELTA,
+                            run_id=node.get("action_id") or node["id"],
+                            payload={"delta": ev.text[:1000]},
+                            text="",
+                        )
                     )
                 elif ev.kind == "error":
                     raise RuntimeError(ev.text or "provider error")
@@ -353,19 +431,19 @@ class FlowExecutor:
     @staticmethod
     def _run_branch(
         node: dict[str, Any],
-        inputs: list[str],
+        inputs: dict[str, list[str]],
     ) -> tuple[str, bool]:
-        text = inputs[0] if inputs else ""
+        text = FlowExecutor._flatten_inputs(inputs)
         params = node.get("params") or {}
         pattern = params.get("pattern", ".*")
         matched = bool(re.search(pattern, text))
         return text, matched
 
     @staticmethod
-    def _run_merge(inputs: list[str]) -> str:
-        return "\n\n---\n\n".join(inputs)
+    def _run_merge(inputs: dict[str, list[str]]) -> str:
+        return FlowExecutor._flatten_inputs(inputs, separator="\n\n---\n\n")
 
-    async def _wait_human(self, run_id: str, node_id: str, inputs: list[str]) -> bool:
+    async def _wait_human(self, run_id: str, node_id: str, inputs: dict[str, list[str]]) -> bool:
         future: asyncio.Future[bool] = asyncio.get_event_loop().create_future()
         self._human_waiters[(run_id, node_id)] = future
         await self._emit(
@@ -373,13 +451,21 @@ class FlowExecutor:
             "flow.node.human_pending",
             payload={
                 "node_id": node_id,
-                "preview": (inputs[0] if inputs else "")[:1000],
+                "preview": FlowExecutor._flatten_inputs(inputs)[:1000],
             },
         )
         try:
             return await future
         finally:
             self._human_waiters.pop((run_id, node_id), None)
+
+    @staticmethod
+    def _flatten_inputs(inputs: dict[str, list[str]], separator: str = "\n\n") -> str:
+        """Utility to join all inputs into a single string."""
+        all_vals = []
+        for vals in inputs.values():
+            all_vals.extend(vals)
+        return separator.join(all_vals)
 
     # ------------------------------------------------------------------
     # Event emission

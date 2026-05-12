@@ -46,8 +46,8 @@ class DriftSentinel:
     consecutive_tool_error_threshold: int = 3
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _runs: dict[str, _RunStats] = field(default_factory=dict)
-    _consume_task: asyncio.Task | None = None
-    _check_task: asyncio.Task | None = None
+    _consume_task: asyncio.Task[Any] | None = None
+    _check_task: asyncio.Task[Any] | None = None
 
     async def start(self) -> None:
         if self._consume_task is not None:

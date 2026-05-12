@@ -48,13 +48,13 @@ def test_role_labels_match_drone_role_enum() -> None:
 
 def test_provider_constants_have_model_hints() -> None:
     pytest.importorskip("PySide6")
-    from apps.gui.windows.blueprints import _MODEL_HINTS, _PROVIDERS
+    from apps.gui.presets import PROVIDER_MODELS, PROVIDERS
 
-    for p in _PROVIDERS:
+    for p in PROVIDERS:
         # Every provider in the dropdown must have at least one model
         # hint, otherwise the model combo opens empty and the operator
         # has to guess what to type.
-        assert _MODEL_HINTS.get(p), f"provider {p!r} has no model hints"
+        assert PROVIDER_MODELS.get(p), f"provider {p!r} has no model hints"
 
 
 def test_belongs_to_other_provider() -> None:

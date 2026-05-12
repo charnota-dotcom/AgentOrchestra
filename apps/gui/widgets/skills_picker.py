@@ -88,14 +88,35 @@ class SkillsPicker(QtWidgets.QDialog):
         QtCore.QTimer.singleShot(0, lambda: asyncio.ensure_future(self._load()))
 
     async def _load(self) -> None:
+        from apps.service.types import AGENT_SKILLS
+
+        # Start with prepopulated templates for agents.
+        # These are only selectable for autonomous (non-browser) units.
+        templates: list[dict[str, str]] = []
+        if self.provider != "browser":
+            templates = [{"name": name, "description": desc} for name, desc in AGENT_SKILLS]
+
         try:
             res = await self.client.call("skills.list", {"provider": self.provider})
         except Exception as exc:
-            self.hint.setText(f"Couldn't load skills: {exc}")
-            return
-        skills = res.get("skills", []) or []
+            self.hint.setText(f"Couldn't load first-class skills: {exc}")
+            res = {}
+
+        first_class = res.get("skills", []) or []
         source = res.get("source", "none")
-        if not skills:
+        
+        # Merge first-class skills with our templates.
+        all_skills = templates + first_class
+        # Deduplicate by name, prioritizing first-class over templates if collision.
+        seen_names = set()
+        final_list = []
+        for sk in reversed(all_skills): # reversed so first_class (added last) wins
+            name = str(sk.get("name", ""))
+            if name and name not in seen_names:
+                seen_names.add(name)
+                final_list.insert(0, sk)
+
+        if not final_list:
             if source == "none":
                 self.hint.setText(
                     f"{self.provider} has no first-class skills mechanism — type "
@@ -108,11 +129,16 @@ class SkillsPicker(QtWidgets.QDialog):
                     "`<name>.md` files there and re-open this dialog."
                 )
             return
-        self.hint.setText(
-            f"Found {len(skills)} skill(s) in {source}.  "
-            "Tick the ones you want active for this conversation."
-        )
-        for sk in skills:
+
+        if self.provider == "browser":
+            self.hint.setText("Manual drones only support free-form skill directives.")
+        else:
+            msg = f"Pick from {len(templates)} agent templates"
+            if first_class:
+                msg += f" and {len(first_class)} first-class skill(s) from {source}"
+            self.hint.setText(msg + ".")
+
+        for sk in final_list:
             name = str(sk.get("name", ""))
             description = str(sk.get("description", "") or "")
             label = f"{name}\n{description}" if description else name

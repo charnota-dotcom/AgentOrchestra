@@ -19,7 +19,7 @@ not the open internet.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -73,7 +73,7 @@ class HandoffCardEnvelope(BaseModel):
     current_state: str
     blockers: list[str] = Field(default_factory=list)
     next_best_action: str
-    artifacts: list[dict] = Field(default_factory=list)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
     posted_at: datetime = Field(default_factory=utc_now)
 
 
@@ -97,4 +97,4 @@ class A2AEvent(BaseModel):
     ]
     run_id: str
     text: str = ""
-    payload: dict = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtWidgets
 
@@ -15,7 +15,9 @@ class HistoryPage(QtWidgets.QWidget):
     def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
-        self._runs: list[dict] = []
+        self._reloading = False
+        self._last_reload_error: str | None = None
+        self._runs: list[dict[str, Any]] = []
         self.setStyleSheet("background:#fafbfc;")
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -118,11 +120,18 @@ class HistoryPage(QtWidgets.QWidget):
     # -- Recent runs ----------------------------------------------------
 
     async def _reload_runs(self) -> None:
+        if self._reloading:
+            return
+        self._reloading = True
         try:
             self._runs = await self.client.call("runs.list", {})
         except Exception as exc:
-            QtWidgets.QMessageBox.warning(self, "RPC error", str(exc))
+            self._runs = []
+            self.runs_table.setRowCount(0)
+            self._last_reload_error = str(exc)
             return
+        finally:
+            self._reloading = False
         self.runs_table.setRowCount(len(self._runs))
         for r, row in enumerate(self._runs):
             cells = (
@@ -136,7 +145,7 @@ class HistoryPage(QtWidgets.QWidget):
                 self.runs_table.setItem(r, c, QtWidgets.QTableWidgetItem(str(val)))
             self.runs_table.setCellWidget(r, 5, self._row_actions(row))
 
-    def _row_actions(self, row: dict) -> QtWidgets.QWidget:
+    def _row_actions(self, row: dict[str, Any]) -> QtWidgets.QWidget:
         """Per-row Approve / Reject / Cancel button strip.
 
         Approve and Reject only fire when state == 'reviewing' (the
@@ -188,7 +197,7 @@ class HistoryPage(QtWidgets.QWidget):
     def _cancel(self, run_id: str) -> None:
         asyncio.ensure_future(self._call_then_reload("runs.cancel", {"run_id": run_id}))
 
-    async def _call_then_reload(self, method: str, params: dict) -> None:
+    async def _call_then_reload(self, method: str, params: dict[str, Any]) -> None:
         try:
             await self.client.call(method, params)
         except Exception as exc:

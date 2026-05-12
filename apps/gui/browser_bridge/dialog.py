@@ -97,7 +97,7 @@ class BrowserBridgeDialog(QtWidgets.QDialog):
         self._refresh_link_label()
         header.addWidget(self._link_label, stretch=1)
         self._gauge = ContextGauge(parent=self, compact=True)
-        self._gauge.update(transcript_tokens, context_window)
+        self._gauge.set_token_counts(transcript_tokens, context_window)
         header.addWidget(self._gauge)
         v.addLayout(header)
 

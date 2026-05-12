@@ -16,7 +16,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -109,7 +109,7 @@ class OllamaChatSession(ChatSession):
 
 
 class OllamaProvider:
-    name: str = "ollama"
+    name: Literal["ollama"] = "ollama"
 
     async def open_chat(
         self,

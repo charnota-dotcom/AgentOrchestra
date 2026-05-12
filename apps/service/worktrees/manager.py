@@ -13,9 +13,10 @@ import asyncio
 import contextlib
 import logging
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from apps.service.store.events import EventStore
 from apps.service.types import (
@@ -73,13 +74,14 @@ class _WorkspaceLock:
 
 
 def _platform_lock(fh: int) -> None:
-    try:
-        import fcntl
+    if sys.platform != "win32":
+        try:
+            import fcntl
 
-        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return
-    except ImportError:
-        pass
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except ImportError:
+            pass
     try:
         import msvcrt
 
@@ -91,13 +93,14 @@ def _platform_lock(fh: int) -> None:
 
 
 def _platform_unlock(fh: int) -> None:
-    try:
-        import fcntl
+    if sys.platform != "win32":
+        try:
+            import fcntl
 
-        fcntl.flock(fh, fcntl.LOCK_UN)
-        return
-    except ImportError:
-        pass
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            return
+        except ImportError:
+            pass
     try:
         import msvcrt
 
@@ -390,7 +393,7 @@ class WorktreeManager:
         branch = await self._must_get_branch(branch_id)
         await self._transition(branch, BranchState.ACTIVE)
 
-    async def request_review(self, branch_id: str) -> dict:
+    async def request_review(self, branch_id: str) -> dict[str, Any]:
         branch = await self._must_get_branch(branch_id)
         await self._transition(branch, BranchState.AWAITING_REVIEW)
         repo = await self._workspace_repo(branch.workspace_id)
@@ -408,7 +411,7 @@ class WorktreeManager:
 
     MergeMode = Literal["clean", "assisted", "manual"]
 
-    async def approve_and_merge(self, branch_id: str, mode: MergeMode = "clean") -> dict:
+    async def approve_and_merge(self, branch_id: str, mode: MergeMode = "clean") -> dict[str, Any]:
         branch = await self._must_get_branch(branch_id)
         ws_lock = self._get_workspace_lock(await self._must_get_workspace(branch.workspace_id))
         await ws_lock.acquire()
@@ -525,7 +528,7 @@ class WorktreeManager:
             flagged.append(b.id)
         return flagged
 
-    async def panic_reset(self, workspace_id: str) -> dict:
+    async def panic_reset(self, workspace_id: str) -> dict[str, Any]:
         ws = await self._must_get_workspace(workspace_id)
         ws_lock = self._get_workspace_lock(ws)
         await ws_lock.acquire()

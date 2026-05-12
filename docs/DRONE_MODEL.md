@@ -14,16 +14,15 @@ read and signed off.
 
 | Term | What it is |
 |---|---|
-| **Operator** | The human (you).  Sole creator of blueprints. |
+| **Operator** | The human (you).  Sole creator of blueprints and skills. |
 | **Drone blueprint** | A frozen template — model, provider, persona, default skills, default references, role.  Operator-set, repo-agnostic, reusable across many deployments. |
 | **Drone action** | An instance of a drone, *deployed* from a blueprint.  Carries the runtime state: workspace binding (optional), transcript, attachments, additional skills layered on top of the blueprint, additional one-off references. |
-| **General chat** | A free-form chat in the Chat tab, no blueprint involved.  Same as a normal web AI UI.  Today's `Agent` rows fall here by default; new "general chats" continue to live alongside drones. |
-| **External endpoint** | The thing on the other side of the wire — Claude Code CLI, Gemini CLI, an MCP-tool surface, etc.  Whether it considers itself an "agent" is irrelevant; we treat all uniformly. |
+| **Drone** | A manual, browser-based robot friend (`provider="browser"`). Requires operator copy/paste. |
+| **Agent** | An autonomous, CLI-based robot friend (`provider="claude-cli"` or `"gemini-cli"`). Runs independently on the host. |
+| **Skill** | A reusable instruction template (Superpower) stored in the database and selectable during blueprint creation or deployment. |
 | **App authority** | The orchestrator service's logic.  Enforces role-based access on action mutations.  Roles are operator-set on the blueprint, frozen on deploy, never self-modified. |
 
-The word *agent* exits operator-facing copy entirely.  We keep it only
-in references to *external* concepts ("Claude Code's agent loop") to
-preserve technical accuracy.
+The word *agent* now specifically refers to **autonomous CLI-based units**, while *drone* refers to **manual browser-based units**.
 
 ---
 
@@ -162,14 +161,15 @@ class DroneAction(BaseModel):
 
 ## 4. GUI plan
 
-### 4.1 New rail tab — **Blueprints**
+### 4.1 Rail navigation
 
 ```
 ┌─ Rail ──────────┐
 │  Home           │
-│  Chat           │
-│  Drones         │  ← new (formerly "Agents")
-│  Blueprints     │  ← new
+│  Drones         │  ← Manual (browser-based)
+│  Agents         │  ← Autonomous (CLI-based)
+│  Blueprints     │  ← Plan Workshop
+│  Skills         │  ← Superpower Library
 │  Compose        │
 │  Canvas         │
 │  History        │
@@ -178,29 +178,21 @@ class DroneAction(BaseModel):
 └─────────────────┘
 ```
 
-The **Blueprints** tab:
-- Sidebar list of blueprints (name + role chip).
-- Centre: editable form (name, role dropdown, provider, model, persona, skills picker (reuses `apps/gui/widgets/skills_picker.py`), default references picker).
-- "+ New blueprint" button.
-- "Delete" button refuses if any in-flight actions reference the blueprint, unless operator confirms force.
+- **Drones tab**: Dedicated to manual, browser-bridged units (`provider="browser"`).
+- **Agents tab**: Dedicated to autonomous CLI-bridged units (`claude-cli`, `gemini-cli`).
+- **Skills tab**: Standing CRUD management for reusable superpower templates (database-backed).
 
-The **Drones** tab (today's "Agents" tab):
-- Sidebar list of deployed actions, sorted by recency.  Each row shows action's blueprint name + role chip.
-- Centre: same chat-style transcript view as today, with the workspace banner, git-status banner, references editor, attachment paperclip.
-- Right: "Spawn follow-up" replaced with "Re-deploy from same blueprint" + "Append reference / attachment" (role-gated, hidden when not allowed).
-- "+ New drone" button opens a deploy dialog: pick blueprint, pick workspace (optional), pick additional skills (one-off), confirm.
+### 4.2 Blueprint & Action creation
 
-### 4.2 Canvas tab
+Blueprints and deployments now follow context-aware paths:
+- **+ Drone**: Locks to `browser` provider, shows Chat URL field.
+- **+ Agent**: Locks to CLI providers, replaces manual skill entry with a mandatory selection popup.
 
-- **Conversations palette → Drones palette.**
-- "+ New drone" replaces "+ New conversation".  Opens the same deploy dialog as above.
-- ConversationNode renamed `DroneNode`; subtitle still shows model + workspace.
-- Lineage edges still draw between drones spawned from the same blueprint via Courier / Supervisor follow-ups.
+### 4.3 Canvas tab
 
-### 4.3 Chat tab
-
-- Unchanged.  Still mints a "general chat" `Agent` row on first send.
-- Optional later: "Save as blueprint" button on the Chat header to promote settings into a blueprint.
+- **Drones palette** contains both Blueprints (templates) and Actions (deployed).
+- Double-clicking an action on the canvas opens its **Edit** dialog instead of chat, allowing runtime configuration (name, workspace, skills).
+- Right-clicking a manual drone action offers **"Convert to autonomous Agent..."**, promoting it to a CLI-based unit while preserving its transcript.
 
 ---
 
@@ -258,3 +250,31 @@ the one that flips the operator-facing copy; before it, drones and
 - **References across the boundary**: can a drone-action reference a general-chat `agent`?  The honest answer is yes (any text transcript works as context), but it muddles the two pools.  Current proposal: yes, allowed; the dialog shows two sections "Drone actions" and "General chats" so the operator picks intentionally.
 - **Role escalation / downgrade after deploy**: an action's role is frozen with the blueprint snapshot.  If the operator later edits the blueprint to change role, in-flight actions keep their old role (snapshot).  New deploys from the edited blueprint pick up the new role.  Standard immutable-snapshot semantics.
 - **Roles beyond the four**: the `DroneRole` enum is closed.  If "moderator" or "fact-checker" comes up later we'd add it; not worth designing custom-role plumbing in v1.
+
+---
+
+## 9. Cross-Agent Communication ("Talk")
+
+Agents from independent contexts can "talk" to each other when enabled by the user. This works across different models (e.g., Claude CLI and Gemini CLI) as well as within one.
+
+### 9.1 How it works
+1.  **Reference Linkage**: The operator links two drone actions (either via the "References" editor in the Drones/Agents tab or by drawing a non-directional edge on the Flow Canvas).
+2.  **Transcript Injection**: When an agent is invoked, the orchestrator fetches the full conversation history of all linked peers.
+3.  **Context Assembly**: These peer transcripts are formatted and injected into the agent's system prompt under a `### PEER CONTEXT` header.
+4.  **Implicit Communication**: By seeing the peer's history, the agent can understand and build upon the work done in independent windows, enabling collaborative problem-solving across isolated contexts.
+
+---
+
+## 10. Agent Lifecycle & Skills
+
+### 10.1 Standing Skills Management
+The **Skills** tab provides a dedicated surface for managing reusable instruction templates.
+- **Persistence**: Custom skills are stored in the `skills` database table.
+- **Seeding**: The system auto-seeds with 20 popular archetypes (e.g., `research-deep`, `code-review`) on first launch.
+- **Contextual Selection**: The selection interface (popup) only displays templates when configuring autonomous Agents, preventing bloat in manual Drone setups.
+
+### 10.2 Lifecycle Upgrades (Conversion)
+Manual Drones can be "promoted" to autonomous Agents at any time:
+1.  **Canvas Promotion**: Right-click a `DroneActionNode` → "Convert to autonomous Agent...".
+2.  **Blueprint Promotion**: Blueprint editor → "Convert to Agent...".
+3.  **Result**: The manual `browser` provider is swapped for a CLI-based provider. The entire conversation transcript and all references are preserved, allowing autonomous agents to continue work initiated in the browser.

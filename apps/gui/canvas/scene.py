@@ -31,7 +31,7 @@ class CanvasScene(QtWidgets.QGraphicsScene):
     works the way users expect.
     """
 
-    selection_changed = QtCore.Signal(list)  # list[BaseNode]
+    selection_changed = QtCore.Signal(list)  # list[BaseNode | Edge]
 
     def __init__(self) -> None:
         super().__init__()
@@ -91,19 +91,22 @@ class CanvasScene(QtWidgets.QGraphicsScene):
         self._nodes.append(node)
 
     def remove_node(self, node: BaseNode) -> None:
-        # Detach any edges incident to this node first; deleting a
-        # QGraphicsItem with surviving references in another item's
-        # ``paint`` causes a use-after-free crash.
-        for edge in list(self._edges):
-            if edge.touches(node):
-                self.remove_edge(edge)
+        # Bug 3: Detach and remove any edges incident to this node.
+        # Use a while loop or a clean filter to avoid index/iterator issues
+        # during bulk deletions.
+        to_remove = [e for e in self._edges if e.touches(node)]
+        for edge in to_remove:
+            self.remove_edge(edge)
+
         if node in self._nodes:
             self._nodes.remove(node)
+
         # Drop selection before removeItem() so the selectionChanged
         # signal fires against a still-valid wrapper rather than racing
         # the C++ deletion.
         if node.isSelected():
             node.setSelected(False)
+
         self.removeItem(node)
 
     def add_edge(self, edge: Edge) -> None:
@@ -114,7 +117,15 @@ class CanvasScene(QtWidgets.QGraphicsScene):
         if edge in self._edges:
             self._edges.remove(edge)
         edge.detach()
-        self.removeItem(edge)
+        if edge.scene() == self:
+            self.removeItem(edge)
+
+    def clear_draft_edges(self) -> None:
+        """Bug 15: Proactively clear any abandoned DraftEdge items."""
+        from apps.gui.canvas.edges import DraftEdge
+        for item in self.items():
+            if isinstance(item, DraftEdge):
+                self.removeItem(item)
 
     def nodes(self) -> list[BaseNode]:
         return list(self._nodes)
@@ -127,7 +138,12 @@ class CanvasScene(QtWidgets.QGraphicsScene):
     # ------------------------------------------------------------------
 
     def _on_selection_changed(self) -> None:
-        from apps.gui.canvas.nodes.base import BaseNode  # local import — avoid cycle
+        from apps.gui.canvas.edges import Edge
+        from apps.gui.canvas.nodes.base import BaseNode
 
-        selected = [item for item in self.selectedItems() if isinstance(item, BaseNode)]
+        selected = [
+            item
+            for item in self.selectedItems()
+            if isinstance(item, (BaseNode, Edge))
+        ]
         self.selection_changed.emit(selected)

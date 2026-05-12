@@ -24,6 +24,7 @@ from typing import Any
 from PySide6 import QtGui
 
 from apps.gui.canvas.nodes.base import BaseNode
+from apps.gui.canvas.ports import Port, PortDirection
 from apps.gui.presets import model_label_for
 
 _PROVIDER_HEADER = {
@@ -66,6 +67,10 @@ class DroneActionNode(BaseNode):
         self.action = action
         self.HEADER_COLOUR = _PROVIDER_HEADER.get(provider, QtGui.QColor("#3b4252"))
 
+        # Add ports for manual linking.
+        self.add_input_port(Port(self, PortDirection.INPUT, "in"))
+        self.add_output_port(Port(self, PortDirection.OUTPUT, "out"))
+
         ws_path = action.get("workspace_path") or ""
         repo_line = (
             f"Repo:     {ws_name or 'bound'}{f' ({ws_path})' if ws_path else ''}\n"
@@ -92,3 +97,41 @@ class DroneActionNode(BaseNode):
             "action_id": self.action.get("id"),
             "params": {},
         }
+
+    def refresh_visuals(self) -> None:
+        """Update appearance based on current self.action state."""
+        action = self.action
+        snapshot = action.get("blueprint_snapshot") or {}
+        transcript = action.get("transcript") or []
+        provider = str(snapshot.get("provider", ""))
+        raw_model = str(snapshot.get("model", "?"))
+        friendly_model = model_label_for(provider, raw_model) if provider else raw_model
+        role = snapshot.get("role", "worker")
+        
+        ws_name = action.get("workspace_name") or ""
+        repo_marker = (
+            f"  ·  📂 {ws_name}"
+            if (action.get("workspace_id") and ws_name)
+            else ("  ·  📂 repo" if action.get("workspace_id") else "")
+        )
+
+        self._title = str(action.get("name") or snapshot.get("name") or "Drone")
+        self._subtitle = f"{role} · {friendly_model} · {len(transcript)} turns{repo_marker}"
+        self.HEADER_COLOUR = _PROVIDER_HEADER.get(provider, QtGui.QColor("#3b4252"))
+
+        ws_path = action.get("workspace_path") or ""
+        repo_line = (
+            f"Repo:     {ws_name or 'bound'}{f' ({ws_path})' if ws_path else ''}\n"
+            if action.get("workspace_id")
+            else "Repo:     none — chat-only\n"
+        )
+        self.setToolTip(
+            f"{self._title}\n"
+            f"Role:     {role}\n"
+            f"Provider: {provider}\n"
+            f"Model:    {friendly_model} ({raw_model})\n"
+            f"Turns:    {len(transcript)}\n"
+            f"{repo_line}"
+            "\nDouble-click to open the chat window for this drone."
+        )
+        self.update()

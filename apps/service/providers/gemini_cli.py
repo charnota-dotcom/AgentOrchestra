@@ -25,7 +25,7 @@ import logging
 import os
 import shutil
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
 from apps.service.providers.protocol import ChatSession, StreamEvent
 from apps.service.types import PersonalityCard, ProviderError, utc_now
@@ -216,7 +216,7 @@ def _is_noise_line(line: str) -> bool:
 
 
 class GeminiCLIProvider:
-    name: str = "gemini-cli"
+    name: Literal["gemini-cli"] = "gemini-cli"
 
     async def open_chat(
         self,

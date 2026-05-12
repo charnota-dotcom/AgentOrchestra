@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS flows (
     description  TEXT NOT NULL DEFAULT '',
     payload      TEXT NOT NULL,        -- JSON: {nodes:[...], edges:[...]}
     version      INTEGER NOT NULL DEFAULT 1,
+    is_flight    INTEGER NOT NULL DEFAULT 0, -- BOOLEAN
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
@@ -317,3 +318,16 @@ CREATE TABLE IF NOT EXISTS drone_action_attachments (
 
 CREATE INDEX IF NOT EXISTS idx_drone_action_attachments_action
     ON drone_action_attachments(action_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Skills — reusable agent templates (superpowers)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS skills (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL UNIQUE,
+    description  TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_skills_updated ON skills(updated_at DESC);

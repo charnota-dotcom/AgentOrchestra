@@ -47,30 +47,78 @@ class Edge(QtWidgets.QGraphicsPathItem):
         self.setZValue(0.5)
         self._hover = False
         self._sync_pen()
+
+        # Bug 17: Repath timer to throttle updates during storms.
+        self._repath_timer = QtCore.QTimer()
+        self._repath_timer.setSingleShot(True)
+        self._repath_timer.setInterval(0)
+        self._repath_timer.timeout.connect(self.update_path)
+
         # Repath when either endpoint moves.
-        source.owner.geometry_changed.connect(self.update_path)  # type: ignore[arg-type]
-        target.owner.geometry_changed.connect(self.update_path)  # type: ignore[arg-type]
+        source.owner.geometry_changed.connect(self._request_repath)
+        target.owner.geometry_changed.connect(self._request_repath)
+
+        # Bug 1: Proactively detach if either endpoint is destroyed.
+        source.destroyed.connect(self._on_endpoint_destroyed)
+        target.destroyed.connect(self._on_endpoint_destroyed)
+
         self.update_path()
 
+    def _request_repath(self) -> None:
+        """Throttle update_path calls."""
+        if not self._repath_timer.isActive():
+            self._repath_timer.start()
+
+    def _on_endpoint_destroyed(self, obj: QtCore.QObject | None = None) -> None:
+        """Handle unexpected deletion of a port item."""
+        # If we're already being removed, this is redundant but safe.
+        scene = self.scene()
+        if scene:
+            # We don't call scene.remove_edge because that calls detach()
+            # which might try to access the already-deleting object.
+            # Instead, we just remove ourselves from the scene.
+            from apps.gui.canvas.scene import CanvasScene
+            if isinstance(scene, CanvasScene):
+                scene.remove_edge(self)
+            else:
+                scene.removeItem(self)
+
     def detach(self) -> None:
-        for endpoint_owner in (
-            getattr(self.source, "owner", None),
-            getattr(self.target, "owner", None),
-        ):
+        """Disconnect signals and nullify references."""
+        # Bug 2: Safe access during teardown.
+        source_owner = getattr(self.source, "owner", None)
+        target_owner = getattr(self.target, "owner", None)
+
+        for endpoint_owner in (source_owner, target_owner):
             if endpoint_owner is None:
                 continue
             try:
-                endpoint_owner.geometry_changed.disconnect(self.update_path)  # type: ignore[arg-type]
+                endpoint_owner.geometry_changed.disconnect(self.update_path)
             except (RuntimeError, TypeError):
-                pass
+                # Bug 4: Log but don't crash.
+                import logging
+                logging.getLogger(__name__).debug(
+                    "failed to disconnect geometry_changed for %s", endpoint_owner
+                )
+
+        # Disconnect destroyed signals too.
+        for port in (self.source, self.target):
+            if port is not None:
+                try:
+                    port.destroyed.disconnect(self._on_endpoint_destroyed)
+                except (RuntimeError, TypeError):
+                    pass
+
         self.source = None
         self.target = None
 
     def touches(self, node: BaseNode) -> bool:
+        # Bug 20: Use node_id for comparison instead of identity (is).
+        if self.source is None or self.target is None:
+            return False
         return (
-            self.source is not None
-            and self.target is not None
-            and (self.source.owner is node or self.target.owner is node)
+            self.source.owner.node_id == node.node_id
+            or self.target.owner.node_id == node.node_id
         )
 
     def update_path(self) -> None:
@@ -78,15 +126,27 @@ class Edge(QtWidgets.QGraphicsPathItem):
             return
         p1 = self.source.scene_position()
         p2 = self.target.scene_position()
-        dx = abs(p2.x() - p1.x())
-        # Pull the bezier handles outward proportional to the distance
-        # between endpoints — straight handles look kinked when ports
-        # are stacked vertically; long handles smooth them out.
-        handle_len = max(60.0, dx * 0.5)
-        c1 = QtCore.QPointF(p1.x() + handle_len, p1.y())
-        c2 = QtCore.QPointF(p2.x() - handle_len, p2.y())
+
+        dx = p2.x() - p1.x()
+        
+        handle_len = max(60.0, min(300.0, abs(dx) * 0.5))
+
         path = QtGui.QPainterPath(p1)
-        path.cubicTo(c1, c2, p2)
+
+        lod = 1.0
+        scene = self.scene()
+        if scene:
+            views = scene.views()
+            if views:
+                lod = views[0].viewportTransform().m11()
+
+        if lod < 0.2:
+            path.lineTo(p2)
+        else:
+            c1 = QtCore.QPointF(p1.x() + handle_len, p1.y())
+            c2 = QtCore.QPointF(p2.x() - handle_len, p2.y())
+            path.cubicTo(c1, c2, p2)
+
         self.setPath(path)
 
     def hoverEnterEvent(
@@ -134,10 +194,17 @@ class Edge(QtWidgets.QGraphicsPathItem):
         option: QtWidgets.QStyleOptionGraphicsItem,
         widget: QtWidgets.QWidget | None = None,
     ) -> None:
+        # Bug 13: Rely on view's global antialiasing.
+        # super().paint draws the path using the pen.
         super().paint(painter, option, widget)
         if self.source is None or self.target is None:
             return
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+
+        # Bug 10: Fade details at low LOD.
+        lod = option.levelOfDetailFromTransform(painter.worldTransform())
+        if lod < 0.4:
+            return
+
         # Arrowhead at the target end so directional edges read
         # as "from → to".  Only draw if we asked for it; flow-edge
         # connections leave directional=False to keep the existing
@@ -152,8 +219,6 @@ class Edge(QtWidgets.QGraphicsPathItem):
     def _draw_arrowhead(self, painter: QtGui.QPainter) -> None:
         if self.source is None or self.target is None:
             return
-        p1 = self.source.scene_position()
-        p2 = self.target.scene_position()
         # Approximate the tangent at the target by sampling the bezier
         # close to its end — gives a more accurate arrowhead angle than
         # using p1->p2 directly when the curve is sharply offset.
@@ -170,7 +235,7 @@ class Edge(QtWidgets.QGraphicsPathItem):
         if dx == 0 and dy == 0:
             return
         angle = math.atan2(dy, dx)
-        size = 9.0
+        size = 30.0
         spread = math.radians(28)
         a1 = angle + math.pi - spread
         a2 = angle + math.pi + spread
@@ -184,9 +249,6 @@ class Edge(QtWidgets.QGraphicsPathItem):
         painter.setBrush(self.pen().color())
         painter.setPen(QtCore.Qt.PenStyle.NoPen)
         painter.drawPolygon(head)
-        # Suppress unused-variable warning in tools that miss the use.
-        _ = p1
-        _ = p2
 
     def _draw_label(self, painter: QtGui.QPainter) -> None:
         path = self.path()
@@ -231,12 +293,14 @@ class DraftEdge(QtWidgets.QGraphicsPathItem):
         pen = QtGui.QPen(QtGui.QColor("#1f6feb"), 1.5, QtCore.Qt.PenStyle.DashLine)
         pen.setCosmetic(True)
         self.setPen(pen)
-        self.setZValue(0.4)
+        # Bug 14: Elevate Z-value above nodes (1.0), edges (0.5) and ports (2.0)
+        self.setZValue(2.5)
 
     def update_to(self, scene_pos: QtCore.QPointF) -> None:
         p1 = self.source.scene_position()
-        dx = abs(scene_pos.x() - p1.x())
-        handle_len = max(60.0, dx * 0.5)
+        dx = scene_pos.x() - p1.x()
+        # Bug 8: Clamp handle_len.
+        handle_len = max(60.0, min(300.0, abs(dx) * 0.5))
         c1 = QtCore.QPointF(p1.x() + handle_len, p1.y())
         c2 = QtCore.QPointF(scene_pos.x() - handle_len, scene_pos.y())
         path = QtGui.QPainterPath(p1)

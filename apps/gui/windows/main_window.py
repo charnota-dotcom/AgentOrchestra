@@ -10,9 +10,11 @@ need Qt.  The class is constructed lazily.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
+
 
 from apps.gui.annotator import setup_annotator
 from apps.gui.canvas.page import CanvasPage
@@ -26,6 +28,7 @@ from apps.gui.windows.limits import LimitsPage
 from apps.gui.windows.live import LivePage
 from apps.gui.windows.review import ReviewPage
 from apps.gui.windows.settings import SettingsPage
+from apps.gui.windows.skills import SkillsPage
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
@@ -35,6 +38,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
+        from apps.gui.ipc.sse_client import SseClient
+        self.sse = SseClient(base_url=client.base_url, token=client.token)
+
         self.setWindowTitle("AgentOrchestra")
         self.resize(1280, 820)
 
@@ -57,7 +63,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings = SettingsPage(self.client)
         self.canvas = CanvasPage(self.client)
         self.blueprints = BlueprintsPage(self.client)
-        self.drones = DronesPage(self.client)
+        self.skills = SkillsPage(self.client)
+        self.drones = DronesPage(self.client, sse=self.sse, provider_mode="manual")
+        self.agents = DronesPage(self.client, sse=self.sse, provider_mode="autonomous")
         self.limits = LimitsPage(self.client)
 
         self.stack.addWidget(self.home)  # 0
@@ -69,7 +77,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.addWidget(self.canvas)  # 6
         self.stack.addWidget(self.limits)  # 7
         self.stack.addWidget(self.blueprints)  # 8
-        self.stack.addWidget(self.drones)  # 9
+        self.stack.addWidget(self.skills)  # 9
+        self.stack.addWidget(self.drones)  # 10
+        self.stack.addWidget(self.agents)  # 11
 
         self.setCentralWidget(central)
 
@@ -111,7 +121,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_rail(self) -> QtWidgets.QWidget:
         rail = QtWidgets.QFrame()
-        rail.setFixedWidth(220)
+        # Bug: Fixed width of 220px prevented narrow window resizing.
+        rail.setMinimumWidth(160)
+        rail.setMaximumWidth(220)
         rail.setStyleSheet("background:#1f2024;color:#e8e8ea;")
 
         layout = QtWidgets.QVBoxLayout(rail)
@@ -127,7 +139,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for label in (
             "Home",
             "Drones",
+            "Agents",
             "Blueprints",
+            "Skills",
             "Compose",
             "Canvas",
             "History",
@@ -147,15 +161,40 @@ class MainWindow(QtWidgets.QMainWindow):
 
         layout.addStretch(1)
 
+        manual_btn = QtWidgets.QPushButton("User Manual 🚀")
+        manual_btn.setStyleSheet(
+            "QPushButton{text-align:left;padding:8px 10px;border:none;"
+            "background:transparent;color:#f0c97a;border-radius:4px;font-size:12px;}"
+            "QPushButton:hover{background:#2a2c31;}"
+        )
+
+        def _open_manual() -> None:
+            path = Path(__file__).parent.parent.parent.parent / "docs" / "USER_MANUAL.md"
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(path.absolute())))
+
+        manual_btn.clicked.connect(_open_manual)
+        layout.addWidget(manual_btn)
+
         status = QtWidgets.QLabel("Service: localhost:8765")
         status.setStyleSheet("color:#7a7d85;font-size:11px;padding:6px 8px;")
         layout.addWidget(status)
         return rail
 
     # Map rail button index -> stack widget index.
-    # Home → 0, Drones → 9, Blueprints → 8, Compose → 1, Canvas → 6,
-    # History → 4, Limits → 7, Settings → 5
-    _NAV_TO_STACK = {0: 0, 1: 9, 2: 8, 3: 1, 4: 6, 5: 4, 6: 7, 7: 5}
+    # Home → 0, Drones → 10, Agents → 11, Blueprints → 8, Skills → 9,
+    # Compose → 1, Canvas → 6, History → 4, Limits → 7, Settings → 5
+    _NAV_TO_STACK = {
+        0: 0,
+        1: 10,
+        2: 11,
+        3: 8,
+        4: 9,
+        5: 1,
+        6: 6,
+        7: 4,
+        8: 7,
+        9: 5,
+    }
 
     def _wire_navigation(self) -> None:
         for i, btn in enumerate(self._nav_buttons):

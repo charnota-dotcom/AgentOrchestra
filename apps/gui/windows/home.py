@@ -21,6 +21,7 @@ class HomePage(QtWidgets.QWidget):
     def __init__(self, client: RpcClient) -> None:
         super().__init__()
         self.client = client
+        self._reloading = False
         self.setStyleSheet("background:#fafbfc;")
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -82,11 +83,19 @@ class HomePage(QtWidgets.QWidget):
         asyncio.ensure_future(self._reload_async())
 
     async def _reload_async(self) -> None:
+        if self._reloading:
+            return
+        self._reloading = True
         try:
             runs = await self.client.call("runs.list", {})
         except Exception as exc:
-            QtWidgets.QMessageBox.warning(self, "RPC error", str(exc))
+            self.active_table.setRowCount(0)
+            self.recent_table.setRowCount(0)
+            self.refresh_btn.setToolTip(f"Last refresh failed: {exc}")
             return
+        finally:
+            self._reloading = False
+
         active = [
             r
             for r in runs
