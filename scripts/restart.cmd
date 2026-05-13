@@ -56,8 +56,8 @@ if not exist "%REPO%\.venv\Scripts\activate.bat" (
     exit /b 1
 )
 
-start "AgentOrchestra" cmd /k ^
-    "cd /d %REPO% && .venv\Scripts\activate.bat && python -m apps.gui.main"
+start "AgentOrchestra" /min cmd /k ^
+    "cd /d %REPO% && .venv\\Scripts\\activate.bat && python -m apps.gui.main"
 
 echo [restart] Done.  GUI is opening in a new window.
 echo.

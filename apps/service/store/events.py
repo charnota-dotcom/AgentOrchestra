@@ -27,6 +27,7 @@ import aiosqlite
 from apps.service.types import (
     Approval,
     Artifact,
+    AgentTemplate,
     BlueprintVersionConflict,
     Branch,
     BranchState,
@@ -46,6 +47,7 @@ from apps.service.types import (
     Skill,
     Step,
     Workspace,
+    long_id,
     utc_now,
 )
 
@@ -60,6 +62,10 @@ def _row_to_dict(row: aiosqlite.Row | None) -> dict[str, Any] | None:
 class FlowVersionConflict(Exception):
     """Raised when an optimistic update_flow lost the race; the caller
     needs to re-fetch the flow and reapply their edits."""
+
+
+class TemplateVersionConflict(Exception):
+    """Raised when an optimistic update_template_graph lost the race."""
 
 
 class EventStore:
@@ -465,6 +471,131 @@ class EventStore:
             cur = await self.db.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
             await self.db.commit()
         return (cur.rowcount or 0) > 0
+
+    # ------------------------------------------------------------------
+    # Graph templates
+    # ------------------------------------------------------------------
+
+    def _hydrate_template_graph(self, row: aiosqlite.Row) -> AgentTemplate:
+        d = dict(row)
+        body = json.loads(d.pop("payload"))
+        d["tags"] = json.loads(d.get("tags") or "[]")
+        d["published"] = bool(d.get("published", 0))
+        d["nodes"] = body.get("nodes") or []
+        d["edges"] = body.get("edges") or []
+        d["created_at"] = d.get("created_at") or body.get("created_at")
+        d["updated_at"] = d.get("updated_at") or body.get("updated_at")
+        d["version"] = int(d.get("version") or body.get("version") or 1)
+        # Keep any future payload fields available to the model without
+        # dropping them on round-trip.
+        for key, value in body.items():
+            d.setdefault(key, value)
+        return AgentTemplate.model_validate(d)
+
+    async def insert_template_graph(self, template: AgentTemplate) -> AgentTemplate:
+        template.updated_at = template.created_at if template.updated_at is None else template.updated_at
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO template_graphs (
+                    id, name, description, category, icon, tags, payload,
+                    published, version, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    template.id,
+                    template.name,
+                    template.description,
+                    template.category,
+                    template.icon,
+                    json.dumps(template.tags),
+                    json.dumps(template.model_dump(mode="json")),
+                    int(template.published),
+                    template.version,
+                    template.created_at.isoformat(),
+                    template.updated_at.isoformat(),
+                ),
+            )
+            await self.db.commit()
+        return template
+
+    async def update_template_graph(
+        self, template: AgentTemplate, *, expected_version: int | None = None
+    ) -> AgentTemplate:
+        template.updated_at = utc_now()
+        async with self._lock:
+            params = (
+                template.name,
+                template.description,
+                template.category,
+                template.icon,
+                json.dumps(template.tags),
+                json.dumps(template.model_dump(mode="json")),
+                int(template.published),
+                template.updated_at.isoformat(),
+                template.id,
+            )
+            if expected_version is not None:
+                cur = await self.db.execute(
+                    """
+                    UPDATE template_graphs
+                       SET name = ?, description = ?, category = ?, icon = ?,
+                           tags = ?, payload = ?, published = ?,
+                           version = version + 1, updated_at = ?
+                     WHERE id = ? AND version = ?
+                    """,
+                    params + (expected_version,),
+                )
+                if (cur.rowcount or 0) == 0:
+                    raise TemplateVersionConflict(
+                        f"template graph {template.id} version {expected_version} no longer current"
+                    )
+                template.version = expected_version + 1
+            else:
+                await self.db.execute(
+                    """
+                    UPDATE template_graphs
+                       SET name = ?, description = ?, category = ?, icon = ?,
+                           tags = ?, payload = ?, published = ?,
+                           version = version + 1, updated_at = ?
+                     WHERE id = ?
+                    """,
+                    params,
+                )
+                template.version += 1
+            await self.db.commit()
+        return template
+
+    async def get_template_graph(self, template_id: str) -> AgentTemplate | None:
+        cur = await self.db.execute("SELECT * FROM template_graphs WHERE id = ?", (template_id,))
+        row = await cur.fetchone()
+        return self._hydrate_template_graph(row) if row else None
+
+    async def list_template_graphs(self) -> list[AgentTemplate]:
+        cur = await self.db.execute("SELECT * FROM template_graphs ORDER BY updated_at DESC")
+        rows = await cur.fetchall()
+        return [self._hydrate_template_graph(r) for r in rows]
+
+    async def delete_template_graph(self, template_id: str) -> bool:
+        async with self._lock:
+            cur = await self.db.execute("DELETE FROM template_graphs WHERE id = ?", (template_id,))
+            await self.db.commit()
+        return (cur.rowcount or 0) > 0
+
+    async def duplicate_template_graph(
+        self, template_id: str, *, name: str | None = None
+    ) -> AgentTemplate | None:
+        template = await self.get_template_graph(template_id)
+        if template is None:
+            return None
+        dup = template.model_copy(deep=True)
+        dup.id = long_id()
+        dup.name = (name or f"{template.name} Copy").strip()
+        dup.version = 1
+        dup.created_at = utc_now()
+        dup.updated_at = dup.created_at
+        await self.insert_template_graph(dup)
+        return dup
 
     # ------------------------------------------------------------------
     # Templates & Cards

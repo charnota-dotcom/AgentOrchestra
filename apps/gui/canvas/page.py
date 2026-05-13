@@ -109,15 +109,21 @@ class CanvasPage(QtWidgets.QWidget):
         # Draft mode flag mirrors Flow.is_draft.  Run is gated when
         # True; the toolbar shows a "Draft" badge.
         self._is_draft: bool = False
+        self._settings = QtCore.QSettings()
+        self._settings_key = "canvas/splitter_state"
 
         # Layout: left palette | centre canvas | right inspector
-        root = QtWidgets.QHBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        main_layout = QtWidgets.QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        self.splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(6)
+        self.splitter.setStyleSheet("QSplitter::handle{background:#e6e7eb;}")
+        main_layout.addWidget(self.splitter)
 
         self.palette_panel = PalettePanel(client)
-        self.palette_panel.setMinimumWidth(160)
-        self.palette_panel.setMaximumWidth(220)
+        self.palette_panel.setMinimumWidth(50)
         # When the operator clicks "Deploy" in the palette and the
         # drone is deployed server-side, the palette emits this signal
         # so we can drop a DroneActionNode onto
@@ -127,9 +133,10 @@ class CanvasPage(QtWidgets.QWidget):
         self.palette_panel.drone_deployed.connect(  # type: ignore[arg-type]
             self._on_drone_deployed
         )
-        root.addWidget(self.palette_panel)
+        self.splitter.addWidget(self.palette_panel)
 
         centre = QtWidgets.QWidget()
+        centre.setMinimumWidth(50)
         c = QtWidgets.QVBoxLayout(centre)
         c.setContentsMargins(0, 0, 0, 0)
         c.setSpacing(0)
@@ -170,12 +177,15 @@ class CanvasPage(QtWidgets.QWidget):
         self._reposition_minimap()
         centre.installEventFilter(self)
 
-        root.addWidget(centre, stretch=1)
+        self.splitter.addWidget(centre)
 
         self.inspector = InspectorPanel()
         self.inspector.setMinimumWidth(180)
-        self.inspector.setMaximumWidth(280)
-        root.addWidget(self.inspector)
+        self.splitter.addWidget(self.inspector)
+
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
 
         self.scene.selection_changed.connect(self.inspector.show_for)  # type: ignore[arg-type]
         self.inspector.flow_name_changed.connect(self._on_flow_name_changed)  # type: ignore[arg-type]
@@ -184,6 +194,18 @@ class CanvasPage(QtWidgets.QWidget):
         self.inspector.delete_requested.connect(self._remove_item)  # type: ignore[arg-type]
 
         self.view.viewport().installEventFilter(self)
+
+    def _restore_splitter_state(self) -> None:
+        value = self._settings.value(self._settings_key)
+        if value is not None:
+            self.splitter.restoreState(value)
+
+    def _save_splitter_state(self) -> None:
+        self._settings.setValue(self._settings_key, self.splitter.saveState())
+
+    def hideEvent(self, event: QtGui.QHideEvent) -> None:  # type: ignore[override]
+        super().hideEvent(event)
+        self._save_splitter_state()
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # type: ignore[override]
         """Refresh the palette's drones list every time the operator
@@ -195,8 +217,9 @@ class CanvasPage(QtWidgets.QWidget):
         switch.
         """
         super().showEvent(event)
+        self._restore_splitter_state()
         if hasattr(self, "palette_panel"):
-            asyncio.ensure_future(self.palette_panel.reload_drones())
+            asyncio.ensure_future(self.palette_panel._reload_all())
 
     # ------------------------------------------------------------------
     # Toolbar
@@ -316,6 +339,9 @@ class CanvasPage(QtWidgets.QWidget):
                 existing.setPos(scene_pos)
                 return
             node = DroneActionNode(_node_id(), action)
+        elif kind == "template_graph":
+            asyncio.ensure_future(self._deploy_template_async(payload, scene_pos))
+            return
         else:
             return
 
@@ -324,6 +350,100 @@ class CanvasPage(QtWidgets.QWidget):
             self._wire_node(node)
             # Add via undo stack so a misclick is one Ctrl+Z away.
             self.undo_stack.push(AddNodeCommand(self.scene, node))
+
+    async def _deploy_template_async(
+        self,
+        payload: dict[str, Any],
+        scene_pos: QtCore.QPointF,
+    ) -> None:
+        template_id = payload.get("template_id")
+        if not template_id:
+            return
+        try:
+            result = await self.client.call(
+                "template_graphs.deploy",
+                {
+                    "template_id": template_id,
+                    "template_version": payload.get("template_version"),
+                    "drop_x": scene_pos.x(),
+                    "drop_y": scene_pos.y(),
+                    "group_label": payload.get("name"),
+                },
+            )
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Template deployment failed", str(exc))
+            return
+        if result.get("errors"):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Template deployment blocked",
+                "\n".join(result.get("errors") or ["Template validation failed"]),
+            )
+            return
+        await self._apply_template_deployment(result)
+
+    async def _apply_template_deployment(self, result: dict[str, Any]) -> None:
+        node_index: dict[str, BaseNode] = {}
+        self.undo_stack.beginMacro("Deploy template")
+        try:
+            for node_data in result.get("nodes", []) or []:
+                node = self._node_from_deployment(node_data)
+                if node is None:
+                    continue
+                node.setPos(float(node_data.get("x", 0.0)), float(node_data.get("y", 0.0)))
+                self._wire_node(node)
+                self.undo_stack.push(AddNodeCommand(self.scene, node))
+                node_index[node.node_id] = node
+
+            for edge_data in result.get("edges", []) or []:
+                src = node_index.get(edge_data.get("from_node"))
+                dst = node_index.get(edge_data.get("to_node"))
+                if src is None or dst is None:
+                    continue
+                src_port = next(
+                    (p for p in src.output_ports if p.name == edge_data.get("from_port")),
+                    src.output_ports[0] if src.output_ports else None,
+                )
+                dst_port = next(
+                    (p for p in dst.input_ports if p.name == edge_data.get("to_port")),
+                    dst.input_ports[0] if dst.input_ports else None,
+                )
+                if src_port and dst_port:
+                    edge = Edge(
+                        src_port,
+                        dst_port,
+                        label=edge_data.get("label", ""),
+                        directional=bool(edge_data.get("directional", True)),
+                    )
+                    self.undo_stack.push(AddEdgeCommand(self.scene, edge))
+        finally:
+            self.undo_stack.endMacro()
+
+    def _node_from_deployment(self, node_data: dict[str, Any]) -> BaseNode | None:
+        kind = str(node_data.get("kind") or "")
+        if kind == "agent":
+            card = node_data.get("card") or {}
+            return AgentNode(_node_id(), card)
+        if kind == "control":
+            control_kind = str(node_data.get("control_kind") or "")
+            cls = _CONTROL_FACTORY.get(control_kind)
+            if cls is None:
+                return None
+            node = cls(_node_id())
+            if control_kind == "branch" and isinstance(node, BranchNode):
+                node.pattern = str((node_data.get("params") or {}).get("pattern") or ".*")
+            if control_kind == "staging_area" and isinstance(node, StagingAreaNode):
+                params = node_data.get("params") or {}
+                node.set_mode(str(params.get("mode") or "manual_release"))
+                if params.get("threshold") is not None:
+                    node.set_threshold(int(params.get("threshold") or 1))
+                if params.get("timeout_seconds") is not None:
+                    node.set_timeout_seconds(int(params.get("timeout_seconds")))
+                node.summary_hint = str(params.get("summary_hint") or "")
+                node.release_note = str(params.get("release_note") or "")
+                node.sync_view()
+            return node
+        return None
 
     def _wire_node(self, node: BaseNode) -> None:
         for port in node.input_ports + node.output_ports:
@@ -739,17 +859,19 @@ class CanvasPage(QtWidgets.QWidget):
             node: BaseNode | None = None
             if canonical_node_type(str(node_type or "")) == "reaper":
                 card_id = n.get("card_id")
-                # We don't have a cards.get RPC; pull from the cards
-                # we already cached in the palette.
-                card = next(
-                    (
-                        c.data(QtCore.Qt.ItemDataRole.UserRole)["card"]
-                        for i in range(self.palette_panel.cards_list.count())
-                        if (c := self.palette_panel.cards_list.item(i)) is not None
-                        and c.data(QtCore.Qt.ItemDataRole.UserRole)["card"].get("id") == card_id
-                    ),
-                    {"id": card_id, "name": "Missing card"},
-                )
+                card = n.get("card")
+                if not isinstance(card, dict):
+                    # We don't have a cards.get RPC; pull from the cards
+                    # we already cached in the palette.
+                    card = next(
+                        (
+                            c.data(QtCore.Qt.ItemDataRole.UserRole)["card"]
+                            for i in range(self.palette_panel.cards_list.count())
+                            if (c := self.palette_panel.cards_list.item(i)) is not None
+                            and c.data(QtCore.Qt.ItemDataRole.UserRole)["card"].get("id") == card_id
+                        ),
+                        {"id": card_id, "name": "Missing card"},
+                    )
                 agent_node = AgentNode(node_id, card)
                 agent_node.goal_override = (n.get("params") or {}).get("goal", "")
                 node = agent_node
@@ -966,7 +1088,6 @@ class NodeAnnotationProxy(QtWidgets.QLabel):
         # Find the page to call the conversion logic.
         # proxy -> viewport -> view -> layout -> page
         view = self.parent().parent()
-        from apps.gui.canvas.page import CanvasPage
         page = None
         if isinstance(view, _CanvasViewWithDrop):
             page = view._page

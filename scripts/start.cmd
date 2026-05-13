@@ -1,4 +1,13 @@
 @echo off
+set "SCRIPTS_DIR=%~dp0"
+
+if "%1"=="--minimized" (
+    shift
+) else (
+    start "AgentOrchestra Launcher" /min cmd /c "%~f0" --minimized %*
+    exit /b
+)
+
 rem Verify CLI connections, then launch AgentOrchestra.
 rem
 rem  [1/3] Probe `claude --version` (binary check)
@@ -52,7 +61,7 @@ rem checkout, but if a stale local copy survives, this script still
 rem runs end-to-end.
 
 setlocal enabledelayedexpansion
-set REPO=%~dp0..
+for %%I in ("%SCRIPTS_DIR%..") do set "REPO=%%~fI"
 
 if not exist "%REPO%\.venv\Scripts\activate.bat" echo [start] No virtual environment found at %REPO%\.venv
 if not exist "%REPO%\.venv\Scripts\activate.bat" echo [start] Run setup.cmd first to install AgentOrchestra.
@@ -180,7 +189,7 @@ if "!ALL_FAILED!"=="1" pause
 if "!ALL_FAILED!"=="1" exit /b 1
 
 echo Launching AgentOrchestra...
-start "AgentOrchestra" cmd /k "cd /d %REPO% && .venv\Scripts\activate.bat && python -m apps.gui.main"
+start "AgentOrchestra" /min cmd /k "cd /d %REPO% && .venv\\Scripts\\activate.bat && python -m apps.gui.main"
 
 echo.
 echo Press any key to close this pre-flight window.

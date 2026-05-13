@@ -29,6 +29,24 @@ def test_parse_minimal_template() -> None:
     assert t.content_hash
 
 
+def test_parse_template_accepts_utf8_bom() -> None:
+    text = (
+        "\ufeff---\n"
+        "name: Demo\n"
+        "archetype: demo\n"
+        "variables:\n"
+        "  - name: goal\n"
+        "    kind: text\n"
+        "    required: true\n"
+        "---\n"
+        "Hello {{ goal }}.\n"
+    )
+    t = parse_template(text)
+    assert t.name == "Demo"
+    assert t.archetype == "demo"
+    assert t.variables[0].name == "goal"
+
+
 def test_render_substitutes_variables() -> None:
     t = parse_template(
         "---\nname: X\narchetype: x\nvariables:\n"
@@ -68,6 +86,26 @@ def test_load_seed_templates(tmp_path) -> None:
         assert t.archetype
         assert t.name
         assert t.variables
+
+
+def test_load_template_accepts_utf8_bom(tmp_path) -> None:
+    path = tmp_path / "bom_template.md"
+    path.write_text(
+        "---\n"
+        "name: Bom Demo\n"
+        "archetype: bom-demo\n"
+        "variables:\n"
+        "  - name: goal\n"
+        "    kind: text\n"
+        "    required: true\n"
+        "---\n"
+        "Hello {{ goal }}.\n",
+        encoding="utf-8-sig",
+    )
+    t = load_template(path)
+    assert t.name == "Bom Demo"
+    assert t.archetype == "bom-demo"
+    assert t.variables[0].name == "goal"
 
 
 def test_phase2_mapper_templates_include_required_contracts() -> None:

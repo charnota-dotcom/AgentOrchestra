@@ -17,6 +17,7 @@ from apps.gui.canvas.nodes.control import (
 )
 from apps.gui.canvas.nodes.drone_action import DroneActionNode
 from apps.gui.canvas.nodes.staging_area import StagingAreaNode
+from apps.gui.canvas.nodes.template_graph import TemplateGraphNode
 
 ReaperNode = AgentNode
 FPVDroneNode = DroneActionNode
@@ -33,5 +34,6 @@ __all__ = [
     "OutputNode",
     "ReaperNode",
     "StagingAreaNode",
+    "TemplateGraphNode",
     "TriggerNode",
 ]

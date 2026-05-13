@@ -9,27 +9,30 @@ under `apps/gui/`.
 
 ## 1. Executive summary
 
-Posture: **close to "all requirements met" â€” Phase 5 is functionally complete on
-the Chat / Canvas / Limits / Operator-Panel surfaces, the implicit "subscription-only,
-conversations-as-nodes, repo-aware coding" thesis is intact, and the shared
-`presets.py` registry has eliminated the worst Chat â†” Canvas drift.** What
-remains are *consistency* gaps â€” features that work on one surface but were not
-mirrored to the other â€” plus a small handful of polish / hardening items.
+Posture: **close to "all requirements met" on the shipped GUI surfaces.** The
+old Settings/API-key and Reaper Drones second-class issues are resolved, and the
+shared `presets.py` registry has eliminated the worst model-picker drift. The
+remaining gaps are now mostly convenience and surface-completeness items rather
+than core workflow blockers.
+
+Update 2026-05: the separate graph-template builder now exists in the
+`Templates` tab. When this document says `templates` in the old service
+context, it still means instruction templates unless the graph-template
+builder is explicitly named.
 
 The three highest-impact gaps:
 
-1. **The Reaper Drones tab is a second-class citizen.** It cannot bind a workspace,
-   edit references, attach files, switch branch, or surface the git-status
-   banner â€” none of which the canvas chat dialog or the Chat tab is missing.
-   `apps/gui/windows/agents.py:53-457`.
-2. **Settings still presents Anthropic / Google / OpenAI API-key fields** as a
-   prominent block above hooks/workspaces, contradicting the
-   "subscription-only by default" thesis the README opens with.
-   `apps/gui/windows/settings.py:39-86`.
-3. **The Chat tab's paperclip path has no client-side 25 MB pre-check.** The
-   canvas chat dialog enforces it; the Chat tab uploads first and lets the
-   server reject â€” wasting seconds on a multi-MB read+b64 round-trip.
-   `apps/gui/windows/chat.py:456-495` vs `apps/gui/canvas/chat_dialog.py:380-395`.
+1. **Settings still lacks a GUI editor for service-level controls.** The
+   README now correctly says `Service URL` / `Token` are CLI-level options and
+   the MCP registry is service-side, but that still leaves no in-app editor for
+   either surface.
+2. **The Drones tab and canvas mini-dialog are not feature-parity peers.**
+   Workspace binding and references live in the Drones tab, while the canvas
+   chat dialog stays message-only and does not surface branch switching, live
+   git status, attachments, or per-turn references.
+3. **Composer dictation is file-based, not live recording.** It transcribes an
+   existing audio file through `faster-whisper`; there is still no in-app
+   recorder.
 
 ---
 
@@ -45,39 +48,20 @@ The three highest-impact gaps:
   - LOW â€” no auto-refresh; the operator must click Refresh after dispatching
     from Compose to see the row appear in Active.
 
-### Chat â€” `apps/gui/windows/chat.py`
-- **Today:** Model picker (12 rows) + Thinking + Skills + Repo combo + paperclip
-  + drag-drop + Save-last-reply + New-chat. Repo binding via `Add repoâ€¦` and
-  `Clone from gitâ€¦` is fully wired. Auto-mints a Reaper Drone on first send.
-- **Gaps:**
-  - **MEDIUM** â€” no client-side 25 MB pre-check before
-    `Path.read_bytes()` + `base64.b64encode` (`chat.py:469-478`); the canvas
-    dialog has it (`chat_dialog.py:389`). On a 50 MB drag-drop the UI does
-    seconds of pointless work before showing the server's "too large" warning.
-  - **LOW** â€” `_render_for_send` (`chat.py:803-817`) is dead code: the actual
-    send only passes the latest user message because the backend keeps the
-    transcript. The dead path is misleading for future maintainers.
-  - **LOW** â€” `_pending_attachments` carries a `bytes` field set from `stat()`,
-    but no per-image dimension preview / total-size bar.
+### Legacy chat surface
+- **Today:** The old `apps/gui/windows/chat.py` surface is no longer present in
+  the current GUI tree. Its former attachment and picker gaps are now folded
+  into the Drones and Canvas notes above.
+- **Gaps:** None distinct from the Drones / Canvas rows above.
 
-### Reaper Drones â€” `apps/gui/windows/agents.py`
-- **Today:** Sidebar list, transcript view, Send box, Spawn-follow-up panel,
-  + New Reaper Drone dialog (Coding mode only, 5 rows).
+### Reaper Drones â€” `apps/gui/windows/drones.py`
+- **Today:** Sidebar list, transcript view, Send box, workspace banner,
+  references editor, and a `+ New` / edit dialog for deployed drone actions.
 - **Gaps:**
-  - **HIGH** â€” no workspace binding control. `agents.set_workspace` exists in
-    the RPC; the Reaper Drones tab never calls it. Operators who land here and want to
-    bind their existing chat to a repo have to drop it on the canvas and
-    double-click. (`agents.py:295-334`).
-  - **HIGH** â€” no References editor. `agents.set_references` only reachable
-    via the canvas chat dialog (`chat_dialog.py:254-329`).
-  - **HIGH** â€” no attachment paperclip / drag-drop. Both Chat and the canvas
-    chat dialog support attachments; this tab does not.
-  - **HIGH** â€” no live git-status banner / Switch-branch button on the
-    transcript pane. Same omission pattern.
-  - MEDIUM â€” the `+ New` dialog has no thinking / skills / mode picker
-    (`agents.py:295-326` deliberately filters to MODE_CODING). The README
-    states this is intentional, so call it MEDIUM not HIGH â€” but it means a
-    chat-style General-mode Reaper Drone literally cannot be created from this tab.
+  - **HIGH** â€” no attachment upload flow.
+  - **HIGH** â€” no live git-status banner or `Switch branch` control.
+  - MEDIUM â€” the `+ New` dialog is still coding-oriented rather than a full
+    general-mode conversation builder.
 
 ### Compose â€” `apps/gui/windows/composer.py`
 - **Today:** Cards list, workspace picker, form-driven variables, Preview
@@ -86,17 +70,16 @@ The three highest-impact gaps:
   - **MEDIUM** â€” voice-dictate dialog asks for a pre-recorded audio file
     (`composer.py:213-221`); no in-app recording. The README's Compose section
     promises "voice dictation button" without that caveat.
-  - LOW â€” no attachment paperclip on Compose; autonomous Runs cannot ingest
-    images/spreadsheets via this surface (only the Chat / Canvas paths).
+  - LOW â€” no attachment upload control on Compose.
   - LOW â€” no draft-save (you have to hit Preview before Dispatch becomes
     active, but losing focus to another tab discards typed variables).
 
-### Canvas â€” `apps/gui/canvas/page.py` + `palette.py` + `chat_dialog.py`
+### Canvas â€” `apps/gui/canvas/page.py` + `palette.py` + `drone_chat_dialog.py`
 - **Today:** Drag from palette (control / Reaper Drone cards / conversations);
-  + New conversation dialog mirrors Chat-tab picker incl. workspace +
-  Addâ€¦ / Cloneâ€¦; lineage edges + LineageBox cluster; Visibility toggle;
-  Draft-mode banner; auto-layout; minimap; undo; per-Reaper Drone chat dialog with
-  workspace banner + git status + Switch branch + References + attachments.
+  new conversation dialog mirrors the shared model/workspace picker incl.
+  workspace + Addâ€¦ / Cloneâ€¦; lineage edges + LineageBox cluster; Visibility
+  toggle; Draft-mode banner; auto-layout; minimap; undo; per-Reaper Drone chat
+  dialog with transcript + send box + context gauge.
 - **Gaps:**
   - **MEDIUM** â€” `_open_flow` uses an `QInputDialog.comboBoxItems()`
     round-trip (`page.py:800-812`) which silently falls back to index 0 on any
@@ -111,6 +94,8 @@ The three highest-impact gaps:
     "Missing agent" stub nodes.
   - LOW â€” no minimap toggle / hide; can't be turned off when the operator
     wants the centre area for a wide flow.
+  - LOW â€” the mini-dialog is intentionally message-only, so attachments,
+    references, and branch controls are absent there by design.
 
 ### History â€” `apps/gui/windows/history.py`
 - **Today:** Search tab (FTS5) + Recent runs tab with per-row Approve / Reject
@@ -131,20 +116,11 @@ The three highest-impact gaps:
     a small countdown on the disabled button would be friendlier.
 
 ### Settings â€” `apps/gui/windows/settings.py`
-- **Today:** API-key fields (Anthropic / Google / OpenAI), hook installer,
-  workspaces list, Add workspace.
+- **Today:** Hooks installer, workspaces list, and a collapsed API-fallback
+  disclosure for Anthropic / Google / OpenAI keys.
 - **Gaps:**
-  - **HIGH** â€” Provider keys block is the first card on the page, contradicting
-    the "subscription-only by default" thesis the README opens with
-    (`settings.py:39-86`). Operators following a fresh install screenshot the
-    Settings page and ask "where do I get an Anthropic key?" â€” exactly the
-    confusion the first-run wizard PR #11 went out of its way to remove.
-  - **MEDIUM** â€” no MCP server registry UI despite README Â§Settings claiming
-    one (README:198) and the RPCs (`mcp.list / add / trust / block / remove`)
-    being shipped.
-  - **MEDIUM** â€” no "Service URL / Token" field despite README Â§Settings
-    listing them (README:196-197). Currently the only way to change the URL is
-    via `--service-url` CLI flag.
+  - **MEDIUM** â€” no GUI editor for the service URL / RPC token override.
+  - **MEDIUM** â€” no GUI editor for the MCP server registry.
 
 ### Live â€” `apps/gui/windows/live.py` (reachable from Compose dispatch)
 - **Today:** SSE-driven transcript + event log + Cancel + Open Review.
@@ -166,29 +142,27 @@ The three highest-impact gaps:
 
 ## 3. Cross-cutting requirements
 
-- **Subscription-only flow.** â˜… Mostly intact: chat / Reaper Drones / canvas all route
-  through `claude-cli` / `gemini-cli`; the Replay dropdown deliberately omits
-  API providers (`history.py:213`); first-run wizard removed the API-key page.
-  **Gap:** Settings still surfaces three API-key fields up front. **Severity HIGH** for
-  consistency with README claim.
-- **Drag-and-drop file attach.** â˜… Wired on Chat tab and canvas chat dialog
-  (`chat.py:387-404`, `chat_dialog.py:353-378`). **Gap:** Agents tab and
-  Composer have no drop handler. **MEDIUM.**
+- **Subscription-only flow.** â˜… Mostly intact: Drones / canvas route through
+  `claude-cli` / `gemini-cli`; the Replay dropdown deliberately omits API
+  providers (`history.py:213`); Settings keeps API keys collapsed by default.
+  No documentation mismatch remains here.
+- **Attachment upload flow.** â˜… Backend storage and Limits usage are present.
+  **Gap:** the current GUI does not expose a dedicated upload surface on the
+  Drones tab, canvas mini-dialog, or Composer. **MEDIUM.**
 - **Drag from Conversations palette to canvas.** â˜… Wired
   (`palette.py:112-114` + `_DragList.startDrag` + `page.py:288-307`); duplicate-
   drop guard recentres the existing node. No gap.
 - **Visibility toggle dimming non-cluster nodes.** â˜… Wired
   (`page.py:370-455`) â€” both ancestors + descendants on selection. **Gap:** no
   visual hint that Reaper Drone node / control node selection does nothing. **LOW.**
-- **Draft canvas mirroring Chat UI.** â˜… Mirrored: same 12-row picker, same
-  thinking-depth, same skills, same workspace combo with Addâ€¦ / Cloneâ€¦
-  (`palette.py:127-322`); amber Draft banner on toolbar (`page.py:127-139`);
-  `compose_system` shared. No gap.
-- **Repo-aware agents end-to-end.** â˜… Clone (Chat + canvas), Switch branch
-  (canvas chat dialog only), green workspace banner, live git-status banner,
-  CLAUDE.md / AGENTS.md inlined system prompt â€” all wired on Chat + canvas
-  surfaces. **Gap:** Agents tab cannot bind / unbind / switch branch / see
-  status banner. **HIGH.**
+- **Draft canvas mirroring the shared picker.** â˜… Mirrored: same 12-row
+  picker, same thinking-depth, same skills, same workspace combo with Addâ€¦ /
+  Cloneâ€¦ (`palette.py:127-322`); amber Draft banner on toolbar
+  (`page.py:127-139`); `compose_system` shared. No gap.
+- **Repo-aware agents end-to-end.** â˜… Workspace binding, green workspace
+  banner, and `CLAUDE.md` / `AGENTS.md` inlining are wired. **Gap:** branch
+  switching, live git-status surfacing, and attachment upload are still absent
+  from the GUI surfaces. **MEDIUM.**
 - **Operator Panel one-click flow on Windows.** â˜… `scripts/ops.py` reads
   `manifest.json`; star-badged â˜… pinned utilities (start / restart / ops /
   limits) plus 1-8 numbered steps; QProcess-based with merged channels. No gap.
@@ -198,24 +172,22 @@ The three highest-impact gaps:
 ## 4. Forward priorities
 
 ### Now (block operator workflow / break trust)
-- **Settings: hide / collapse provider-keys block** under an "Advanced â€” API
-  fallback (optional)" disclosure. Severity HIGH.
-  `apps/gui/windows/settings.py:39-86`.
-- **Agents tab: add Workspace + References + Attachments + git banner**
-  to mirror the canvas chat dialog. Severity HIGH; the simplest fix is to
-  extract the canvas chat dialog's right-hand-side controls into a reusable
-  widget and embed it. `apps/gui/windows/agents.py:123-171`.
-- **Chat tab: 25 MB pre-check before read+b64.** Severity MEDIUM but cheap.
-  `apps/gui/windows/chat.py:456-495`.
+- **Settings: decide whether service-level controls stay CLI-only.**
+  The app still has no GUI for `Service URL`, RPC token override, or MCP
+  registry management. Severity MEDIUM.
+- **Drones tab / canvas mini-dialog: decide on parity or keep the split.**
+  The Drones tab owns workspace and references; the canvas dialog is still
+  intentionally minimal. Severity MEDIUM.
+- **Composer: in-app recording.** The current file-picker flow is usable but
+  less ergonomic than the README's "voice dictation" wording suggests.
 
 ### Next (annoying or partial implementations)
 - **Canvas Open dialog: replace `QInputDialog.comboBoxItems()` index lookup**
   with a real `QListWidget` so flow #N actually loads. `page.py:800-812`.
-- **Settings: ship the MCP server registry UI** the README Â§Settings promises.
-  RPCs already exist. `apps/gui/windows/settings.py:1-213`.
-- **Settings: surface Service URL + Token override** â€” currently CLI-only.
+- **Settings: surface Service URL / Token and MCP registry if GUI parity is
+  desired.** RPCs already exist, but the current page keeps them out of the UI.
 - **Compose: in-app voice recording** instead of file picker. `composer.py:213-221`.
-- **Agents tab + New dialog: optional thinking + skills + mode** so a General-
+- **Drones tab + New dialog: optional thinking + skills + mode** so a General-
   mode Reaper Drone can be created without going to the canvas.
 - **Live page: structured event-log rendering** â€” kind + delta + ts + cost.
   `apps/gui/windows/live.py:115`.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
@@ -10,6 +11,13 @@ import pytest
 import pytest_asyncio
 
 from apps.service.store.events import EventStore
+
+
+_LOCAL_TMP = Path(__file__).resolve().parent.parent / ".tmp"
+_LOCAL_TMP.mkdir(parents=True, exist_ok=True)
+for _env_key in ("TMP", "TEMP", "TMPDIR"):
+    os.environ.setdefault(_env_key, str(_LOCAL_TMP))
+tempfile.tempdir = str(_LOCAL_TMP)
 
 
 @pytest_asyncio.fixture

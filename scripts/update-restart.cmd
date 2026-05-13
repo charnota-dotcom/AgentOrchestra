@@ -70,7 +70,7 @@ rem probes it.
 ping -n 2 127.0.0.1 >nul
 
 echo [update-restart] Starting AgentOrchestra...
-start "AgentOrchestra" cmd /k "cd /d %REPO% && .venv\Scripts\activate.bat && python -m apps.gui.main"
+start "AgentOrchestra" /min cmd /k "cd /d %REPO% && .venv\\Scripts\\activate.bat && python -m apps.gui.main"
 
 echo.
 echo [update-restart] Done.  GUI is opening in a new window with the latest code.

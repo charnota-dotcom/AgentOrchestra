@@ -1,6 +1,6 @@
 ﻿# AgentOrchestra
 
-**Desktop orchestrator for multi-vendor AI sub-agents on Windows.** Drive Claude Code, Gemini CLI, Codex CLI, and local Ollama models from a single PySide6 GUI: design reusable **Blueprints** (templates with provider, model, system persona, default skills + role), deploy them as **FPV Drones** (manual browser-based source bundles), drag FPV Drones onto a canvas, attach repos so they can read / edit code with their built-in file tools, and design dispatchable Flow graphs that hand a task off through Trigger â†’ Agent â†’ Branch â†’ Merge â†’ Human â†’ Output nodes.
+**Desktop orchestrator for multi-vendor AI sub-agents on Windows.** Drive Claude Code, Gemini CLI, Codex CLI, and local Ollama models from a single PySide6 GUI: design reusable **Blueprints** (templates with provider, model, system persona, default skills + role), build reusable graph **Templates** for agent-team workflows, deploy them as **FPV Drones** (manual browser-based source bundles), drag FPV Drones onto a canvas, attach repos so they can read / edit code with their built-in file tools, and design dispatchable Flow graphs that hand a task off through Trigger â†’ Agent â†’ Branch â†’ Merge â†’ Human â†’ Output nodes.
 
 > **Heads up â€” Phase 6 rename.** The legacy "Agent" abstraction now maps to Reaper Drone, the Drone model now maps to FPV Drone, and Staging Area is a separate first-class node.  Existing chats from earlier versions are dropped on first launch after the upgrade.  See `docs/DRONE_MODEL.md` for the design and `CHANGELOG.md` for what changed.
 
@@ -14,7 +14,7 @@ Subscription-only by default â€” no API keys are required for the day-to-da
 2. [Install & first run](#install--first-run)
 3. [Operator panel (Windows .cmd scripts)](#operator-panel-windows-cmd-scripts)
 4. [The GUI tabs in detail](#the-gui-tabs-in-detail)
-   - [Home](#home) Â· [FPV Drones](#drones) Â· [Reaper Drones](#Reaper Drones) Â· [Blueprints](#blueprints) Â· [Skills](#skills) Â· [Compose](#compose) Â· [Canvas](#canvas) Â· [Analytics](#analytics) Â· [History](#history) Â· [Limits](#limits) Â· [Settings](#settings)
+   - [Home](#home) Â· [FPV Drones](#drones) Â· [Reaper Drones](#Reaper Drones) Â· [Blueprints](#blueprints) Â· [Templates](#templates) Â· [Skills](#skills) Â· [Compose](#compose) Â· [Canvas](#canvas) Â· [Analytics](#analytics) Â· [History](#history) Â· [Limits](#limits) Â· [Settings](#settings)
 5. [Subsystems](#subsystems)
    - [Repo-aware coding sessions](#repo-aware-coding-sessions)
    - [Attachments (images + spreadsheets)](#attachments-images--spreadsheets)
@@ -45,7 +45,7 @@ The service does five things:
 4. **Watches the host** â€” Claude session JSONL files and Claude Code hooks â€” so what you do interactively shows up in the orchestrator's history too.
 5. **Exposes ~50 RPC methods** the GUI calls into. The full list is below.
 
-The GUI presents this as **eleven rail tabs** (Home, FPV Drones, Reaper Drones, Blueprints, Skills, Compose, Canvas, Analytics, History, Limits, Settings) plus two stack pages (Live, Review) reached when you dispatch a Run from Compose.
+The GUI presents this as **twelve rail tabs** (Home, FPV Drones, Reaper Drones, Blueprints, Templates, Skills, Compose, Canvas, Analytics, History, Limits, Settings) plus two stack pages (Live, Review) reached when you dispatch a Run from Compose.
 
 ---
 
@@ -117,6 +117,14 @@ The **"Robot Plan"** workshop.  Create frozen templates for your friends:
 - **+ Reaper Drone** â€” Start an autonomous CLI plan with integrated skill selection.
 - **Convert to Reaper Drone** â€” Select any Drone blueprint and upgrade it to an Reaper Drone brain at any time.
 
+### Templates
+
+The **graph-template builder**.  Create reusable agent-team flow graphs, validate them, export Mermaid previews, and publish them to the canvas sidebar.
+
+- Deploy a template onto the Canvas to stamp out native-looking cards and links.
+- Edit nodes, edges, and deployment mapping in a dedicated builder instead of mixing them into the instruction-template engine.
+- `templates.render` and `templates.get` still refer to instruction templates; graph templates use the new `template_graphs.*` RPCs.
+
 ### Skills
 
 The **"Superpower"** management library.  Create, edit, and delete instruction templates (e.g. `/research-deep`, `/code-review`).  These are database-backed and can be easily picked from a popup window whenever you are making or deploying a Reaper Drone.
@@ -142,7 +150,7 @@ Drag-and-drop graph editor. Two distinct things live on the canvas:
 **Key Features:**
 - **Edit on Double-Click:** Double-clicking any drone node opens the **Edit Drone** dialog (name, workspace, skills) without changing the original blueprint.
 - **Convert to Reaper Drone:** Right-click any manual browser drone to "promote" it to an autonomous CLI Reaper Drone, preserving the full transcript.
-- **Peer References:** Non-directional edges between drone nodes act as implicit context providers, allowing agents to "talk" across different windows and models.
+- **Message-only chat:** Double-clicking a drone node opens a compact transcript dialog for continuing the conversation. Workspace binding and peer references stay in the Drones tab.
 - **Lineage:** Auto-draws translucent boxes around parent/child FPV Drone clusters.
 
 ### Analytics
@@ -173,10 +181,11 @@ Read-only browser over every Run, Branch, Step, Approval, and Artifact. **FTS5 s
 
 ### Settings
 
-- **Service URL** (default `http://127.0.0.1:8765`).
-- **Token** â€” sourced from the OS keyring. The service mints one at startup if missing; the GUI looks it up via `hook_token()`.
-- **MCP server registry** â€” list / add / trust / block / remove MCP servers. Trusted servers are exposed to cards whose `tool_allowlist` includes them.
-- **Hook installer** â€” install / uninstall the Claude Code hook scripts (`packs/hooks/`) so JSONL session files land in our ingestion path.
+- **Hooks installer** â€” install / uninstall the Claude Code hook scripts (`packs/hooks/`) so JSONL session files land in our ingestion path.
+- **Workspaces** â€” register local repos the service can bind to for repo-aware runs.
+- **Advanced API fallback** â€” collapsed by default. Stores Anthropic / Google / OpenAI API keys only for the API-keyed fallback path; the standard chat / agent flow stays subscription-only.
+
+`Service URL` and `Token` are CLI-level options on `apps/gui/main.py` rather than Settings fields. The MCP server registry exists in the service layer, but the current GUI does not expose a Settings editor for it yet.
 
 ---
 
@@ -186,8 +195,8 @@ Read-only browser over every Run, Branch, Step, Approval, and Artifact. **FTS5 s
 
 When a Reaper Drone has `workspace_id` set, the CLI runs with `cwd=<repo_path>` so its built-in tools operate against the project. Two ways to get there:
 
-1. **Clone from a git URL** â€” Chat tab â†’ Clone from gitâ€¦, or Canvas palette â†’ Cloneâ€¦. Runs `git clone --quiet [-b <branch>] [--depth N] -- <url> <dest>` into `<data_dir>/clones/<sanitized-name>`. URLs starting with `-` and containing control chars are rejected; pre-existing dest paths are refused; half-finished clones are cleaned up on failure; 5-minute timeout.
-2. **Register an existing local repo** â€” Add repoâ€¦ picks a directory and runs `WorktreeManager.register_workspace`, which validates the path is a working tree (not a bare repo) and that no `agent/*` branches exist yet (so the worktree namespace is clean).
+1. **Register an existing local repo** â€” the first-run wizard and the Settings page both call `workspaces.register` on a picked directory. The service validates the path is a working tree (not a bare repo) and that no `agent/*` branches exist yet, so the worktree namespace is clean.
+2. **Clone into a workspace** â€” the service also has `workspaces.clone`, but the current GUI does not expose a dedicated clone dialog yet.
 
 Once bound, every send to that Agent:
 
@@ -196,22 +205,11 @@ Once bound, every send to that Agent:
   - Names the workspace and the **current branch**.
   - Tells the model not to push / force / `rm -rf` without explicit go-ahead, to prefer small reviewable diffs, and to run `git status` / `git diff` before non-trivial changes.
   - Inlines the **first project-convention file** found at the repo root: `CLAUDE.md` â†’ `AGENTS.md` â†’ `GEMINI.md` â†’ `.cursorrules` â†’ `.cursor/rules.md`. Capped at 8 KB with a truncation marker. Symlinks pointing outside the repo are refused.
-- The canvas chat dialog refreshes the **live git status banner** after the send, so you see what changed.
-
-The **Switch branch** button calls `workspaces.switch_branch` (`git switch [-c] -- <branch>`). Branch names starting with `-` or containing whitespace are rejected; the `--` separator is belt-and-braces.
+- The Drones tab shows a workspace banner when bound and exposes an **Edit references** control for peer context. The current canvas mini-dialog is message-only and does not expose branch switching, live git status, attachments, or per-turn references.
 
 ### Attachments (images + spreadsheets)
 
-Operators drag-drop or paperclip files into the Chat tab or canvas chat dialog. Supported:
-
-- **Images:** `.png` `.jpg` `.jpeg` `.gif` `.webp` â€” passed through to the CLI as `@<path>` references the model can `Read`. With Pillow installed, oversized images are downscaled to 1600 px on the long edge (JPEG re-encoded at quality 85). `MAX_IMAGE_PIXELS = 50,000,000` guards against decompression bombs. GIFs are passed through unchanged to preserve animation.
-- **Spreadsheets:** `.xlsx` `.xls` `.csv` â€” rendered to one fenced markdown table per sheet, **once at upload time**, capped at 200 rows Ã— 30 cols per sheet with truncation markers. Subsequent sends reuse the cached `rendered_text` so we don't re-parse. `openpyxl` for `.xlsx`, `xlrd` for `.xls` (with `release_resources()` so the file isn't held mmap-open on Windows). Missing optional dep falls back to embedding raw bytes with a "could not render" warning.
-
-**Hard 25 MB upload cap** â€” pre-checked at the GUI before reading + base64-encoding (which run in `asyncio.to_thread` so a big file doesn't freeze the event loop), and re-checked at the RPC. **Sanitized filename** rejects whitespace / `@` / `\n\r\t` so the `@<path>` token can't break the CLI's prompt tokenizer or smuggle in extra files. The data dir's path is also checked for whitespace at upload time for the same reason.
-
-**Storage layout:** `<data_dir>/attachments/<agent_id>/<id>__<sanitized_name>`. Schema in `apps/service/store/schema.sql` under `CREATE TABLE attachments` with `ON DELETE CASCADE` on `agent_id`. **Cross-agent auth** â€” every `attachments.delete`, `.list`, and the internal `update_attachment_turn` require the `agent_id` and refuse to act on rows that don't belong to it.
-
-When a Reaper Drone references another Agent (see below), the referencing Agent's prompt also gets the referenced Agent's spreadsheet `rendered_text` inlined (capped 100 KB total across all references). Image attachments don't transfer through references â€” re-attach them if the new Agent needs to see them.
+The backend still has attachment storage and rendering RPCs, and the Limits tab shows attachment usage, but the current GUI does not expose a dedicated upload flow on the Drones tab or the canvas mini-dialog yet.
 
 The **Limits â†’ Attachment storage** card surfaces total disk usage broken down by agent.
 
@@ -220,8 +218,7 @@ The **Limits â†’ Attachment storage** card surfaces total disk usage broken
 Reaper Drones from independent contexts can "talk" to each other when linked by the operator. Each referenced unit's full conversation history is injected into the agent's system prompt as read-only context. This is cross-provider safe: a Gemini-CLI Agent reading a Claude-CLI Agent's transcript just sees plain text.
 
 Established via:
-- **Standalone:** "Edit references" button in the Drones or Agents chat pane.
-- **Canvas:** Drawing a non-directional edge between two drone nodes.
+- **Standalone:** "Edit references" button in the Drones / Agents tab.
 
 Peer history is capped at 20,000 characters to prevent blowing the context window while still providing deep shared memory.
 
@@ -376,7 +373,7 @@ All under `127.0.0.1:8765`, JSON-RPC body, `Authorization: Bearer <token>`. Stre
 
 ### Cards / Templates / Runs / Branches
 
-`cards.list`, `templates.render`, `templates.get`, `runs.list`, `runs.dispatch`, `runs.approve`, `runs.reject`, `runs.cancel`, `runs.replay`, `runs.consensus`, `runs.select_consensus_winner`, `runs.approve_plan`, `runs.artifacts`.
+`cards.list`, `templates.render`, `templates.get`, `template_graphs.list`, `template_graphs.get`, `template_graphs.create`, `template_graphs.update`, `template_graphs.delete`, `template_graphs.duplicate`, `template_graphs.validate`, `template_graphs.export_mermaid`, `template_graphs.deploy`, `runs.list`, `runs.dispatch`, `runs.approve`, `runs.reject`, `runs.cancel`, `runs.replay`, `runs.consensus`, `runs.select_consensus_winner`, `runs.approve_plan`, `runs.artifacts`.
 
 ### Flows
 

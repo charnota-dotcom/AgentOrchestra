@@ -10,8 +10,9 @@ need Qt.  The class is constructed lazily.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -30,6 +31,7 @@ from apps.gui.windows.live import LivePage
 from apps.gui.windows.review import ReviewPage
 from apps.gui.windows.settings import SettingsPage
 from apps.gui.windows.skills import SkillsPage
+from apps.gui.windows.templates import TemplateBuilderPage
 
 if TYPE_CHECKING:
     from apps.gui.ipc.client import RpcClient
@@ -65,6 +67,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas = CanvasPage(self.client)
         self.analytics = AnalyticsPage(self.client)
         self.blueprints = BlueprintsPage(self.client)
+        self.templates = TemplateBuilderPage(self.client)
         self.skills = SkillsPage(self.client)
         self.drones = DronesPage(self.client, sse=self.sse, provider_mode="manual")
         self.agents = DronesPage(self.client, sse=self.sse, provider_mode="autonomous")
@@ -80,9 +83,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.addWidget(self.analytics)  # 7
         self.stack.addWidget(self.limits)  # 8
         self.stack.addWidget(self.blueprints)  # 9
-        self.stack.addWidget(self.skills)  # 10
-        self.stack.addWidget(self.drones)  # 11
-        self.stack.addWidget(self.agents)  # 12
+        self.stack.addWidget(self.templates)  # 10
+        self.stack.addWidget(self.skills)  # 11
+        self.stack.addWidget(self.drones)  # 12
+        self.stack.addWidget(self.agents)  # 13
 
         self.setCentralWidget(central)
 
@@ -90,6 +94,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.composer.dispatched.connect(self._on_dispatched)
         self.live.review_requested.connect(self._on_review_requested)
         self.review.closed.connect(lambda: self._switch_to(0))
+        self.templates.library_changed.connect(self._on_template_library_changed)  # type: ignore[arg-type]
 
         self._wire_navigation()
         self.stack.setCurrentIndex(0)
@@ -144,6 +149,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "Drones",
             "Agents",
             "Blueprints",
+            "Templates",
             "Skills",
             "Compose",
             "Canvas",
@@ -185,20 +191,21 @@ class MainWindow(QtWidgets.QMainWindow):
         return rail
 
     # Map rail button index -> stack widget index.
-    # Home → 0, Drones → 11, Agents → 12, Blueprints → 9, Skills → 10,
+    # Home → 0, Drones → 12, Agents → 13, Blueprints → 9, Templates → 10, Skills → 11,
     # Compose → 1, Canvas → 6, Analytics → 7, History → 4, Limits → 8, Settings → 5
     _NAV_TO_STACK = {
         0: 0,
-        1: 11,
-        2: 12,
+        1: 12,
+        2: 13,
         3: 9,
         4: 10,
-        5: 1,
-        6: 6,
-        7: 7,
-        8: 4,
-        9: 8,
-        10: 5,
+        5: 11,
+        6: 1,
+        7: 6,
+        8: 7,
+        9: 4,
+        10: 8,
+        11: 5,
     }
 
     def _wire_navigation(self) -> None:
@@ -214,3 +221,6 @@ class MainWindow(QtWidgets.QMainWindow):
         for i, btn in enumerate(self._nav_buttons):
             btn.setChecked(i == rail_idx)
         self.stack.setCurrentIndex(stack_idx)
+
+    def _on_template_library_changed(self) -> None:
+        asyncio.ensure_future(self.canvas.palette_panel.reload_templates())

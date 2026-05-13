@@ -43,6 +43,7 @@ class _ParsedTemplate:
 
 
 def _parse_frontmatter(text: str) -> _ParsedTemplate:
+    text = text.removeprefix("\ufeff")
     m = _FRONTMATTER_RE.match(text)
     if not m:
         return _ParsedTemplate(metadata={}, body=text)
@@ -70,7 +71,7 @@ def _parse_yaml_subset(text: str) -> dict[str, Any]:
                 # block: either list or mapping
                 items: list[Any] = []
                 i += 1
-                while i < len(lines) and lines[i].startswith("  "):
+                while i < len(lines) and lines[i].startswith(" "):
                     if lines[i].lstrip().startswith("- "):
                         # start a new item
                         item: dict[str, Any] = {}
@@ -81,7 +82,7 @@ def _parse_yaml_subset(text: str) -> dict[str, Any]:
                         i += 1
                         while (
                             i < len(lines)
-                            and lines[i].startswith("    ")
+                            and lines[i].startswith(" ")
                             and not lines[i].lstrip().startswith("- ")
                         ):
                             sub = lines[i].lstrip()
@@ -161,7 +162,7 @@ def parse_template(text: str) -> InstructionTemplate:
 
 
 def load_template(path: Path) -> InstructionTemplate:
-    return parse_template(path.read_text(encoding="utf-8"))
+    return parse_template(path.read_text(encoding="utf-8-sig"))
 
 
 def render(template: InstructionTemplate, variables: dict[str, Any]) -> str:

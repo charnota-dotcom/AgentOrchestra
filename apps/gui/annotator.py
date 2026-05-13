@@ -54,7 +54,6 @@ def _discover_library() -> None:
     here = Path(__file__).resolve().parent
     search_paths = [
         here.parents[2] / "Annotator" / "pyside6_annotator_pkg",  # Sibling of AgentOrchestra/
-        Path(r"C:\Users\konst\OneDrive\Documents\GitHub\Annotator\pyside6_annotator_pkg"),
     ]
 
     for path in search_paths:

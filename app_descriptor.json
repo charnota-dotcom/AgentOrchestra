@@ -1,0 +1,56 @@
+{
+  "id": "agentorchestra",
+  "name": "AgentOrchestra",
+  "description": "Agent orchestration platform for Claude and Gemini.",
+  "commands": [
+    {
+      "id": "start",
+      "label": "Start AgentOrchestra",
+      "file": "scripts/start.cmd",
+      "summary": "Verify CLIs and launch the GUI.",
+      "step": 1
+    },
+    {
+      "id": "launch",
+      "label": "Direct Launch (No Checks)",
+      "file": "scripts/launch.cmd",
+      "summary": "Skip CLI verification and launch the GUI directly.",
+      "step": 0
+    },
+    {
+      "id": "restart",
+      "label": "Restart",
+      "file": "scripts/restart.cmd",
+      "summary": "Stop everything and launch a fresh GUI.",
+      "step": 0
+    },
+    {
+      "id": "update-restart",
+      "label": "Update + Restart",
+      "file": "scripts/update-restart.cmd",
+      "summary": "Git pull, refresh deps, and restart.",
+      "step": 0
+    },
+    {
+      "id": "setup",
+      "label": "Setup / Install",
+      "file": "scripts/setup.cmd",
+      "summary": "Create venv and install dependencies.",
+      "step": 2
+    },
+    {
+      "id": "stop",
+      "label": "Stop All",
+      "file": "scripts/stop.cmd",
+      "summary": "Kill the GUI and any background services.",
+      "step": 0
+    },
+    {
+      "id": "doctor",
+      "label": "Diagnostic (Doctor)",
+      "file": "scripts/doctor.cmd",
+      "summary": "Run health checks and print report.",
+      "step": 3
+    }
+  ]
+}

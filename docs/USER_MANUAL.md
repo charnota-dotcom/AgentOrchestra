@@ -26,7 +26,20 @@ When filling in the blueprint:
 
 ---
 
-## 2. Manage skills
+## 2. Build graph templates
+
+Go to the **Templates** tab to build reusable agent-team flow graphs.
+
+- Add Start, Decision, Agent, Command, Note, and End nodes.
+- Wire edges between nodes and use the inspector to edit labels and deployment mapping.
+- Validate before saving if you want blocking errors and warnings separated.
+- Publish a template to show it in the Canvas sidebar, then drag it onto the canvas to deploy native-looking nodes and links.
+
+Graph templates are separate from instruction templates. The `templates` tab in older docs refers to instruction-template text rendering; the new graph builder uses `template_graphs.*`.
+
+---
+
+## 3. Manage skills
 
 Go to the **Skills** tab to create, edit, or remove reusable skill templates.
 
@@ -35,7 +48,7 @@ same instruction snippets wherever they are deployed.
 
 ---
 
-## 3. Deploy and run
+## 4. Deploy and run
 
 Go to the **FPV Drones** or **Reaper Drones** tab and deploy from a blueprint.
 
@@ -45,7 +58,7 @@ Go to the **FPV Drones** or **Reaper Drones** tab and deploy from a blueprint.
 
 ---
 
-## 4. Use the canvas
+## 5. Use the canvas
 
 The **Canvas** is where you connect FPV Drones, Reaper Drones, and Staging Areas.
 
@@ -56,7 +69,7 @@ The **Canvas** is where you connect FPV Drones, Reaper Drones, and Staging Areas
 
 ---
 
-## 5. How they behave
+## 6. How they behave
 
 - An **FPV Drone** gives you a prompt or transcript to paste into a browser.
 - A **Reaper Drone** runs the task directly and streams its output as it works.

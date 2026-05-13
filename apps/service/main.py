@@ -43,8 +43,14 @@ from apps.service.providers.registry import known_providers
 from apps.service.secrets.keyring_store import hook_token
 from apps.service.store.events import EventStore
 from apps.service.templates.engine import render
+from apps.service.templates.deployment import (
+    deploy_template_graph,
+    export_mermaid,
+    validate_template_graph,
+)
 from apps.service.tokens import context_window, estimate_action_total, estimate_tokens
 from apps.service.types import (
+    AgentTemplate,
     Artifact,
     ArtifactKind,
     BlueprintVersionConflict,
@@ -56,6 +62,7 @@ from apps.service.types import (
     EventSource,
     Flow,
     Instruction,
+    TemplateDeploymentSettings,
     long_id,
     utc_now,
 )
@@ -716,6 +723,121 @@ class Handlers:
                 for v in template.variables
             ],
         }
+
+    def _coerce_graph_template(self, params: dict[str, Any]) -> AgentTemplate:
+        raw = params.get("template")
+        if raw is None:
+            raw = params
+        if not isinstance(raw, dict):
+            raise ValueError("template payload required")
+        payload = dict(raw)
+        payload.setdefault("name", "Untitled template")
+        payload.setdefault("description", "")
+        payload.setdefault("category", "general")
+        payload.setdefault("tags", [])
+        payload.setdefault("nodes", [])
+        payload.setdefault("edges", [])
+        return AgentTemplate.model_validate(payload)
+
+    async def template_graphs_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        templates = await self.store.list_template_graphs()
+        return [t.model_dump(mode="json") for t in templates]
+
+    async def template_graphs_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        template = await self.store.get_template_graph(params["template_id"])
+        if not template:
+            raise ValueError(f"unknown template graph: {params['template_id']}")
+        return template.model_dump(mode="json")
+
+    async def template_graphs_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        template = self._coerce_graph_template(params)
+        template.version = 1
+        template.created_at = utc_now()
+        template.updated_at = template.created_at
+        await self.store.insert_template_graph(template)
+        return template.model_dump(mode="json")
+
+    async def template_graphs_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        template = await self.store.get_template_graph(params["template_id"])
+        if not template:
+            raise ValueError(f"unknown template graph: {params['template_id']}")
+        if "name" in params:
+            template.name = params.get("name") or "Untitled template"
+        if "description" in params:
+            template.description = params.get("description") or ""
+        if "category" in params:
+            template.category = params.get("category") or "general"
+        if "icon" in params:
+            template.icon = params.get("icon") or None
+        if "tags" in params:
+            template.tags = [str(t) for t in (params.get("tags") or []) if str(t).strip()]
+        if "nodes" in params:
+            template.nodes = params.get("nodes") or []
+        if "edges" in params:
+            template.edges = params.get("edges") or []
+        if "published" in params:
+            template.published = bool(params.get("published"))
+        template.updated_at = utc_now()
+        try:
+            await self.store.update_template_graph(
+                template, expected_version=params.get("expected_version")
+            )
+        except Exception as exc:
+            raise ValueError(str(exc)) from exc
+        return template.model_dump(mode="json")
+
+    async def template_graphs_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        ok = await self.store.delete_template_graph(params["template_id"])
+        return {"deleted": bool(ok)}
+
+    async def template_graphs_duplicate(self, params: dict[str, Any]) -> dict[str, Any]:
+        dup = await self.store.duplicate_template_graph(
+            params["template_id"], name=params.get("name")
+        )
+        if dup is None:
+            raise ValueError(f"unknown template graph: {params['template_id']}")
+        return dup.model_dump(mode="json")
+
+    async def template_graphs_validate(self, params: dict[str, Any]) -> dict[str, Any]:
+        template = (
+            await self.store.get_template_graph(params["template_id"])
+            if params.get("template_id")
+            else self._coerce_graph_template(params)
+        )
+        if template is None:
+            raise ValueError(f"unknown template graph: {params.get('template_id')}")
+        result = validate_template_graph(template)
+        return result.model_dump(mode="json")
+
+    async def template_graphs_export_mermaid(self, params: dict[str, Any]) -> dict[str, Any]:
+        template = (
+            await self.store.get_template_graph(params["template_id"])
+            if params.get("template_id")
+            else self._coerce_graph_template(params)
+        )
+        if template is None:
+            raise ValueError(f"unknown template graph: {params.get('template_id')}")
+        return {"template_id": template.id, "mermaid": export_mermaid(template)}
+
+    async def template_graphs_deploy(self, params: dict[str, Any]) -> dict[str, Any]:
+        template = (
+            await self.store.get_template_graph(params["template_id"])
+            if params.get("template_id")
+            else self._coerce_graph_template(params)
+        )
+        if template is None:
+            raise ValueError(f"unknown template graph: {params.get('template_id')}")
+        settings = TemplateDeploymentSettings(
+            template_id=template.id,
+            template_version=params.get("template_version") or template.version,
+            drop_x=float(params.get("drop_x", 0.0) or 0.0),
+            drop_y=float(params.get("drop_y", 0.0) or 0.0),
+            group_label=params.get("group_label") or None,
+            snap_to_grid=bool(params.get("snap_to_grid", True)),
+            name_override=params.get("name_override") or None,
+        )
+        result = deploy_template_graph(template, settings)
+        return result.model_dump(mode="json")
 
     async def runs_dispatch(self, params: dict[str, Any]) -> dict[str, Any]:
         run = await self.dispatcher.dispatch(
@@ -2104,6 +2226,15 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("cost.forecast", h.cost_forecast)
     server.register("templates.render", h.render_template)
     server.register("templates.get", h.templates_get)
+    server.register("template_graphs.list", h.template_graphs_list)
+    server.register("template_graphs.get", h.template_graphs_get)
+    server.register("template_graphs.create", h.template_graphs_create)
+    server.register("template_graphs.update", h.template_graphs_update)
+    server.register("template_graphs.delete", h.template_graphs_delete)
+    server.register("template_graphs.duplicate", h.template_graphs_duplicate)
+    server.register("template_graphs.validate", h.template_graphs_validate)
+    server.register("template_graphs.export_mermaid", h.template_graphs_export_mermaid)
+    server.register("template_graphs.deploy", h.template_graphs_deploy)
     server.register("flows.list", h.flows_list)
     server.register("flows.get", h.flows_get)
     server.register("flows.create", h.flows_create)

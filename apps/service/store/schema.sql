@@ -31,6 +31,23 @@ CREATE TABLE IF NOT EXISTS templates (
     UNIQUE(archetype, version)
 );
 
+CREATE TABLE IF NOT EXISTS template_graphs (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    category     TEXT NOT NULL DEFAULT 'general',
+    icon         TEXT,
+    tags         TEXT NOT NULL DEFAULT '[]',
+    payload      TEXT NOT NULL,                -- JSON
+    published    INTEGER NOT NULL DEFAULT 0,
+    version      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_template_graphs_updated
+    ON template_graphs(updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS cards (
     id                       TEXT PRIMARY KEY,
     name                     TEXT NOT NULL,

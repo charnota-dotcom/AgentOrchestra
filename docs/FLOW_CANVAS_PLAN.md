@@ -8,6 +8,10 @@
 > metadata the executor doesn't need to read.  Treat this document as
 > the design rationale; the README's Canvas section is the current
 > operator-facing description.
+>
+> Update 2026-05: graph templates now live in the separate `Templates`
+> tab and deploy onto the existing Canvas. This document still describes
+> the Flow Canvas itself; it does not describe the graph-template editor.
 
 A visual, zoomable, drag-and-drop orchestration canvas for AgentOrchestra.
 

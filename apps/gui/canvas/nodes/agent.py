@@ -46,5 +46,6 @@ class AgentNode(BaseNode):
             "x": pos.x(),
             "y": pos.y(),
             "card_id": self.card.get("id"),
+            "card": self.card,
             "params": {"goal": self.goal_override} if self.goal_override else {},
         }

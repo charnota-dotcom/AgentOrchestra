@@ -25,18 +25,28 @@ class SkillsPage(QtWidgets.QWidget):
         self.client = client
         self._skills: list[dict[str, Any]] = []
         self._current: dict[str, Any] | None = None
+        self.setStyleSheet("background:#fafbfc;")
 
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        main_layout = QtWidgets.QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # 1. Sidebar (List of templates)
+        self.splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(6)
+        self.splitter.setStyleSheet("QSplitter::handle{background:#e6e7eb;}")
+        main_layout.addWidget(self.splitter)
+
+        # 1. Sidebar (Skills list)
         self.sidebar = self._build_sidebar()
-        layout.addWidget(self.sidebar)
+        self.splitter.addWidget(self.sidebar)
 
         # 2. Main content (Editor form)
         self.editor = self._build_editor()
-        layout.addWidget(self.editor, stretch=1)
+        self.editor.setMinimumWidth(50)
+        self.splitter.addWidget(self.editor)
+
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
 
         # Initial load.
         QtCore.QTimer.singleShot(0, lambda: asyncio.ensure_future(self._reload()))
@@ -47,10 +57,9 @@ class SkillsPage(QtWidgets.QWidget):
 
     def _build_sidebar(self) -> QtWidgets.QWidget:
         wrap = QtWidgets.QFrame()
-        wrap.setMinimumWidth(200)
-        wrap.setMaximumWidth(280)
+        wrap.setMinimumWidth(50)
         wrap.setStyleSheet("background:#f6f8fa; border-right:1px solid #d0d3d9;")
-        
+
         v = QtWidgets.QVBoxLayout(wrap)
         v.setContentsMargins(12, 16, 12, 12)
         v.setSpacing(12)

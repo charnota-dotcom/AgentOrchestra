@@ -175,6 +175,128 @@ class InstructionTemplate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Graph templates
+# ---------------------------------------------------------------------------
+
+
+class TemplateCardMapping(BaseModel):
+    """Canvas-card payload used when a template node deploys to the canvas.
+
+    The mapping intentionally stays lightweight: enough to produce a native
+    looking card using the existing node classes, but not a second card model.
+    """
+
+    canvas_type: Literal[
+        "trigger",
+        "branch",
+        "merge",
+        "human",
+        "output",
+        "reaper",
+        "fpv_drone",
+        "staging_area",
+        "ugv",
+        "data_prep",
+        "integration_action",
+    ] = "reaper"
+    name: str = ""
+    description: str = ""
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-4-5"
+    role: str = "worker"
+    subtitle: str | None = None
+    body: str | None = None
+    command: str | None = None
+
+
+class TemplateNode(BaseModel):
+    id: str = Field(default_factory=long_id)
+    type: str
+    title: str
+    body: str = ""
+    summary: str = ""
+    subtitle: str = ""
+    x: float = 0.0
+    y: float = 0.0
+    params: dict[str, Any] = Field(default_factory=dict)
+    card_mapping: TemplateCardMapping | None = None
+    agent_role: str | None = None
+    instruction: str | None = None
+    command: str | None = None
+
+
+class TemplateEdge(BaseModel):
+    id: str = Field(default_factory=long_id)
+    from_node: str
+    from_port: str = ""
+    to_node: str
+    to_port: str = ""
+    label: str = ""
+    directional: bool = True
+
+
+class AgentTemplate(BaseModel):
+    """Reusable graph template that can be deployed onto the canvas."""
+
+    id: str = Field(default_factory=long_id)
+    name: str
+    description: str = ""
+    category: str = "general"
+    icon: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    nodes: list[TemplateNode] = Field(default_factory=list)
+    edges: list[TemplateEdge] = Field(default_factory=list)
+    published: bool = False
+    version: int = 1
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class TemplateDeploymentSettings(BaseModel):
+    template_id: str
+    template_version: int | None = None
+    drop_x: float = 0.0
+    drop_y: float = 0.0
+    group_label: str | None = None
+    snap_to_grid: bool = True
+    name_override: str | None = None
+
+
+class TemplateDeploymentResult(BaseModel):
+    template_id: str
+    template_version: int
+    deployed_group_id: str
+    created_node_ids: list[str] = Field(default_factory=list)
+    created_edge_ids: list[str] = Field(default_factory=list)
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class TemplateValidationSeverity(StrEnum):
+    ERROR = "error"
+    WARNING = "warning"
+
+
+class TemplateValidationIssue(BaseModel):
+    code: str
+    severity: TemplateValidationSeverity = TemplateValidationSeverity.WARNING
+    message: str
+    node_id: str | None = None
+    edge_id: str | None = None
+    field: str | None = None
+
+
+class TemplateValidationResult(BaseModel):
+    template_id: str | None = None
+    template_version: int | None = None
+    valid: bool = True
+    errors: list[TemplateValidationIssue] = Field(default_factory=list)
+    warnings: list[TemplateValidationIssue] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Instruction (a concrete rendering)
 # ---------------------------------------------------------------------------
 

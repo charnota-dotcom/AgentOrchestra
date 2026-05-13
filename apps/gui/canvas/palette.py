@@ -106,6 +106,11 @@ class PalettePanel(QtWidgets.QWidget):
         self.cards_list.setStyleSheet(self._list_stylesheet())
         layout.addWidget(self.cards_list, stretch=1)
 
+        layout.addWidget(self._section_header("Templates"))
+        self.templates_list = _DragList()
+        self.templates_list.setStyleSheet(self._list_stylesheet())
+        layout.addWidget(self.templates_list, stretch=1)
+
         layout.addWidget(self._section_header("Staging"))
         self.staging_list = _DragList()
         self.staging_list.setStyleSheet(self._list_stylesheet())
@@ -144,7 +149,7 @@ class PalettePanel(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0, lambda: asyncio.ensure_future(self._reload_all()))
 
     async def _reload_all(self) -> None:
-        await asyncio.gather(self.reload_cards(), self.reload_drones())
+        await asyncio.gather(self.reload_cards(), self.reload_drones(), self.reload_templates())
 
     # Deploy a drone action from a blueprint, without leaving the
     # canvas.  Mirrors the Drones tab's Deploy dialog so the canvas
@@ -332,6 +337,38 @@ class PalettePanel(QtWidgets.QWidget):
                 {"kind": "drone_action", "action": a},
             )
             self.drones_list.addItem(item)
+
+    async def reload_templates(self) -> None:
+        try:
+            templates = await self.client.call("template_graphs.list", {})
+        except Exception:
+            templates = []
+        self.templates_list.clear()
+        for template in templates:
+            if not template.get("published", False):
+                continue
+            node_count = len(template.get("nodes") or [])
+            edge_count = len(template.get("edges") or [])
+            tags = ", ".join(template.get("tags") or [])
+            meta = f"{template.get('category', 'general')}  ·  {node_count} nodes / {edge_count} links"
+            if tags:
+                meta += f"  ·  {tags}"
+            item = QtWidgets.QListWidgetItem(f"{template.get('name', '?')}\nPublished  ·  {meta}")
+            item.setData(
+                QtCore.Qt.ItemDataRole.UserRole,
+                {
+                    "kind": "template_graph",
+                    "template_id": template["id"],
+                    "template_version": template.get("version", 1),
+                    "name": template.get("name", ""),
+                    "preview": {
+                        "category": template.get("category", ""),
+                        "tags": template.get("tags", []),
+                        "description": template.get("description", ""),
+                    },
+                },
+            )
+            self.templates_list.addItem(item)
 
     @staticmethod
     def _section_header(text: str) -> QtWidgets.QLabel:

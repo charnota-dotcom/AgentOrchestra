@@ -4,6 +4,7 @@
 
 - The current product vocabulary now uses **FPV Drone**, **Reaper Drone**, and **Staging Area**.
 - Legacy labels remain documented only where they matter for compatibility or historical accuracy.
+- Added a dedicated **Templates** tab for graph templates, with JSON-backed CRUD, validation, Mermaid export, and canvas deployment.
 
 ## Phase 7 - FPV Drones, Reaper Drones & Stability (2026-05)
 

@@ -1,4 +1,4 @@
-﻿---
+---
 name: Broad Research
 archetype: broad-research
 version: 1
@@ -7,7 +7,7 @@ variables:
     label: Goal
     kind: text
     required: true
-    help: One sentence â€” what should the Reaper Drone find out?
+    help: One sentence — what should the Reaper Drone find out?
   - name: scope_hours
     label: Time budget (hours, Reaper Drone-side)
     kind: number
