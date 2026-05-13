@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS runs (
     completed_at        TEXT,
     cost_usd            REAL NOT NULL DEFAULT 0,
     cost_tokens         INTEGER NOT NULL DEFAULT 0,
+    last_plan_turn      INTEGER,
     error               TEXT
 );
 
@@ -290,6 +291,8 @@ CREATE TABLE IF NOT EXISTS drone_actions (
     -- routed to this drone only if their clipboard SourceURL matches.
     -- NULL until first paste; nullable for all other providers.
     bound_chat_url                    TEXT,
+    is_hallucination                  INTEGER NOT NULL DEFAULT 0,
+    plan_latency                      INTEGER NOT NULL DEFAULT 0,
     created_at                        TEXT NOT NULL,
     updated_at                        TEXT NOT NULL
 );

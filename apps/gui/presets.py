@@ -89,19 +89,30 @@ MODE_IMAGE = "Image prompt"
 # --- Provider/Model Source of Truth ----------------------------------------
 
 # Subset of providers we currently route to.
-PROVIDERS: tuple[str, ...] = ("claude-cli", "gemini-cli", "browser")
+PROVIDERS: tuple[str, ...] = ("claude-cli", "gemini-cli", "codex-cli", "browser")
 
 # Canonical model IDs for each provider.  Used by the Blueprints editor
 # and creation dialogs to ensure only valid models are selectable.
 PROVIDER_MODELS: dict[str, tuple[str, ...]] = {
     "claude-cli": ("claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"),
-    "gemini-cli": ("gemini-2.5-pro", "gemini-2.5-flash"),
+    "gemini-cli": (
+        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+    ),
+    "codex-cli": ("gpt-5.3-codex", "gpt-5.2-codex", "gpt-5-codex", "codex-mini-latest"),
     "browser": (
         "claude-sonnet-4-6",
         "claude-opus-4-7",
         "claude-haiku-4-5",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
+        "gpt-5.3-codex",
+        "gpt-5.2-codex",
+        "gpt-5-codex",
+        "codex-mini-latest",
     ),
 }
 
@@ -120,18 +131,29 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
     ModelPreset("Claude Haiku 4.5", "claude-cli", "claude-haiku-4-5", MODE_CODING, ""),
     ModelPreset("Gemini 2.5 Pro", "gemini-cli", "gemini-2.5-pro", MODE_CODING, ""),
     ModelPreset("Gemini 2.5 Flash", "gemini-cli", "gemini-2.5-flash", MODE_CODING, ""),
+    ModelPreset("Gemini 3 Pro (Preview)", "gemini-cli", "gemini-3-pro-preview", MODE_CODING, ""),
+    ModelPreset(
+        "Gemini 3 Flash (Preview)", "gemini-cli", "gemini-3-flash-preview", MODE_CODING, ""
+    ),
+    ModelPreset("GPT-5.3 Codex", "codex-cli", "gpt-5.3-codex", MODE_CODING, ""),
+    ModelPreset("GPT-5.2 Codex", "codex-cli", "gpt-5.2-codex", MODE_CODING, ""),
+    ModelPreset("GPT-5 Codex", "codex-cli", "gpt-5-codex", MODE_CODING, ""),
+    ModelPreset("Codex Mini Latest", "codex-cli", "codex-mini-latest", MODE_CODING, ""),
     # --- General chat ------------------------------------------------
     ModelPreset(
         "Claude Sonnet 4.6", "claude-cli", "claude-sonnet-4-6", MODE_GENERAL, _MODE_GENERAL
     ),
     ModelPreset("Claude Opus 4.7", "claude-cli", "claude-opus-4-7", MODE_GENERAL, _MODE_GENERAL),
     ModelPreset("Gemini 2.5 Pro", "gemini-cli", "gemini-2.5-pro", MODE_GENERAL, _MODE_GENERAL),
+    ModelPreset("GPT-5.3 Codex", "codex-cli", "gpt-5.3-codex", MODE_GENERAL, _MODE_GENERAL),
     # --- File / artifact ---------------------------------------------
     ModelPreset("Claude Sonnet 4.6", "claude-cli", "claude-sonnet-4-6", MODE_FILE, _MODE_FILE),
     ModelPreset("Gemini 2.5 Pro", "gemini-cli", "gemini-2.5-pro", MODE_FILE, _MODE_FILE),
+    ModelPreset("GPT-5.3 Codex", "codex-cli", "gpt-5.3-codex", MODE_FILE, _MODE_FILE),
     # --- Image prompt ------------------------------------------------
     ModelPreset("Claude Sonnet 4.6", "claude-cli", "claude-sonnet-4-6", MODE_IMAGE, _MODE_IMAGE),
     ModelPreset("Gemini 2.5 Pro", "gemini-cli", "gemini-2.5-pro", MODE_IMAGE, _MODE_IMAGE),
+    ModelPreset("GPT-5.3 Codex", "codex-cli", "gpt-5.3-codex", MODE_IMAGE, _MODE_IMAGE),
 )
 
 

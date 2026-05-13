@@ -35,7 +35,7 @@ class Edge(QtWidgets.QGraphicsPathItem):
         target: Port,
         *,
         label: str = "",
-        directional: bool = False,
+        directional: bool = True,
     ) -> None:
         super().__init__()
         self.source: Port | None = source

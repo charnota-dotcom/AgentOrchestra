@@ -566,8 +566,8 @@ class BlueprintsPage(QtWidgets.QWidget):
         await self._reload()
         self._set_status("Deleted")
 
-    def _new_dialog(self) -> None:
-        dlg = _NewBlueprintDialog(self)
+    def _new_dialog(self, is_agent: bool) -> None:
+        dlg = _NewBlueprintDialog(is_agent, self)
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         params = dlg.params()

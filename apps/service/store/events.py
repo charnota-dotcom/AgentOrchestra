@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import timedelta
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -117,7 +118,12 @@ class EventStore:
         await self._add_column_if_missing("drone_blueprints", "chat_url", "TEXT")
         await self._add_column_if_missing("drone_actions", "bound_chat_url", "TEXT")
         await self._add_column_if_missing("drone_actions", "name", "TEXT")
+        await self._add_column_if_missing(
+            "drone_actions", "is_hallucination", "INTEGER NOT NULL DEFAULT 0"
+        )
+        await self._add_column_if_missing("drone_actions", "plan_latency", "INTEGER NOT NULL DEFAULT 0")
         await self._add_column_if_missing("flows", "is_flight", "INTEGER NOT NULL DEFAULT 0")
+        await self._add_column_if_missing("runs", "last_plan_turn", "INTEGER")
         await self.db.commit()
 
         # Seed initial skills if the table is empty.
@@ -267,15 +273,21 @@ class EventStore:
     async def insert_flow(self, flow: Flow) -> Flow:
         async with self._lock:
             await self.db.execute(
-                "INSERT INTO flows VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO flows VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     flow.id,
                     flow.name,
                     flow.description,
                     json.dumps(
-                        {"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}
+                        {
+                            "nodes": flow.nodes,
+                            "edges": flow.edges,
+                            "is_draft": flow.is_draft,
+                            "is_flight": flow.is_flight,
+                        }
                     ),
                     flow.version,
+                    int(flow.is_flight),
                     flow.created_at.isoformat(),
                     flow.updated_at.isoformat(),
                 ),
@@ -298,7 +310,12 @@ class EventStore:
                         flow.name,
                         flow.description,
                         json.dumps(
-                            {"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}
+                            {
+                                "nodes": flow.nodes,
+                                "edges": flow.edges,
+                                "is_draft": flow.is_draft,
+                                "is_flight": flow.is_flight,
+                            }
                         ),
                         flow.updated_at.isoformat(),
                         flow.id,
@@ -320,7 +337,12 @@ class EventStore:
                         flow.name,
                         flow.description,
                         json.dumps(
-                            {"nodes": flow.nodes, "edges": flow.edges, "is_draft": flow.is_draft}
+                            {
+                                "nodes": flow.nodes,
+                                "edges": flow.edges,
+                                "is_draft": flow.is_draft,
+                                "is_flight": flow.is_flight,
+                            }
                         ),
                         flow.updated_at.isoformat(),
                         flow.id,
@@ -339,6 +361,7 @@ class EventStore:
         d["nodes"] = body.get("nodes", [])
         d["edges"] = body.get("edges", [])
         d["is_draft"] = bool(body.get("is_draft", False))
+        d["is_flight"] = bool(d.get("is_flight", body.get("is_flight", False)))
         return Flow.model_validate(d)
 
     async def list_flows(self) -> list[Flow]:
@@ -351,6 +374,7 @@ class EventStore:
             d["nodes"] = body.get("nodes", [])
             d["edges"] = body.get("edges", [])
             d["is_draft"] = bool(body.get("is_draft", False))
+            d["is_flight"] = bool(d.get("is_flight", body.get("is_flight", False)))
             out.append(Flow.model_validate(d))
         return out
 
@@ -468,8 +492,42 @@ class EventStore:
             await self.db.commit()
         return t
 
+    async def update_template(self, t: InstructionTemplate) -> InstructionTemplate:
+        t.version += 1
+        async with self._lock:
+            await self.db.execute(
+                """
+                UPDATE templates
+                   SET name = ?, body = ?, variables = ?, version = ?,
+                       content_hash = ?
+                 WHERE id = ?
+                """,
+                (
+                    t.name,
+                    t.body,
+                    json.dumps([v.model_dump() for v in t.variables]),
+                    t.version,
+                    t.content_hash,
+                    t.id,
+                ),
+            )
+            await self.db.commit()
+        return t
+
     async def get_template(self, template_id: str) -> InstructionTemplate | None:
         cur = await self.db.execute("SELECT * FROM templates WHERE id = ?", (template_id,))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["variables"] = json.loads(d["variables"])
+        return InstructionTemplate.model_validate(d)
+
+    async def get_template_by_archetype(self, archetype: str) -> InstructionTemplate | None:
+        cur = await self.db.execute(
+            "SELECT * FROM templates WHERE archetype = ? ORDER BY created_at DESC LIMIT 1",
+            (archetype,),
+        )
         row = await cur.fetchone()
         if not row:
             return None
@@ -516,6 +574,49 @@ class EventStore:
             await self.db.commit()
         return c
 
+    async def update_card(self, c: PersonalityCard) -> PersonalityCard:
+        c.updated_at = utc_now()
+        c.version += 1
+        async with self._lock:
+            await self.db.execute(
+                """
+                UPDATE cards
+                   SET name = ?, description = ?, template_id = ?,
+                       provider = ?, model = ?, mode = ?, cost = ?,
+                       blast_radius = ?, sandbox_tier = ?,
+                       tool_allowlist = ?, fallbacks = ?, auto_qa = ?,
+                       requires_plan = ?, stale_minutes = ?,
+                       max_commits_per_run = ?, max_turns = ?,
+                       skip_pre_commit_hooks = ?, version = ?,
+                       updated_at = ?
+                 WHERE id = ?
+                """,
+                (
+                    c.name,
+                    c.description,
+                    c.template_id,
+                    c.provider,
+                    c.model,
+                    c.mode.value,
+                    c.cost.model_dump_json(),
+                    c.blast_radius.model_dump_json(),
+                    c.sandbox_tier.value,
+                    json.dumps(c.tool_allowlist),
+                    json.dumps(c.fallbacks),
+                    int(c.auto_qa),
+                    int(c.requires_plan),
+                    c.stale_minutes,
+                    c.max_commits_per_run,
+                    c.max_turns,
+                    int(c.skip_pre_commit_hooks),
+                    c.version,
+                    c.updated_at.isoformat(),
+                    c.id,
+                ),
+            )
+            await self.db.commit()
+        return c
+
     @staticmethod
     def _hydrate_card(row: aiosqlite.Row) -> PersonalityCard:
         d = dict(row)
@@ -538,6 +639,14 @@ class EventStore:
         cur = await self.db.execute("SELECT * FROM cards ORDER BY archetype, name")
         rows = await cur.fetchall()
         return [self._hydrate_card(r) for r in rows]
+
+    async def get_card_by_archetype(self, archetype: str) -> PersonalityCard | None:
+        cur = await self.db.execute(
+            "SELECT * FROM cards WHERE archetype = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1",
+            (archetype,),
+        )
+        row = await cur.fetchone()
+        return self._hydrate_card(row) if row else None
 
     async def get_card(self, card_id: str) -> PersonalityCard | None:
         cur = await self.db.execute("SELECT * FROM cards WHERE id = ?", (card_id,))
@@ -576,8 +685,8 @@ class EventStore:
                 """
                 INSERT INTO runs (id, workspace_id, card_id, instruction_id,
                     branch_id, state, state_changed_at, created_at,
-                    completed_at, cost_usd, cost_tokens, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    completed_at, cost_usd, cost_tokens, last_plan_turn, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run.id,
@@ -591,6 +700,7 @@ class EventStore:
                     run.completed_at.isoformat() if run.completed_at else None,
                     run.cost_usd,
                     run.cost_tokens,
+                    run.last_plan_turn,
                     run.error,
                 ),
             )
@@ -623,6 +733,251 @@ class EventStore:
             )
         rows = await cur.fetchall()
         return [Run.model_validate(dict(r)) for r in rows]
+
+    async def analytics_summary(
+        self,
+        *,
+        days: int = 7,
+        workspace_id: str | None = None,
+        card_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate run analytics over a rolling time window."""
+        start_iso = (utc_now() - timedelta(days=max(1, days))).isoformat()
+        clauses = ["r.created_at >= ?"]
+        params: list[Any] = [start_iso]
+        if workspace_id:
+            clauses.append("r.workspace_id = ?")
+            params.append(workspace_id)
+        if card_id:
+            clauses.append("r.card_id = ?")
+            params.append(card_id)
+        where = " AND ".join(clauses)
+        cur = await self.db.execute(
+            f"""
+            SELECT r.id, r.created_at, r.state, r.cost_usd, r.cost_tokens, r.last_plan_turn,
+                   c.name AS card_name, c.provider, c.archetype
+              FROM runs r
+              LEFT JOIN cards c ON c.id = r.card_id
+             WHERE {where}
+             ORDER BY r.created_at ASC
+            """,
+            params,
+        )
+        runs = [dict(r) for r in await cur.fetchall()]
+
+        run_ids = [r["id"] for r in runs]
+        diff_chars_by_run: dict[str, int] = {}
+        tool_errors_by_run: dict[str, int] = {}
+        max_step_seq_by_run: dict[str, int] = {}
+        if run_ids:
+            qmarks = ",".join("?" for _ in run_ids)
+            diff_cur = await self.db.execute(
+                f"""
+                SELECT run_id, COALESCE(SUM(LENGTH(body)), 0) AS diff_chars
+                  FROM artifacts
+                 WHERE kind = 'diff' AND run_id IN ({qmarks})
+                 GROUP BY run_id
+                """,
+                run_ids,
+            )
+            for row in await diff_cur.fetchall():
+                diff_chars_by_run[row["run_id"]] = int(row["diff_chars"] or 0)
+
+            step_cur = await self.db.execute(
+                f"""
+                SELECT run_id, seq, payload
+                  FROM steps
+                 WHERE kind = 'tool_call' AND run_id IN ({qmarks})
+                """,
+                run_ids,
+            )
+            for row in await step_cur.fetchall():
+                run_id = row["run_id"]
+                seq = int(row["seq"] or 0)
+                if seq > max_step_seq_by_run.get(run_id, 0):
+                    max_step_seq_by_run[run_id] = seq
+                payload_raw = row["payload"] or "{}"
+                try:
+                    payload = json.loads(payload_raw)
+                except Exception:
+                    payload = {}
+                is_tool_error = False
+                if isinstance(payload, dict):
+                    if payload.get("is_error") is True:
+                        is_tool_error = True
+                    content = payload.get("content")
+                    if isinstance(content, dict) and "error" in content:
+                        is_tool_error = True
+                if is_tool_error:
+                    tool_errors_by_run[run_id] = tool_errors_by_run.get(run_id, 0) + 1
+
+        daily: dict[str, dict[str, float | int]] = {}
+        total_tokens = 0
+        total_diff_chars = 0
+        total_tool_errors = 0
+        total_replan_velocity = 0.0
+        total_cost = 0.0
+        success_count = 0
+        run_rows: list[dict[str, Any]] = []
+        for run in runs:
+            run_id = run["id"]
+            created = str(run.get("created_at") or "")
+            day = created[:10] if len(created) >= 10 else "unknown"
+            tokens = int(run.get("cost_tokens") or 0)
+            diff_chars = int(diff_chars_by_run.get(run_id, 0))
+            tool_errors = int(tool_errors_by_run.get(run_id, 0))
+            max_seq = int(max_step_seq_by_run.get(run_id, 0))
+            last_plan_turn = run.get("last_plan_turn")
+            plan_latency = max(0, max_seq - int(last_plan_turn or 0)) if max_seq > 0 else 0
+            is_hallucination = 1 if tool_errors > 0 else 0
+            replan_velocity = 0.0
+            if isinstance(last_plan_turn, int) and max_seq > 0:
+                replan_velocity = min(1.0, max(0.0, float(last_plan_turn) / float(max_seq)))
+            state = str(run.get("state") or "")
+            success = state in {"reviewing", "merged"}
+            if success:
+                success_count += 1
+            cost_usd = float(run.get("cost_usd") or 0.0)
+            total_cost += cost_usd
+
+            total_tokens += tokens
+            total_diff_chars += diff_chars
+            total_tool_errors += tool_errors
+            total_replan_velocity += replan_velocity
+
+            bucket = daily.setdefault(
+                day,
+                {
+                    "date": day,
+                    "runs": 0,
+                    "tokens": 0,
+                    "diff_chars": 0,
+                    "tool_errors": 0,
+                    "avg_replan_velocity": 0.0,
+                    "cost_usd": 0.0,
+                },
+            )
+            bucket["runs"] = int(bucket["runs"]) + 1
+            bucket["tokens"] = int(bucket["tokens"]) + tokens
+            bucket["diff_chars"] = int(bucket["diff_chars"]) + diff_chars
+            bucket["tool_errors"] = int(bucket["tool_errors"]) + tool_errors
+            bucket["avg_replan_velocity"] = float(bucket["avg_replan_velocity"]) + replan_velocity
+            bucket["cost_usd"] = float(bucket["cost_usd"]) + cost_usd
+
+            run_rows.append(
+                {
+                    "run_id": run_id,
+                    "created_at": created,
+                    "card_name": run.get("card_name"),
+                    "provider": run.get("provider"),
+                    "archetype": run.get("archetype"),
+                    "state": state,
+                    "cost_usd": cost_usd,
+                    "tokens": tokens,
+                    "diff_chars": diff_chars,
+                    "tool_errors": tool_errors,
+                    "is_hallucination": is_hallucination,
+                    "plan_latency": plan_latency,
+                    "replan_velocity": replan_velocity,
+                    "token_efficiency": (float(diff_chars) / float(tokens)) if tokens > 0 else 0.0,
+                }
+            )
+
+        trend: list[dict[str, Any]] = []
+        for day in sorted(daily.keys()):
+            row = daily[day]
+            runs_n = int(row["runs"])
+            tokens_n = int(row["tokens"])
+            diff_n = int(row["diff_chars"])
+            row["avg_replan_velocity"] = (
+                float(row["avg_replan_velocity"]) / float(runs_n) if runs_n > 0 else 0.0
+            )
+            row["token_efficiency"] = (float(diff_n) / float(tokens_n)) if tokens_n > 0 else 0.0
+            trend.append(row)
+
+        run_count = len(runs)
+        token_efficiency = (float(total_diff_chars) / float(total_tokens)) if total_tokens > 0 else 0.0
+        hallucination_rate = (float(total_tool_errors) / float(run_count)) if run_count > 0 else 0.0
+        replan_velocity = (float(total_replan_velocity) / float(run_count)) if run_count > 0 else 0.0
+        cost_per_success = (float(total_cost) / float(success_count)) if success_count > 0 else None
+        return {
+            "window": {"days": int(max(1, days)), "start": start_iso, "end": utc_now().isoformat()},
+            "kpis": {
+                "run_count": run_count,
+                "hallucination_rate": hallucination_rate,
+                "token_efficiency": token_efficiency,
+                "replan_velocity": replan_velocity,
+                "cost_per_success": cost_per_success,
+                "success_count": success_count,
+                "total_cost_usd": total_cost,
+            },
+            "trend": trend,
+            "runs": run_rows,
+        }
+
+    async def analytics_leaderboard(
+        self,
+        *,
+        days: int = 7,
+        group_by: str = "card",
+        min_samples: int = 1,
+    ) -> dict[str, Any]:
+        """Leaderboard by card/provider/archetype over a rolling window."""
+        grouping = group_by if group_by in {"card", "provider", "archetype"} else "card"
+        summary = await self.analytics_summary(days=days)
+        rows = summary["runs"]
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if grouping == "provider":
+                key = str(row.get("provider") or "unknown")
+            elif grouping == "archetype":
+                key = str(row.get("archetype") or "unknown")
+            else:
+                key = str(row.get("card_name") or "unknown")
+            g = grouped.setdefault(
+                key,
+                {
+                    "entity": key,
+                    "sample_size": 0,
+                    "success_count": 0,
+                    "total_cost_usd": 0.0,
+                    "total_tokens": 0,
+                    "total_diff_chars": 0,
+                },
+            )
+            g["sample_size"] += 1
+            if row.get("state") in {"reviewing", "merged"}:
+                g["success_count"] += 1
+            g["total_cost_usd"] += float(row.get("cost_usd") or 0.0)
+            g["total_tokens"] += int(row.get("tokens") or 0)
+            g["total_diff_chars"] += int(row.get("diff_chars") or 0)
+
+        out: list[dict[str, Any]] = []
+        for item in grouped.values():
+            if int(item["sample_size"]) < max(1, min_samples):
+                continue
+            success = int(item["success_count"])
+            tokens = int(item["total_tokens"])
+            item["cost_per_success"] = (
+                float(item["total_cost_usd"]) / float(success) if success > 0 else None
+            )
+            item["token_efficiency"] = (
+                float(item["total_diff_chars"]) / float(tokens) if tokens > 0 else 0.0
+            )
+            out.append(item)
+
+        out.sort(
+            key=lambda r: (
+                r["cost_per_success"] is None,
+                r["cost_per_success"] if r["cost_per_success"] is not None else float("inf"),
+                -int(r["success_count"]),
+            )
+        )
+        return {
+            "window": summary["window"],
+            "group_by": grouping,
+            "rows": out,
+        }
 
     # ------------------------------------------------------------------
     # Branches

@@ -1,4 +1,4 @@
----
+﻿---
 name: Narrow Research
 archetype: narrow-research
 version: 1
@@ -23,7 +23,7 @@ variables:
     required: false
     default: A defensible answer with citations and an explicit list of what is still unknown.
 ---
-You are a Narrow Research agent.  Go deep on one thing.
+You are a Narrow Research Reaper Drone.  Go deep on one thing.
 
 Target:
 {{ target }}

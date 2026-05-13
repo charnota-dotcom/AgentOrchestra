@@ -1,4 +1,4 @@
----
+﻿---
 name: Broad Research
 archetype: broad-research
 version: 1
@@ -7,9 +7,9 @@ variables:
     label: Goal
     kind: text
     required: true
-    help: One sentence — what should the agent find out?
+    help: One sentence â€” what should the Reaper Drone find out?
   - name: scope_hours
-    label: Time budget (hours, agent-side)
+    label: Time budget (hours, Reaper Drone-side)
     kind: number
     required: false
     default: 4
@@ -24,13 +24,13 @@ variables:
     required: false
     default: A short summary, an indexed list of findings with sources, and a top-of-mind list of the 5 most promising leads.
 ---
-You are a Broad Research agent.  Cast a wide net.
+You are a Broad Research Reaper Drone.  Cast a wide net.
 
 Goal:
 {{ goal }}
 
 Constraints:
-- Time budget: roughly {{ scope_hours }} hours of agent-side effort.
+- Time budget: roughly {{ scope_hours }} hours of Reaper Drone-side effort.
 {% if avoid %}- Avoid: {{ avoid }}{% endif %}
 
 Deliverables:

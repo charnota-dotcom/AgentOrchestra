@@ -46,7 +46,7 @@ def test_provider_set_is_subscription_only() -> None:
     no API-key-only providers should sneak into the default picker.
     """
     seen = {p.provider for p in MODEL_PRESETS}
-    assert seen <= {"claude-cli", "gemini-cli"}, f"unexpected providers: {seen}"
+    assert seen <= {"claude-cli", "gemini-cli", "codex-cli"}, f"unexpected providers: {seen}"
 
 
 def test_skills_to_system_empty_returns_empty() -> None:

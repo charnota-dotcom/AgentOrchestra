@@ -16,9 +16,14 @@ from apps.gui.canvas.nodes.control import (
     TriggerNode,
 )
 from apps.gui.canvas.nodes.drone_action import DroneActionNode
+from apps.gui.canvas.nodes.staging_area import StagingAreaNode
+
+ReaperNode = AgentNode
+FPVDroneNode = DroneActionNode
 
 __all__ = [
     "AgentNode",
+    "FPVDroneNode",
     "BaseNode",
     "BranchNode",
     "DroneActionNode",
@@ -26,5 +31,7 @@ __all__ = [
     "MergeNode",
     "NodeStatus",
     "OutputNode",
+    "ReaperNode",
+    "StagingAreaNode",
     "TriggerNode",
 ]

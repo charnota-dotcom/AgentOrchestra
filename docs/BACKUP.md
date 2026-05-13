@@ -1,7 +1,7 @@
-# Backup & restore
+﻿# Backup & restore
 
-AgentOrchestra keeps every Run, Branch, Step, Agent, Attachment, Flow,
-Workspace, Card, and Event in a single SQLite file in WAL mode.  This
+AgentOrchestra keeps every Run, Branch, Step, Reaper Drone, Attachment, Flow,
+Workspace, Card, and Event in a single SQLite file in WAL mode. This
 guide covers safe ways to back it up and restore it.
 
 ## Where the data lives
@@ -11,13 +11,13 @@ guide covers safe ways to back it up and restore it.
 | `<data_dir>/agentorchestra.sqlite` | the main database |
 | `<data_dir>/agentorchestra.sqlite-wal` | uncommitted write-ahead log frames |
 | `<data_dir>/agentorchestra.sqlite-shm` | shared-memory index for the WAL |
-| `<data_dir>/attachments/<agent_id>/…` | uploaded images + spreadsheets |
-| `<data_dir>/clones/<repo>/…` | git repos cloned via `workspaces.clone` |
+| `<data_dir>/attachments/<reaper_id>/â€¦` | uploaded images + spreadsheets |
+| `<data_dir>/clones/<repo>/â€¦` | git repos cloned via `workspaces.clone` |
 
 `<data_dir>` defaults to `%LOCALAPPDATA%\agentorchestra\` on Windows
 and `~/.local/share/agentorchestra/` on Linux/macOS.
 
-## ⚠ Don't naively copy the .sqlite file
+## âš  Don't naively copy the .sqlite file
 
 Copying `agentorchestra.sqlite` while the service is running misses
 uncommitted WAL frames.  At best the backup is missing the most
@@ -64,14 +64,14 @@ implementation:
   database** so SQLite can't replay pre-restore WAL frames into the
   freshly-restored file.
 
-If the GUI is open during restore, close it first — the running
+If the GUI is open during restore, close it first â€” the running
 service holds the connection and the swap will fail otherwise.
 
 ## Pruning attachments
 
-The Limits tab's **Attachment storage** card shows per-agent disk
-usage.  To reclaim space:
+The Limits tab's **Attachment storage** card shows per-Reaper Drone disk
+usage. To reclaim space:
 
-- Delete the agent (cascades to its attachments).
-- Or open the canvas chat dialog, click each attachment chip's `×`
-  button before sending — the server-side row + file get removed.
+- Delete the Reaper Drone (cascades to its attachments).
+- Or open the canvas chat dialog, click each attachment chip's `Ã—`
+  button before sending â€” the server-side row + file get removed.

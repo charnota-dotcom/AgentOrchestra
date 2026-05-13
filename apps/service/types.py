@@ -230,6 +230,7 @@ class Run(BaseModel):
     completed_at: datetime | None = None
     cost_usd: float = 0.0
     cost_tokens: int = 0
+    last_plan_turn: int | None = None
     error: str | None = None
 
     @field_validator("workspace_id", "branch_id", mode="before")
@@ -485,6 +486,11 @@ class EventKind(StrEnum):
     FLOW_NODE_QUEUED = "flow.node.queued"
     FLOW_NODE_STARTED = "flow.node.started"
     FLOW_NODE_TOKEN_DELTA = "flow.node.token_delta"
+    FLOW_NODE_WAITING = "flow.node.waiting"
+    FLOW_NODE_RELEASED = "flow.node.released"
+    FLOW_NODE_TIMED_OUT = "flow.node.timed_out"
+    FLOW_NODE_REJECTED = "flow.node.rejected"
+    FLOW_NODE_BLOCKED = "flow.node.blocked"
     FLOW_NODE_COMPLETED = "flow.node.completed"
     FLOW_NODE_FAILED = "flow.node.failed"
     FLOW_NODE_SKIPPED = "flow.node.skipped"
@@ -523,6 +529,10 @@ class WorktreeError(Exception):
 
 
 class ProviderError(Exception):
+    pass
+
+
+class ToolError(Exception):
     pass
 
 
@@ -595,7 +605,7 @@ class DroneBlueprint(BaseModel):
     name: str
     description: str = ""
     role: DroneRole = DroneRole.WORKER
-    provider: str  # 'claude-cli' / 'gemini-cli' / 'anthropic' / 'google' / 'ollama'
+    provider: str  # 'claude-cli' / 'gemini-cli' / 'codex-cli' / 'anthropic' / 'google' / 'ollama'
     model: str
     # Operator-typed persona / tone / role description.  Goes into
     # the system prompt verbatim.  The mode prompts (Coding / General

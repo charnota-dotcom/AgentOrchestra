@@ -169,17 +169,18 @@ def setup_annotator(window: MainWindow) -> tuple[Any, Any] | None:
         )
         return None
 
-    # Bug fix: prevent crash in library's showEvent override.
-    # We set this at the class level so it's guaranteed to exist
-    # when the constructor runs (which may trigger showEvent).
-    FloatingAnnotationBar._screen_signal_connected = False
-
     class _AgentMintingAnnotationManager(AnnotationManager):
         def _save_annotation(self, widget: Any, index: int, comment: str, **kwargs: Any) -> None:
             super()._save_annotation(widget, index, comment, **kwargs)
-            if not self._annotations:
+            
+            # Skip if we are still in the initial load phase (prevents mass-minting on startup)
+            # or if the index is invalid for some reason.
+            if not getattr(self, "_ready_to_mint", False):
                 return
-            ann = self._annotations[-1]
+            if not (0 <= index < len(self._annotations)):
+                return
+                
+            ann = self._annotations[index]
 
             import asyncio
             async def _mint_drone() -> None:
@@ -220,6 +221,7 @@ def setup_annotator(window: MainWindow) -> tuple[Any, Any] | None:
     try:
         data_dir = _data_dir()
         action_log_path = _action_log_path()
+
         manager = _AgentMintingAnnotationManager(
             window=window,
             data_dir=data_dir,
@@ -237,6 +239,15 @@ def setup_annotator(window: MainWindow) -> tuple[Any, Any] | None:
         )
         window.destroyed.connect(bar.close)  # type: ignore[arg-type]
         log.info("annotation overlay attached (data_dir=%s)", data_dir)
+
+        # Bug fix: prevent mass-minting on startup.  The library calls
+        # _save_annotation for every record it loads from disk.  We
+        # wait until the initial load is likely finished before
+        # enabling the agent-minting logic.
+        from PySide6 import QtCore
+        manager._ready_to_mint = False
+        QtCore.QTimer.singleShot(1000, lambda: setattr(manager, "_ready_to_mint", True))
+
         return manager, bar
     except Exception as exc:  # pragma: no cover - defensive
         log.warning("failed to attach annotation overlay: %s", exc)

@@ -1,9 +1,9 @@
-# Drone model — design
+﻿# FPV Drone / Reaper Drone model â€” design
 
 > *"An agent is the template for the window (skills, preset instructions, tone, etc).  That's the reserve agent.  The active chat is the deployed agent.  Lets call them drone blueprint and drone action to avoid all the agent confusion."*
-> — operator, 2026-05-10
+> â€” operator, 2026-05-10
 
-This document is the contract for the drone-model rename.  It locks the
+This document is the contract for the FPV Drone / Reaper Drone vocabulary alignment and the separate Staging Area node.  It locks the
 schema, RPC surface, GUI surfaces, role-based authority, and migration
 path.  Implementation lands in PRs #20+, gated on this document being
 read and signed off.
@@ -15,14 +15,15 @@ read and signed off.
 | Term | What it is |
 |---|---|
 | **Operator** | The human (you).  Sole creator of blueprints and skills. |
-| **Drone blueprint** | A frozen template — model, provider, persona, default skills, default references, role.  Operator-set, repo-agnostic, reusable across many deployments. |
-| **Drone action** | An instance of a drone, *deployed* from a blueprint.  Carries the runtime state: workspace binding (optional), transcript, attachments, additional skills layered on top of the blueprint, additional one-off references. |
-| **Drone** | A manual, browser-based robot friend (`provider="browser"`). Requires operator copy/paste. |
-| **Agent** | An autonomous, CLI-based robot friend (`provider="claude-cli"` or `"gemini-cli"`). Runs independently on the host. |
+| **FPV Drone blueprint** | A frozen template - model, provider, persona, default skills, default references, role. Operator-set, repo-agnostic, reusable across many deployments. |
+| **FPV Drone action** | An instance of an FPV Drone, *deployed* from a blueprint. Carries the runtime state: workspace binding (optional), transcript, attachments, additional skills layered on top of the blueprint, additional one-off references. |
+| **FPV Drone** | A manual, browser-based robot friend (`provider="browser"`). Requires operator copy/paste. |
+| **Reaper Drone** | An autonomous, CLI-based robot friend (`provider="claude-cli"`, `"gemini-cli"`, or `"codex-cli"`). Runs independently on the host. |
 | **Skill** | A reusable instruction template (Superpower) stored in the database and selectable during blueprint creation or deployment. |
+| **Staging Area** | A first-class gating and aggregation node that can wait, summarize, or release work downstream. |
 | **App authority** | The orchestrator service's logic.  Enforces role-based access on action mutations.  Roles are operator-set on the blueprint, frozen on deploy, never self-modified. |
 
-The word *agent* now specifically refers to **autonomous CLI-based units**, while *drone* refers to **manual browser-based units**.
+The product now uses **Reaper Drone** for autonomous CLI-based units and **FPV Drone** for manual browser-based units. Legacy storage and RPC names may still use older identifiers for compatibility.
 
 ---
 
@@ -48,10 +49,10 @@ Authority matrix (rows = caller's role, columns = capability):
 
 | | Self-state | Append refs to peer | Append attachments to peer | Append skills to peer | Read-only peer |
 |---|---|---|---|---|---|
-| Worker | ✅ | ❌ | ❌ | ❌ | ✅ |
-| Supervisor | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Courier | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Auditor | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Worker | âœ… | âŒ | âŒ | âŒ | âœ… |
+| Supervisor | âœ… | âœ… | âœ… | âœ… | âœ… |
+| Courier | âœ… | âœ… | âŒ | âŒ | âœ… |
+| Auditor | âŒ | âŒ | âŒ | âŒ | âœ… |
 
 ### 2.2 Tables
 
@@ -92,7 +93,7 @@ CREATE TABLE drone_action_attachments (
 
 The existing `agents` table is **renamed conceptually** to *general chats*
 in the GUI but **kept as the same table** on disk so today's data
-survives.  See §6.
+survives.  See Â§6.
 
 ### 2.3 Pydantic types (`apps/service/types.py`)
 
@@ -155,7 +156,7 @@ class DroneAction(BaseModel):
 
 ### 3.3 General chats (today's `agents.*`, kept verbatim)
 
-`agents.list / get / create / send / set_workspace / set_references / spawn_followup / delete` — unchanged.  GUI label changes to "Chat" / "General chat" / "Free chat".  Migration §6.
+`agents.list / get / create / send / set_workspace / set_references / spawn_followup / delete` â€” unchanged.  GUI label changes to "Chat" / "General chat" / "Free chat".  Migration Â§6.
 
 ---
 
@@ -164,18 +165,18 @@ class DroneAction(BaseModel):
 ### 4.1 Rail navigation
 
 ```
-┌─ Rail ──────────┐
-│  Home           │
-│  Drones         │  ← Manual (browser-based)
-│  Agents         │  ← Autonomous (CLI-based)
-│  Blueprints     │  ← Plan Workshop
-│  Skills         │  ← Superpower Library
-│  Compose        │
-│  Canvas         │
-│  History        │
-│  Limits         │
-│  Settings       │
-└─────────────────┘
+â”Œâ”€ Rail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  Home           â”‚
+â”‚  Drones         â”‚  â† Manual (browser-based)
+â”‚  Agents         â”‚  â† Autonomous (CLI-based)
+â”‚  Blueprints     â”‚  â† Plan Workshop
+â”‚  Skills         â”‚  â† Superpower Library
+â”‚  Compose        â”‚
+â”‚  Canvas         â”‚
+â”‚  History        â”‚
+â”‚  Limits         â”‚
+â”‚  Settings       â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 - **Drones tab**: Dedicated to manual, browser-bridged units (`provider="browser"`).
@@ -194,18 +195,24 @@ Blueprints and deployments now follow context-aware paths:
 - Double-clicking an action on the canvas opens its **Edit** dialog instead of chat, allowing runtime configuration (name, workspace, skills).
 - Right-clicking a manual drone action offers **"Convert to autonomous Agent..."**, promoting it to a CLI-based unit while preserving its transcript.
 
+### 4.4 Stability & Integration (Annotator)
+
+When auto-minting drones from UI annotations (e.g. the "Annotator" blueprint), the integration implements two critical safety guards:
+1. **Mass-Minting Guard**: A readiness flag and startup delay prevent the app from spawning new drones for every existing annotation during the initial load burst.
+2. **Self-Healing Deduplication**: The action log is automatically deduplicated on launch to prevent identical AI attempts from overflowing the conversation threads.
+
 ---
 
 ## 5. Authority enforcement
 
 A `_check_authority(caller_action_id, target_action_id, capability)` helper sits in `apps/service/main.py`:
 
-1. Look up caller action → role from blueprint snapshot.
-2. Look up target action → owner / parent.
-3. Check the matrix (§2.1).
+1. Look up caller action â†’ role from blueprint snapshot.
+2. Look up target action â†’ owner / parent.
+3. Check the matrix (Â§2.1).
 4. Raise `PermissionError` (HTTP 403, GUI surfaces a friendly toast) on denial.
 
-The orchestrator service is the *only* enforcer.  GUI never gates by role — it asks, gets a 403, surfaces the message.  This keeps the authority model honest.
+The orchestrator service is the *only* enforcer.  GUI never gates by role â€” it asks, gets a 403, surfaces the message.  This keeps the authority model honest.
 
 ---
 
@@ -234,7 +241,7 @@ Suggested PR sequence:
 | #21 | RPC layer: `blueprints.*` + `drones.*` handlers + `_check_authority` helper + role-gating tests.  No GUI yet. |
 | #22 | New **Blueprints** tab.  Operator can create / edit / delete blueprints via the GUI. |
 | #23 | "Drones" tab (rename of today's Agents tab) + deploy dialog + role chips + role-gated buttons. |
-| #24 | Canvas rename: ConversationNode → DroneNode; "Conversations" palette → "Drones".  "+ New drone" deploy dialog. |
+| #24 | Canvas rename: ConversationNode â†’ DroneNode; "Conversations" palette â†’ "Drones".  "+ New drone" deploy dialog. |
 | #25 | Sweep-and-burn: rename `Agent` references in user-facing copy across README, ROADMAP, CHANGELOG.  Delete obsolete tooltips.  Tests. |
 
 Each PR is independently reviewable.  Each adds new code without
@@ -275,6 +282,6 @@ The **Skills** tab provides a dedicated surface for managing reusable instructio
 
 ### 10.2 Lifecycle Upgrades (Conversion)
 Manual Drones can be "promoted" to autonomous Agents at any time:
-1.  **Canvas Promotion**: Right-click a `DroneActionNode` → "Convert to autonomous Agent...".
-2.  **Blueprint Promotion**: Blueprint editor → "Convert to Agent...".
+1.  **Canvas Promotion**: Right-click a `DroneActionNode` â†’ "Convert to autonomous Agent...".
+2.  **Blueprint Promotion**: Blueprint editor â†’ "Convert to Agent...".
 3.  **Result**: The manual `browser` provider is swapped for a CLI-based provider. The entire conversation transcript and all references are preserved, allowing autonomous agents to continue work initiated in the browser.

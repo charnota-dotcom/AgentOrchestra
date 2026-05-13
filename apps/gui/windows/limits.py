@@ -64,7 +64,7 @@ class LimitsPage(QtWidgets.QWidget):
         subtitle = QtWidgets.QLabel(
             "Live status from each subscription CLI you're signed into.  "
             "Per-message remaining-quota numbers aren't returned headlessly "
-            "for either provider — the dashboards below are the source of "
+            "for these providers — the dashboards below are the source of "
             "truth for plan tier, billing and historical usage."
         )
         subtitle.setStyleSheet("color:#5b6068;font-size:11px;")
@@ -280,9 +280,9 @@ class LimitsPage(QtWidgets.QWidget):
                     win = str(cap.get("window", "?"))
                     model = str(cap.get("model", ""))
                     msgs = cap.get("messages", "?")
-                    # Map our window labels to the local-tally
-                    # buckets (5h / 24h / 7d).
-                    bucket = {"5h": "5h", "daily": "24h", "weekly": "7d"}.get(win)
+                    # Window labels are canonicalized in the service
+                    # as 5h / 24h / 7d and match local usage buckets.
+                    bucket = {"5h": "5h", "24h": "24h", "7d": "7d"}.get(win)
                     used = usage_for_provider.get(bucket) if bucket else None
                     used_part = f"  (this app: {used} sent)" if used is not None else ""
                     lines.append(f"  • {win}  {model}: {msgs} msgs{used_part}")

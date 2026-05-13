@@ -1,4 +1,4 @@
-# Technical Integration Requirements — pyside6_annotator v1.4.23
+﻿# Technical Integration Requirements â€” pyside6_annotator v1.4.23
 
 **Audience**: AI agent implementing a new PySide6 app that embeds this library.
 **Requirements**: Python 3.10+, PySide6 >= 6.5
@@ -34,16 +34,16 @@ All symbols above are exported from the package's `__init__.py`. Do not import d
 
 ```python
 AnnotationManager(
-    window,               # positional, required — QWidget (typically QMainWindow)
+    window,               # positional, required â€” QWidget (typically QMainWindow)
     data_dir=None,        # positional-or-keyword, Optional[Path]
     *,                    # keyword-only after here
-    app_name="App",       # str — display name shown in the Review dialog and action log
-    app_version="0.0.0",  # str — shown in AI action log entries; use SemVer e.g. "1.0.0"
-    action_log_path=None, # Optional[Path] — explicit path to the actions JSON log file
-    navigate_to=None,     # Optional[Callable[[str], bool]] — callback; see section 4
-    tab_hint_map=None,    # Optional[dict] — maps widget class names to QTabWidget indices
-    _is_primary=True,     # bool — internal; do NOT set to False in a new integration
-    _allow_annotator_ui=False,  # bool — internal; do NOT set in a new integration
+    app_name="App",       # str â€” display name shown in the Review dialog and action log
+    app_version="0.0.0",  # str â€” shown in AI action log entries; use SemVer e.g. "1.0.0"
+    action_log_path=None, # Optional[Path] â€” explicit path to the actions JSON log file
+    navigate_to=None,     # Optional[Callable[[str], bool]] â€” callback; see section 4
+    tab_hint_map=None,    # Optional[dict] â€” maps widget class names to QTabWidget indices
+    _is_primary=True,     # bool â€” internal; do NOT set to False in a new integration
+    _allow_annotator_ui=False,  # bool â€” internal; do NOT set in a new integration
 )
 ```
 
@@ -53,13 +53,13 @@ AnnotationManager(
 |-----------|------|----------|---------|
 | `window` | `QWidget` | Yes | The main window the overlay attaches to. All badge and highlight widgets are children of this window. Must be the window that is already constructed before calling this constructor. |
 | `data_dir` | `Path \| None` | Strongly recommended | Directory where `annotations.json` is written. If `None`, annotations are not persisted to disk. Must exist before instantiation (see section 7). |
-| `app_name` | `str` | Yes (has default) | Appears in the Review dialog title, action log headers, and the clipboard JSON payload as `app_name`. The string is also lowercased and slug-ified (non-word chars → `_`) to derive the action log filename auto-path on Windows. |
+| `app_name` | `str` | Yes (has default) | Appears in the Review dialog title, action log headers, and the clipboard JSON payload as `app_name`. The string is also lowercased and slug-ified (non-word chars â†’ `_`) to derive the action log filename auto-path on Windows. |
 | `app_version` | `str` | Yes (has default) | Used as the `version` field in every action log entry. Should match the app's own version string. |
 | `action_log_path` | `Path \| None` | Optional | Explicit path to `_claude_actions.json`. If omitted, the manager auto-creates a file at `~/OneDrive/Desktop/Annotation logs/<app_slug>.json` (Windows only; silently disabled on other platforms if the path does not exist). Supply an explicit path to ensure cross-platform action logging. |
 | `navigate_to` | `Callable[[str], bool] \| None` | Recommended | Callback invoked when the user clicks "Jump" in the Review dialog. See section 4. |
 | `tab_hint_map` | `dict \| None` | Optional | Maps widget class names (strings) to `QTabWidget` tab indices. Used to infer which tab to switch to before retrying a jump. Override built-in defaults. |
 
-**Do not pass** `_is_primary=False` or `_allow_annotator_ui=True` — those are internal flags used by `FloatingAnnotationBar` when it creates a secondary self-annotation manager.
+**Do not pass** `_is_primary=False` or `_allow_annotator_ui=True` â€” those are internal flags used by `FloatingAnnotationBar` when it creates a secondary self-annotation manager.
 
 ---
 
@@ -67,13 +67,13 @@ AnnotationManager(
 
 ```python
 FloatingAnnotationBar(
-    manager,              # positional, required — AnnotationManager instance
+    manager,              # positional, required â€” AnnotationManager instance
     *,                    # keyword-only after here
-    data_dir=None,        # Optional[Path] — enables self-annotation of the bar itself
-    action_log_path=None, # Optional[Path] — passed through to the self-manager
-    host=None,            # Optional[QWidget] — used only for initial Y positioning
-    parent=None,          # Optional[QWidget] — MUST be None in most integrations
-    settings_key=None,    # Optional[str] — per-app QSettings sub-key for Y position
+    data_dir=None,        # Optional[Path] â€” enables self-annotation of the bar itself
+    action_log_path=None, # Optional[Path] â€” passed through to the self-manager
+    host=None,            # Optional[QWidget] â€” used only for initial Y positioning
+    parent=None,          # Optional[QWidget] â€” MUST be None in most integrations
+    settings_key=None,    # Optional[str] â€” per-app QSettings sub-key for Y position
 )
 ```
 
@@ -83,7 +83,7 @@ FloatingAnnotationBar(
 |-----------|------|----------|---------|
 | `manager` | `AnnotationManager` | Yes | Must be the already-constructed primary `AnnotationManager`. The bar wires itself to the manager's buttons in `__init__`. |
 | `data_dir` | `Path \| None` | Optional | If supplied, enables the "Annotate bar" / "Review bar" self-annotation section and stores bar annotations in `<data_dir>/.annotator/annotations.json`. If `None`, the self-annotation section is hidden. |
-| `action_log_path` | `Path \| None` | Optional | Accepted but **silently ignored** — `_build_self_manager()` always uses a hardcoded OneDrive path for the bar's own action log regardless of this value. Ignored entirely if `data_dir` is `None`. |
+| `action_log_path` | `Path \| None` | Optional | Accepted but **silently ignored** â€” `_build_self_manager()` always uses a hardcoded OneDrive path for the bar's own action log regardless of this value. Ignored entirely if `data_dir` is `None`. |
 | `host` | `QWidget \| None` | Optional | The main window. Used only to compute the initial Y center position of the bar. Has no effect after positioning. |
 | `parent` | `QWidget \| None` | **Must be None** | See section 5. |
 | `settings_key` | `str \| None` | Optional | If provided, the bar's Y position is stored in QSettings under `floating_bar/<settings_key>/edge_y`. Use this when multiple apps share the same QSettings organization/app name to avoid position collisions. |
@@ -102,7 +102,7 @@ def __init__(self):
     # ... build your UI ...
 
     # Step 1: ensure data_dir exists BEFORE constructing the manager.
-    # _save_annotations() silently swallows all I/O errors — there is no
+    # _save_annotations() silently swallows all I/O errors â€” there is no
     # exception to catch if this directory is missing; annotations are lost silently.
     _data_dir = Path.home() / ".myapp"
     _data_dir.mkdir(parents=True, exist_ok=True)
@@ -117,12 +117,12 @@ def __init__(self):
     )
 
     # Step 3: construct the bar (wires itself to the manager).
-    # parent=None is required — see section 5.
+    # parent=None is required â€” see section 5.
     self._annotation_bar = FloatingAnnotationBar(
         self._annotation_mgr,
         data_dir=_data_dir,
         host=self,
-        parent=None,  # MUST be None — non-None parent in QStackedWidget layouts destroys the bar
+        parent=None,  # MUST be None â€” non-None parent in QStackedWidget layouts destroys the bar
     )
     # Note: FloatingAnnotationBar.__init__ calls _place_collapsed() which calls show()
     # internally, so the bar is already visible here. The explicit show() below is
@@ -144,7 +144,7 @@ def my_navigate_to(screen_name: str) -> bool:
     ...
 ```
 
-- **Receives**: `screen_name` — a `str` containing the `screen_name` field recorded on the `Annotation` at the time it was created. This is whatever value was set on `ann.screen_name`. If the annotation was created before `screen_name` was recorded, this will be an empty string `""`.
+- **Receives**: `screen_name` â€” a `str` containing the `screen_name` field recorded on the `Annotation` at the time it was created. This is whatever value was set on `ann.screen_name`. If the annotation was created before `screen_name` was recorded, this will be an empty string `""`.
 - **Must return**: `True` if navigation was attempted (regardless of whether it succeeded), `False` if no navigation is possible (e.g. the screen name is unrecognised or empty). The library calls `bool()` on the return value.
 - **What it must do**: Navigate the app's `QStackedWidget` (or equivalent) to show the screen that contains the annotated widget, so the jump-to mechanism can then locate and highlight the widget. The callback is called from the Qt main thread during a click on the "Jump" button in the Review dialog.
 
@@ -190,9 +190,9 @@ It is a **top-level window**, not a child widget.
 
 When a `QStackedWidget` swaps pages, Qt sends `WM_DESTROY` (Windows) or equivalent destroy events to widgets that have the stack page as their Qt parent. If `FloatingAnnotationBar` is given any widget inside the stack (or the stack itself) as its Qt parent, it will be destroyed and recreated whenever the page changes. Setting `parent=None` makes it a true top-level `Tool` window that is owned by the OS, not by the Qt widget hierarchy, so it survives page switches.
 
-The `host` parameter is separate — it is used during `_place_collapsed()` to read `host.screen()` for multi-monitor awareness and to compute the initial Y position as `host.y() + (host.height() - bar_height) // 2`. It **is** stored as `self._host` for the lifetime of the bar object.
+The `host` parameter is separate â€” it is used during `_place_collapsed()` to read `host.screen()` for multi-monitor awareness and to compute the initial Y position as `host.y() + (host.height() - bar_height) // 2`. It **is** stored as `self._host` for the lifetime of the bar object.
 
-**`WA_DeleteOnClose` is explicitly set to `False`** in the bar's `__init__`, so calling `.close()` hides it without destroying the C++ object. This means it is safe to call `self.destroyed.connect(self._annotation_bar.close)` — `close()` triggers `closeEvent()` which removes the QApplication event filter and stops the animation, but does not delete the widget.
+**`WA_DeleteOnClose` is explicitly set to `False`** in the bar's `__init__`, so calling `.close()` hides it without destroying the C++ object. This means it is safe to call `self.destroyed.connect(self._annotation_bar.close)` â€” `close()` triggers `closeEvent()` which removes the QApplication event filter and stops the animation, but does not delete the widget.
 
 ---
 
@@ -230,7 +230,7 @@ The `.annotator/` subdirectory is created automatically by `_build_self_manager(
 
 ### Must exist before instantiation
 
-`data_dir` itself **must already exist** before `AnnotationManager.__init__` is called. The manager constructs the annotations path as `Path(data_dir) / "annotations.json"` and immediately calls `_load_annotations()` which opens the file for reading. If `data_dir` does not exist, `_load_annotations()` silently no-ops (the path will not be found). **Critically: `_save_annotations()` also silently swallows all I/O errors** — it calls `parent.mkdir(parents=True, exist_ok=True)` before writing but wraps everything in a broad `except Exception: pass`. Data loss occurs silently with no exception raised to the caller. This is why the pre-creation pattern is essential; there is no error signal to catch.
+`data_dir` itself **must already exist** before `AnnotationManager.__init__` is called. The manager constructs the annotations path as `Path(data_dir) / "annotations.json"` and immediately calls `_load_annotations()` which opens the file for reading. If `data_dir` does not exist, `_load_annotations()` silently no-ops (the path will not be found). **Critically: `_save_annotations()` also silently swallows all I/O errors** â€” it calls `parent.mkdir(parents=True, exist_ok=True)` before writing but wraps everything in a broad `except Exception: pass`. Data loss occurs silently with no exception raised to the caller. This is why the pre-creation pattern is essential; there is no error signal to catch.
 
 ### Recommended pattern
 
@@ -254,14 +254,14 @@ Use a per-app subdirectory of the user's home directory (e.g. `~/.myapp`) to avo
 ### app_name
 
 - Displayed in the Review dialog window title area (as part of the app payload's `app_name` field when annotations are copied to clipboard).
-- Used to derive the slug for the automatic action log path: non-word characters are replaced with `_`, leading/trailing underscores stripped. Example: `"My App"` → `"my_app"` → log file `my_app.json`.
+- Used to derive the slug for the automatic action log path: non-word characters are replaced with `_`, leading/trailing underscores stripped. Example: `"My App"` â†’ `"my_app"` â†’ log file `my_app.json`.
 - Used by `_process_pending_actions()` to match `for_app` in `_pending_actions.json`. The slug comparison is case-sensitive and must match exactly. **Use the same `app_name` string every time the app is launched.**
 - Expected format: any human-readable string. Keep it concise (it appears in UI). Example: `"Flashcard Invigilator"`, `"Sightread"`.
 
 ### app_version
 
 - Stored in each action log attempt as the `version` field.
-- Displayed in the Review dialog's AI action cards (e.g. `v1.2.3 · shipped · 2026-01-15`).
+- Displayed in the Review dialog's AI action cards (e.g. `v1.2.3 Â· shipped Â· 2026-01-15`).
 - Expected format: SemVer string such as `"1.0.0"` or `"2.3.14"`. Arbitrary strings are accepted but SemVer is strongly preferred as the UI renders it with a `v` prefix.
 
 ---
@@ -270,7 +270,7 @@ Use a per-app subdirectory of the user's home directory (e.g. `~/.myapp`) to avo
 
 ### Purpose
 
-`_pending_actions.json` is the AI agent's mechanism for submitting fix attempts into the action log without needing to call Python code directly. The file is dropped into the app's working directory (or a configured scan path), and the annotator processes it automatically on the next app launch.
+`_pending_actions.json` is the AI worker's mechanism for submitting fix attempts into the action log without needing to call Python code directly. The file is dropped into the app's working directory (or a configured scan path), and the annotator processes it automatically on the next app launch.
 
 ### Where to place it
 
@@ -278,7 +278,7 @@ Place the file in **the same directory as the app's entry point** (`main.py` or 
 
 ### When it is processed
 
-`_process_pending_actions()` is invoked via `QTimer.singleShot(0, ...)` in `AnnotationManager.__init__`, meaning it runs after the first Qt event loop tick — i.e. after `show()` is called and the window appears, but during normal app startup. The delay avoids blocking the UI while scanning OneDrive paths.
+`_process_pending_actions()` is invoked via `QTimer.singleShot(0, ...)` in `AnnotationManager.__init__`, meaning it runs after the first Qt event loop tick â€” i.e. after `show()` is called and the window appears, but during normal app startup. The delay avoids blocking the UI while scanning OneDrive paths.
 
 ### Schema
 
@@ -292,7 +292,7 @@ The file must be valid JSON with this exact structure:
             "annotation_index":    42,
             "version":             "1.2.0",
             "status":              "shipped",
-            "description":         "Under 100 words — what was wrong and what you did.",
+            "description":         "Under 100 words â€” what was wrong and what you did.",
             "change_overview":     ["One entry per file or function changed"],
             "risk_level":          "Low",
             "risk_note":           "One sentence on side effects or areas to watch.",
@@ -310,7 +310,7 @@ The file must be valid JSON with this exact structure:
 
 | Field | Type | Required | Constraint |
 |-------|------|----------|-----------|
-| `for_app` | `str` | Yes | Must match `re.sub(r"[^\w\-]", "_", app_name.lower()).strip("_")` exactly. **If absent (empty string or missing key), the file is processed by ANY app** — absent `for_app` acts as a wildcard. If present but mismatched, the file is ignored. |
+| `for_app` | `str` | Yes | Must match `re.sub(r"[^\w\-]", "_", app_name.lower()).strip("_")` exactly. **If absent (empty string or missing key), the file is processed by ANY app** â€” absent `for_app` acts as a wildcard. If present but mismatched, the file is ignored. |
 | `attempts` | `list` | Yes | One object per annotation being addressed. |
 | `annotation_index` | `int` | Yes | Must match an existing annotation index from the app's `annotations.json`. |
 | `version` | `str` | Yes | The new version string being shipped. |
@@ -319,14 +319,14 @@ The file must be valid JSON with this exact structure:
 | `change_overview` | `list[str]` | Yes | One string per file or function changed. |
 | `risk_level` | `str` | Yes | Exactly one of: `"Low"`, `"Medium"`, `"High"`. |
 | `risk_note` | `str` | Yes | One sentence on side effects. |
-| `next_steps` | `list[str]` | Yes | 1–2 strings describing what the developer should do next. |
+| `next_steps` | `list[str]` | Yes | 1â€“2 strings describing what the developer should do next. |
 | `files_changed` | `list[str]` | Optional | List of file paths modified. |
 | `annotation_excerpt` | `str` | Optional | First ~8 words of the annotation comment, for display. |
 | `first_seen_version` | `str` | Optional | Version when this annotation was first created. |
 | `notes` | `str` | Optional | Additional freeform notes. |
 
 **Processing logic:**
-1. The file is read. If `for_app` is present and non-empty, it must exactly match the app slug or the file is skipped. If `for_app` is absent or empty, it matches any app (wildcard — always compute and include `for_app` to prevent cross-app processing).
+1. The file is read. If `for_app` is present and non-empty, it must exactly match the app slug or the file is skipped. If `for_app` is absent or empty, it matches any app (wildcard â€” always compute and include `for_app` to prevent cross-app processing).
 2. For each entry in `attempts`, `append_attempt()` is called with all fields.
 3. If at least one attempt succeeds, the file is renamed to `_pending_actions.processed`.
 4. If an entry has an invalid `status`, it is silently skipped (exception swallowed). Other entries in the same file are still processed.
@@ -334,23 +334,23 @@ The file must be valid JSON with this exact structure:
 
 ---
 
-## 10. Action Log — append_attempt()
+## 10. Action Log â€” append_attempt()
 
 ### Signature
 
 ```python
 append_attempt(
-    annotation_index,     # int — required positional
-    json_path=None,       # Optional[Path] — path to the JSON log file
+    annotation_index,     # int â€” required positional
+    json_path=None,       # Optional[Path] â€” path to the JSON log file
     *,
-    version,              # str — required keyword
-    status,               # str — required keyword; one of the five valid values
+    version,              # str â€” required keyword
+    status,               # str â€” required keyword; one of the five valid values
     description="",       # str
     change_overview=None, # Optional[list[str]]
-    risk_level="Low",     # str — one of "Low", "Medium", "High"
+    risk_level="Low",     # str â€” one of "Low", "Medium", "High"
     risk_note="",         # str
     next_steps=None,      # Optional[list[str]]
-    summary="",           # str — legacy fallback; migrated to description if description is empty
+    summary="",           # str â€” legacy fallback; migrated to description if description is empty
     files_changed=None,   # Optional[list[str]]
     notes="",             # str
     annotation_excerpt="",  # str
@@ -432,7 +432,7 @@ If the new app also uses QSettings, use a different organization+application nam
 - Installs and removes event filters on `QApplication.instance()` from `start()` and `stop()`.
 - Creates and manipulates Qt widgets (`_HighlightFrame`, `_Badge`, `_Popover`, `_ReviewDialog`) in response to user input events.
 - Calls `QTimer.singleShot()` for deferred work.
-- Reads/writes files (`annotations.json`, action log JSON) synchronously on the main thread. For large `data_dir` paths (e.g. network drives), this can cause brief UI stalls during `_load_annotations()` at startup and `_save_annotations()` after each annotation. There is no built-in async I/O — keep `data_dir` on a local drive.
+- Reads/writes files (`annotations.json`, action log JSON) synchronously on the main thread. For large `data_dir` paths (e.g. network drives), this can cause brief UI stalls during `_load_annotations()` at startup and `_save_annotations()` after each annotation. There is no built-in async I/O â€” keep `data_dir` on a local drive.
 
 `_process_pending_actions()` runs via `QTimer.singleShot(0, ...)` so it executes on the main thread after the event loop starts. Do not call it manually from a background thread.
 
@@ -464,7 +464,7 @@ This flag has no effect on any other part of the library.
 
 ### 14.1 data_dir does not exist at construction time
 
-`_load_annotations()` silently no-ops if the file does not exist. `_save_annotations()` **does not raise** — it wraps all file I/O in `except Exception: pass` and silently discards errors. Data loss occurs without any signal to the caller. Always call `data_dir.mkdir(parents=True, exist_ok=True)` before constructing `AnnotationManager`; there is no exception to catch if you forget.
+`_load_annotations()` silently no-ops if the file does not exist. `_save_annotations()` **does not raise** â€” it wraps all file I/O in `except Exception: pass` and silently discards errors. Data loss occurs without any signal to the caller. Always call `data_dir.mkdir(parents=True, exist_ok=True)` before constructing `AnnotationManager`; there is no exception to catch if you forget.
 
 ### 14.2 app_name slug mismatch blocks _pending_actions.json processing
 
@@ -480,7 +480,7 @@ Setting `parent` to any widget inside a `QStackedWidget` causes the bar to be de
 
 ### 14.5 Duplicate get_annotation_manager export in __all__
 
-`__init__.py` lists `get_annotation_manager` twice in `__all__` (lines 78–79). This is a harmless duplicate but is a known issue in the current source.
+`__init__.py` lists `get_annotation_manager` twice in `__all__` (lines 78â€“79). This is a harmless duplicate but is a known issue in the current source.
 
 ### 14.6 Self-annotation log path hardcoded to OneDrive
 
@@ -532,7 +532,7 @@ manager.open_review()              # open the Review dialog
 
 ### Run the test suite on every library upgrade
 
-`test_integration_compatibility.py` (in this repo) tests the contracts between the host app and the library — not the library's internals. Run it after every `pyside6_annotator` version bump before shipping:
+`test_integration_compatibility.py` (in this repo) tests the contracts between the host app and the library â€” not the library's internals. Run it after every `pyside6_annotator` version bump before shipping:
 
 ```bash
 pip install pyside6_annotator --upgrade
@@ -550,13 +550,13 @@ A failing test identifies the exact broken contract (constructor signature chang
 - `_pending_actions.json` processing behaviour (rename logic, `for_app` matching)
 - `FloatingAnnotationBar` QSettings key renames
 
-### What requires manual checking
+### 16.2 What requires manual checking
 
 - Visual regressions in the bar or Review dialog UI
 - New library features worth adopting (check the changelog when bumping the pin)
-- `for_app` slug consistency — if the app is ever renamed, the slug changes and all existing `_pending_actions.json` files will be silently ignored unless updated
+- `for_app` slug consistency â€” if the app is ever renamed, the slug changes and all existing `_pending_actions.json` files will be silently ignored unless updated
 
-### Recommended CI setup
+### 16.3 Recommended CI setup
 
 Pin the library version in `requirements.txt` or `pyproject.toml` and gate on the test suite whenever the pin is bumped:
 
@@ -573,3 +573,39 @@ dependencies = [
 - name: Verify annotator integration
   run: pytest test_integration_compatibility.py -v
 ```
+
+---
+
+## 17. Common Integration Bugs & Fixes
+
+### 17.1 Mass-Minting on Startup
+
+**The Problem**: `AnnotationManager` triggers `_save_annotation` (or your overridden version) for every record it loads from `annotations.json` during startup. If your override spawns an external process (like a browser helper or autonomous worker), you will mass-mint a new process for every existing annotation every time the app launches.
+
+**The Fix**: Implement a readiness flag. Initialize it to `False` and use a `QTimer` to set it to `True` after the initial load burst is finished.
+
+```python
+class MyManager(AnnotationManager):
+    def _save_annotation(self, widget, index, comment, **kwargs):
+        super()._save_annotation(widget, index, comment, **kwargs)
+        if not getattr(self, "_ready", False):
+            return  # skip mass-minting during startup load
+        # ... spawn your worker here ...
+
+# In setup code:
+mgr = MyManager(...)
+mgr._ready = False
+QtCore.QTimer.singleShot(1000, lambda: setattr(mgr, "_ready", True))
+```
+
+### 17.2 Action Log Overflow (Duplicates)
+
+**The Problem**: If your external worker is retried or if the mass-minting bug above occurred, the action log JSON can end up with multiple identical `ai_action` entries for the same annotation index, making the thread unreadable.
+
+**The Fix**: Implement a self-healing deduplication pass at startup. Before constructing the `AnnotationManager`, read the `action_log_path` JSON, strip duplicate attempts (same description/changes) for each index, and write it back.
+
+### 17.3 Wrong Annotation Indexing
+
+**The Problem**: When overriding `_save_annotation`, do not rely on `self._annotations[-1]`. If the library is bulk-saving or if a race condition occurs, the last element in the list may not be the one currently being processed.
+
+**The Fix**: Always use the `index` parameter provided to the method: `ann = self._annotations[index]`.

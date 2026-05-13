@@ -1,4 +1,4 @@
----
+﻿---
 name: QA on Fix
 archetype: qa-on-fix
 version: 1
@@ -8,7 +8,7 @@ variables:
     kind: string
     required: true
   - name: focus
-    label: What should the QA agent specifically verify?
+    label: What should the QA Reaper Drone specifically verify?
     kind: text
     required: true
   - name: must_pass_tests
@@ -22,7 +22,7 @@ variables:
     required: false
     default: ""
 ---
-You are a QA agent reviewing the diff produced by run {{ target_run_id }}.
+You are a QA Reaper Drone reviewing the diff produced by run {{ target_run_id }}.
 
 Specifically verify:
 {{ focus }}

@@ -99,28 +99,29 @@ class FirstRunWizard(QtWidgets.QWizard):
     # --- Page 2 -------------------------------------------------------
 
     def _keys_page(self) -> QtWidgets.QWizardPage:
-        # Subscription / local routes only — no metered API keys are
+        # Subscription / local routes only - no metered API keys are
         # collected during onboarding so the default user can never
-        # accidentally bill against an API account.  The page is kept
+        # accidentally bill against an API account. The page is kept
         # in place (rather than removed) so the wizard's page index
         # numbering stays stable for any downstream code that
         # references it.
         page = QtWidgets.QWizardPage()
         page.setTitle("Subscriptions")
         page.setSubTitle(
-            "AgentOrchestra runs on the Claude Code and Gemini CLIs "
-            "you already pay for through your subscription — no API "
-            "keys, no usage fees.  If neither is installed yet, do "
-            "that now (one-time): "
-            "https://docs.claude.com/en/docs/claude-code  •  "
-            "https://github.com/google-gemini/gemini-cli"
+            "AgentOrchestra runs on the Claude Code, Gemini CLI, and Codex CLI "
+            "you already pay for through your subscription - no API "
+            "keys, no usage fees. If none is installed yet, do that now (one-time): "
+            "https://docs.claude.com/en/docs/claude-code | "
+            "https://github.com/google-gemini/gemini-cli | "
+            "https://github.com/openai/codex"
         )
         layout = QtWidgets.QVBoxLayout(page)
 
         info = QtWidgets.QLabel(
             "Detected on PATH:\n\n"
-            f"  • claude — {'yes' if _which('claude') else 'no'}\n"
-            f"  • gemini — {'yes' if _which('gemini') else 'no'}\n\n"
+            f"  - claude: {'yes' if _which('claude') else 'no'}\n"
+            f"  - gemini: {'yes' if _which('gemini') else 'no'}\n"
+            f"  - codex: {'yes' if _which('codex') else 'no'}\n\n"
             "Click Next either way; you can install them later."
         )
         info.setStyleSheet("color:#0f1115;")
@@ -129,7 +130,7 @@ class FirstRunWizard(QtWidgets.QWizard):
 
         # Hidden no-op placeholders so the existing accept() loop
         # that walks (slot, widget) tuples keeps working without
-        # re-validation.  Their text is always empty → set_secret is
+        # re-validation. Their text is always empty -> set_secret is
         # never called.
         self._anth = QtWidgets.QLineEdit()
         self._google = QtWidgets.QLineEdit()

@@ -55,7 +55,7 @@ class SettingsPage(QtWidgets.QWidget):
         / canvas all route through the local CLIs.  The fields below
         are only useful when the operator wants to dispatch agentic
         Runs through the API-keyed `anthropic` / `google` providers,
-        or use a Code-Edit card whose provider is API-keyed.  Hidden
+        or use a Code Planning Assistant card whose provider is API-keyed.  Hidden
         by default so a fresh-install screenshot doesn't read as "you
         need an Anthropic key to use this app".
         """
@@ -82,7 +82,7 @@ class SettingsPage(QtWidgets.QWidget):
             "AgentOrchestra runs subscription-only by default — chat / agents / "
             "canvas all route through your local Claude Code and Gemini CLIs.  "
             "Set API keys here only if you also want to dispatch API-keyed "
-            "Runs (Code-Edit archetype, parallel Anthropic / Google / OpenAI "
+            "Runs (Code Planning Assistant archetype, parallel Anthropic / Google / OpenAI "
             "providers).  Stored in your OS keychain; never written to disk "
             "in plain text."
         )

@@ -76,3 +76,45 @@ def test_belongs_to_other_provider() -> None:
     # Custom string in nobody's hints — keep it (operator-typed).
     assert _belongs_to_other_provider("my-custom-experimental", "claude-cli") is False
     assert _belongs_to_other_provider("my-custom-experimental", "gemini-cli") is False
+
+
+def test_new_dialog_signature_and_instantiation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for TypeError: BlueprintsPage._new_dialog() got an
+    unexpected keyword argument 'is_agent'.
+
+    Verifies the signature change and correct _NewBlueprintDialog
+    instantiation.
+    """
+    pytest.importorskip("PySide6")
+    from unittest.mock import MagicMock
+    from apps.gui.windows.blueprints import BlueprintsPage
+
+    # Mock RpcClient and QWidget dependencies.
+    mock_client = MagicMock()
+    
+    # We need to mock _NewBlueprintDialog before instantiating BlueprintsPage
+    # because it might be referenced. Actually it's only referenced in _new_dialog.
+    mock_dialog_class = MagicMock()
+    monkeypatch.setattr("apps.gui.windows.blueprints._NewBlueprintDialog", mock_dialog_class)
+    
+    # Mock exec to return Cancelled so we don't trigger more logic.
+    from PySide6 import QtWidgets
+    mock_dialog_instance = mock_dialog_class.return_value
+    mock_dialog_instance.exec.return_value = QtWidgets.QDialog.DialogCode.Rejected
+
+    # Instantiate page (minimal, since we aren't running an event loop).
+    # We bypass __init__ to avoid widget building which requires a QApp.
+    page = MagicMock(spec=BlueprintsPage)
+    page.client = mock_client
+    
+    # Manually attach the real method to the mock object.
+    page._new_dialog = BlueprintsPage._new_dialog.__get__(page, BlueprintsPage)
+    
+    # Test call for Agent.
+    page._new_dialog(is_agent=True)
+    mock_dialog_class.assert_called_with(True, page)
+    
+    # Test call for Drone.
+    mock_dialog_class.reset_mock()
+    page._new_dialog(is_agent=False)
+    mock_dialog_class.assert_called_with(False, page)

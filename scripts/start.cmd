@@ -61,8 +61,10 @@ if not exist "%REPO%\.venv\Scripts\activate.bat" exit /b 1
 
 set CLAUDE_OK=0
 set GEMINI_OK=0
+set CODEX_OK=0
 set CLAUDE_PRESENT=0
 set GEMINI_PRESENT=0
+set CODEX_PRESENT=0
 
 echo ================ Pre-flight ================
 echo.
@@ -124,27 +126,58 @@ if "!GEMINI_PRESENT!"=="1" if not "!GEMINI_PROBE_RC!"=="0" if not "!GEMINI_PROBE
 echo.
 
 rem ====================================================================
-rem [3/3] Verdict + launch
+rem [3/3] Codex CLI
 rem ====================================================================
-echo [3/3] Verdict
+echo [3/3] Codex CLI
+where codex >nul 2>&1
+set CODEX_PATH_RC=!errorlevel!
+if "!CODEX_PATH_RC!"=="0" set CODEX_PRESENT=1
+
+if "!CODEX_PRESENT!"=="0" echo   codex: NOT FOUND on PATH.
+if "!CODEX_PRESENT!"=="0" echo           Install with:  npm install -g @openai/codex
+
+if "!CODEX_PRESENT!"=="1" call codex --version
+if "!CODEX_PRESENT!"=="1" echo   probing 'codex exec' with a hard 20-second timeout...
+if "!CODEX_PRESENT!"=="1" powershell -NoProfile -ExecutionPolicy Bypass -Command "$o=[IO.Path]::GetTempFileName(); $e=[IO.Path]::GetTempFileName(); try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c','codex','exec','respond with the single word OK') -PassThru -NoNewWindow -RedirectStandardOutput $o -RedirectStandardError $e; if ($p.WaitForExit(20000)) { exit $p.ExitCode } else { Stop-Process -Id $p.Id -Force; exit 124 } } catch { Write-Host ('  [probe-exc] ' + $_.Exception.Message); exit 99 } finally { Remove-Item $o,$e -ErrorAction SilentlyContinue }"
+if "!CODEX_PRESENT!"=="1" set CODEX_PROBE_RC=!errorlevel!
+if "!CODEX_PRESENT!"=="0" set CODEX_PROBE_RC=-1
+
+if "!CODEX_PROBE_RC!"=="0" set CODEX_OK=1
+if "!CODEX_PROBE_RC!"=="0" echo   codex: OK
+if "!CODEX_PROBE_RC!"=="124" echo   codex: probe TIMED OUT ^(^>20s^).  Probably hung on auth.
+if "!CODEX_PROBE_RC!"=="124" echo           Run 'codex' interactively to sign in, then re-run start.cmd.
+if "!CODEX_PROBE_RC!"=="99" echo   codex: PowerShell wrapper threw an exception ^(exit 99^).
+if "!CODEX_PROBE_RC!"=="99" echo           Run a direct 'codex exec' probe; if that succeeds the issue is in the start.cmd wrapper, not your auth.
+if "!CODEX_PRESENT!"=="1" if not "!CODEX_PROBE_RC!"=="0" if not "!CODEX_PROBE_RC!"=="124" if not "!CODEX_PROBE_RC!"=="99" echo   codex: probe FAILED ^(exit !CODEX_PROBE_RC!^).
+if "!CODEX_PRESENT!"=="1" if not "!CODEX_PROBE_RC!"=="0" if not "!CODEX_PROBE_RC!"=="124" if not "!CODEX_PROBE_RC!"=="99" echo           Likely an auth issue - run 'codex' to sign in.
+
+echo.
+
+rem ====================================================================
+rem [4/4] Verdict + launch
+rem ====================================================================
+echo [4/4] Verdict
 if "!CLAUDE_OK!"=="1" echo   Claude:  ready
 if not "!CLAUDE_OK!"=="1" echo   Claude:  unavailable
 if "!GEMINI_OK!"=="1" echo   Gemini:  ready
 if not "!GEMINI_OK!"=="1" echo   Gemini:  unavailable
+if "!CODEX_OK!"=="1" echo   Codex:   ready
+if not "!CODEX_OK!"=="1" echo   Codex:   unavailable
 echo.
 
-set BOTH_FAILED=0
-if "!CLAUDE_OK!"=="0" if "!GEMINI_OK!"=="0" set BOTH_FAILED=1
+set ALL_FAILED=0
+if "!CLAUDE_OK!"=="0" if "!GEMINI_OK!"=="0" if "!CODEX_OK!"=="0" set ALL_FAILED=1
 
-if "!BOTH_FAILED!"=="1" echo Both providers failed.  Not launching the app.
-if "!BOTH_FAILED!"=="1" echo.
-if "!BOTH_FAILED!"=="1" echo Fixes:
-if "!BOTH_FAILED!"=="1" echo   * Run scripts\test-claude.cmd  ^(diagnoses Claude auth^)
-if "!BOTH_FAILED!"=="1" echo   * Run scripts\test-gemini.cmd  ^(diagnoses Gemini auth^)
-if "!BOTH_FAILED!"=="1" echo   * Then re-run scripts\start.cmd
-if "!BOTH_FAILED!"=="1" echo.
-if "!BOTH_FAILED!"=="1" pause
-if "!BOTH_FAILED!"=="1" exit /b 1
+if "!ALL_FAILED!"=="1" echo All providers failed.  Not launching the app.
+if "!ALL_FAILED!"=="1" echo.
+if "!ALL_FAILED!"=="1" echo Fixes:
+if "!ALL_FAILED!"=="1" echo   * Run scripts\test-claude.cmd  ^(diagnoses Claude auth^)
+if "!ALL_FAILED!"=="1" echo   * Run scripts\test-gemini.cmd  ^(diagnoses Gemini auth^)
+if "!ALL_FAILED!"=="1" echo   * Run 'codex' interactively, then retry the launcher
+if "!ALL_FAILED!"=="1" echo   * Then re-run scripts\start.cmd
+if "!ALL_FAILED!"=="1" echo.
+if "!ALL_FAILED!"=="1" pause
+if "!ALL_FAILED!"=="1" exit /b 1
 
 echo Launching AgentOrchestra...
 start "AgentOrchestra" cmd /k "cd /d %REPO% && .venv\Scripts\activate.bat && python -m apps.gui.main"

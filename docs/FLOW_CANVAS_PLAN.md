@@ -1,9 +1,9 @@
-# Flow Canvas — Project & Implementation Plan
+﻿# Flow Canvas â€” Project & Implementation Plan
 
 > **Status (Phase 5):** core canvas (Phases 1-4 of this plan) is **shipped**
 > and lives at `apps/gui/canvas/` + `apps/service/flows/`.  The plan's
 > proposed `flows/types.py` / `flows/nodes.py` typed-node split was
-> intentionally not pursued — nodes/edges stayed as
+> intentionally not pursued â€” nodes/edges stayed as
 > `list[dict[str, Any]]` so the canvas can round-trip arbitrary GUI
 > metadata the executor doesn't need to read.  Treat this document as
 > the design rationale; the README's Canvas section is the current
@@ -16,15 +16,15 @@ A visual, zoomable, drag-and-drop orchestration canvas for AgentOrchestra.
 The current Compose tab is a single-shot dispatch form. The Flow Canvas
 turns AgentOrchestra into a visual workflow tool where you can:
 
-1. **Drag agents onto an infinite 2D plane.**
+1. **Drag FPV Drones, Reaper Drones, and Staging Areas onto an infinite 2D plane.**
 2. **Link them together** to form sequential, parallel, fan-out, and
    merge patterns.
 3. **Edit and run** the whole flow with one click.
-4. **Watch it execute live** — nodes light up as they run, edges show
+4. **Watch it execute live** â€” nodes light up as they run, edges show
    data flowing along them, results stream into each node.
 5. **Zoom from "the whole flow at a glance" down to "this one node's
    inspector"** without losing visual hierarchy at any level.
-6. **Save and re-use flows** — a flow is a first-class object, like a
+6. **Save and re-use flows** â€” a flow is a first-class object, like a
    card.
 
 Non-goals for V1:
@@ -34,15 +34,15 @@ Non-goals for V1:
 
 ## 2. Why a node graph fits AgentOrchestra
 
-Multi-agent work is naturally graph-shaped:
+Multi-workflow work is naturally graph-shaped:
 
-- **Sequential** — Broad Research → Narrow Research per finding.
-- **Parallel fan-out** — same prompt to Claude-CLI, Gemini-CLI, then
+- **Sequential** â€” Broad Research â†’ Narrow Research per finding.
+- **Parallel fan-out** â€” same prompt to Claude-CLI, Gemini-CLI, then
   judge.
-- **Conditional branching** — if findings > 5 then deep-dive, else
+- **Conditional branching** â€” if findings > 5 then deep-dive, else
   publish.
-- **Human-in-the-loop** — pause before merge, wait for approval.
-- **Loops** — research → critique → revise until score > threshold.
+- **Human-in-the-loop** â€” pause before merge, wait for approval.
+- **Loops** â€” research â†’ critique â†’ revise until score > threshold.
 
 Today every one of these requires manual orchestration in the Compose
 tab. The Canvas makes them first-class.
@@ -50,36 +50,36 @@ tab. The Canvas makes them first-class.
 ## 3. Architecture overview
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ apps/gui/canvas/                  (PySide6 frontend)    │
-│   canvas.py        OrchestratorCanvas (QGraphicsView)   │
-│   scene.py         CanvasScene (grid, snap, viewport)   │
-│   nodes/           BaseNode + AgentNode + control nodes │
-│   ports.py         Input/output docking points          │
-│   edges.py         Bezier edges, dragging, animation    │
-│   palette.py       Drag source — list of available nodes│
-│   inspector.py     Right-side panel for selection       │
-│   minimap.py       Bottom-right overview widget         │
-│   layout.py        Auto-layout (sugiyama on networkx)   │
-└────────────────────────────┬────────────────────────────┘
-                             │ JSON-RPC + SSE
-┌────────────────────────────▼────────────────────────────┐
-│ apps/service/flows/               (executor + storage)  │
-│   executor.py      Topological run loop, parallel       │
-│                    fan-out via asyncio.gather           │
-│   nodes.py         Per-node-type execution adapters     │
-│   types.py         Flow / FlowNode / FlowEdge / FlowRun │
-└────────────────────────────┬────────────────────────────┘
-                             │
-┌────────────────────────────▼────────────────────────────┐
-│ apps/service/store/                                     │
-│   schema.sql       New flows / flow_runs tables         │
-│   events.py        CRUD + flow_run_*                    │
-└─────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ apps/gui/canvas/                  (PySide6 frontend)    â”‚
+â”‚   canvas.py        OrchestratorCanvas (QGraphicsView)   â”‚
+â”‚   scene.py         CanvasScene (grid, snap, viewport)   â”‚
+â”‚   nodes/           BaseNode + AgentNode + control nodes â”‚
+â”‚   ports.py         Input/output docking points          â”‚
+â”‚   edges.py         Bezier edges, dragging, animation    â”‚
+â”‚   palette.py       Drag source â€” list of available nodesâ”‚
+â”‚   inspector.py     Right-side panel for selection       â”‚
+â”‚   minimap.py       Bottom-right overview widget         â”‚
+â”‚   layout.py        Auto-layout (sugiyama on networkx)   â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                             â”‚ JSON-RPC + SSE
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ apps/service/flows/               (executor + storage)  â”‚
+â”‚   executor.py      Topological run loop, parallel       â”‚
+â”‚                    fan-out via asyncio.gather           â”‚
+â”‚   nodes.py         Per-node-type execution adapters     â”‚
+â”‚   types.py         Flow / FlowNode / FlowEdge / FlowRun â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                             â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ apps/service/store/                                     â”‚
+â”‚   schema.sql       New flows / flow_runs tables         â”‚
+â”‚   events.py        CRUD + flow_run_*                    â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 The Canvas is a new tab alongside Home / Compose / History / Settings.
-The existing single-dispatch Compose flow stays — Flow Canvas is
+The existing single-dispatch Compose flow stays â€” Flow Canvas is
 additive, not a replacement.
 
 ## 4. Technical decisions
@@ -93,7 +93,7 @@ Why:
 - Built-in viewport culling, item-level paint, scene transforms
   (`scale`, `translate`), mouse wheel zoom, rubber-band selection.
 - Per-item LOD via `option->levelOfDetailFromTransform()`.
-- Pure Qt — no extra runtime, no Chromium, no IPC.
+- Pure Qt â€” no extra runtime, no Chromium, no IPC.
 - 100% Pythonic via PySide6.
 
 Why not QML: declarative UI is great for static layouts but heavy for
@@ -111,11 +111,11 @@ Three tiers, switched on `levelOfDetailFromTransform`:
 | Zoom level | What a node draws |
 |------------|-------------------|
 | > 0.6      | Full: header, body text, ports, status badges, cost, last reply preview |
-| 0.25–0.6   | Compact: header + provider icon + status colour |
+| 0.25â€“0.6   | Compact: header + provider icon + status colour |
 | < 0.25     | Dot: a single coloured circle, no text |
 
 Edges fade their labels and arrow-heads at < 0.4. Below 0.2 we draw
-straight lines instead of beziers — cheaper paint, same topology.
+straight lines instead of beziers â€” cheaper paint, same topology.
 
 ### 4.3 Persistence: flow JSON in SQLite
 
@@ -187,19 +187,19 @@ A "Flight" is a pre-set template of grouped agents (a saved Flow) designed to be
 Same SSE channel the existing Live page uses. The canvas opens one
 `stream/flow_runs/<id>` subscription per active flow. Each event:
 
-- `flow.node.started` → pulse the node's border, change colour.
-- `flow.node.token_delta` → stream tokens into the node body's
+- `flow.node.started` â†’ pulse the node's border, change colour.
+- `flow.node.token_delta` â†’ stream tokens into the node body's
   preview area.
-- `flow.node.completed` → freeze final preview, show cost, animate
+- `flow.node.completed` â†’ freeze final preview, show cost, animate
   little dots flowing along outgoing edges.
-- `flow.node.failed` → red border, error tooltip, downstream nodes
+- `flow.node.failed` â†’ red border, error tooltip, downstream nodes
   marked unreachable.
 
 ## 5. Phased delivery
 
 Each phase is independently shippable and useful on its own.
 
-### Phase 1 — Canvas foundation (2–3 days)
+### Phase 1 â€” Canvas foundation (2â€“3 days)
 
 - New tab in `MainWindow`: **Canvas**.
 - `OrchestratorCanvas` (QGraphicsView) with grid background.
@@ -208,16 +208,16 @@ Each phase is independently shippable and useful on its own.
 - Rubber-band selection. Multi-select with Shift.
 - A generic `BaseNode` (rounded rect with title bar) you can drop
   programmatically and drag around. LOD already in place.
-- Bezier edges between two nodes (no port logic yet — endpoints are
+- Bezier edges between two nodes (no port logic yet â€” endpoints are
   just the node centres).
 - Save / load canvas state to a JSON file on disk (no DB yet).
 
 **Demo:** drop boxes on a canvas, drag them around, draw curves
 between them, zoom from 10% to 400% smoothly, save the layout.
 
-### Phase 2 — Agent nodes & palette (2 days)
+### Phase 2 â€” Agent nodes & palette (2 days)
 
-- `AgentNode(BaseNode)` — wraps a `PersonalityCard`. Header shows
+- `AgentNode(BaseNode)` â€” wraps a `PersonalityCard`. Header shows
   card name + provider icon (Claude / Gemini / OpenAI / Ollama / CLI).
   Body shows current prompt template summary.
 - `Palette` panel on the left: lists all cards from `cards.list`,
@@ -230,7 +230,7 @@ between them, zoom from 10% to 400% smoothly, save the layout.
 **Demo:** drag two cards onto the canvas, connect them, edit prompts
 in the inspector, save the flow as JSON.
 
-### Phase 3 — Flow execution (4–5 days)
+### Phase 3 â€” Flow execution (4â€“5 days)
 
 - New types `Flow`, `FlowNode`, `FlowEdge`, `FlowRun` in
   `apps/service/types.py`.
@@ -244,32 +244,32 @@ in the inspector, save the flow as JSON.
   visuals: queued (grey), running (pulsing blue), completed (green),
   failed (red). Edges animate dots flowing left-to-right.
 - Inspector panel shows the streaming transcript of the selected
-  running node — same widget as the existing Live page.
+  running node â€” same widget as the existing Live page.
 
-**Demo:** build a 3-step flow (Broad Research → Narrow Research →
+**Demo:** build a 3-step flow (Broad Research â†’ Narrow Research â†’
 Synthesis), hit Run, watch each node fire in order, see the final
 answer.
 
-### Phase 4 — Control nodes (3–4 days)
+### Phase 4 â€” Control nodes (3â€“4 days)
 
-- `TriggerNode` — manual (button) for V1; scheduled / webhook later.
-- `BranchNode` — outputs route to one of N downstream paths based on
+- `TriggerNode` â€” manual (button) for V1; scheduled / webhook later.
+- `BranchNode` â€” outputs route to one of N downstream paths based on
   a predicate. V1 supports two predicates: regex match on the
   upstream text, and an LLM-judge prompt that returns a label.
-- `MergeNode` — joins N parallel branches; output is the
+- `MergeNode` â€” joins N parallel branches; output is the
   concatenation or an LLM-summarised synthesis.
-- `HumanNode` — pauses the run, surfaces an approval prompt in the
+- `HumanNode` â€” pauses the run, surfaces an approval prompt in the
   GUI; downstream nodes wait until Approve / Reject is clicked.
-- `OutputNode` — terminal sink. Renders the upstream result as a
+- `OutputNode` â€” terminal sink. Renders the upstream result as a
   Markdown preview, optionally writes to a file path or pushes to a
   Slack webhook.
 
-**Demo:** "broad research → branch on findings count → narrow
-research per finding (parallel fan-out) → merge → human approves →
-write report" — a non-trivial workflow that today would take a
+**Demo:** "broad research â†’ branch on findings count â†’ narrow
+research per finding (parallel fan-out) â†’ merge â†’ human approves â†’
+write report" â€” a non-trivial workflow that today would take a
 half-hour of manual dispatch.
 
-### Phase 5 — Polish (2–3 days)
+### Phase 5 â€” Polish (2â€“3 days)
 
 - **Minimap** in the bottom-right corner showing the whole graph
   with a viewport rectangle you can drag.
@@ -277,7 +277,7 @@ half-hour of manual dispatch.
   `networkx` topological sort + manual lane assignment, or use
   `pygraphviz` if the user has it installed.
 - **Validator** with a problems panel: "node X is unreachable",
-  "cycle detected at edge Y→Z", "node W has no card assigned".
+  "cycle detected at edge Yâ†’Z", "node W has no card assigned".
 - **Undo / redo** (QUndoStack with QUndoCommand subclasses for
   add/remove/move/connect).
 - **Templates**: save a flow as a template, instantiate from
@@ -287,10 +287,10 @@ half-hour of manual dispatch.
   (zoom-to-selection), Space (pan).
 - **Export**: render the canvas as PNG / SVG for documentation.
 
-### Phase 6 — Stretch goals (open-ended)
+### Phase 6 â€” Stretch goals (open-ended)
 
 - **Per-node A/B**: each node can opt-in to "run on Claude AND Gemini
-  in parallel" with a built-in judge — visualised as a node that
+  in parallel" with a built-in judge â€” visualised as a node that
   splits and re-merges automatically.
 - **Sub-flows**: collapse a selected group of nodes into a single
   callable sub-flow node; flows-as-functions.
@@ -307,14 +307,14 @@ half-hour of manual dispatch.
 
 | Phase | Working days | Cumulative |
 |-------|--------------|------------|
-| 1     | 2–3          | 3          |
+| 1     | 2â€“3          | 3          |
 | 2     | 2            | 5          |
-| 3     | 4–5          | 10         |
-| 4     | 3–4          | 14         |
-| 5     | 2–3          | 17         |
-| 6     | open         | —          |
+| 3     | 4â€“5          | 10         |
+| 4     | 3â€“4          | 14         |
+| 5     | 2â€“3          | 17         |
+| 6     | open         | â€”          |
 
-A useful MVP through **Phase 4 ≈ two weeks of focused work**.
+A useful MVP through **Phase 4 â‰ˆ two weeks of focused work**.
 
 ## 7. Risks & mitigations
 
@@ -322,16 +322,16 @@ A useful MVP through **Phase 4 ≈ two weeks of focused work**.
 |------|-----------|
 | Slow paint with many nodes | LOD tiers + viewport culling (built into QGraphicsView). Profile at 200 nodes. |
 | Edge routing looks tangled at scale | V1: simple bezier. V2: A* routing around obstacles. |
-| Cycle detection performance on huge graphs | `networkx.simple_cycles` is good enough until ~10⁴ edges. |
+| Cycle detection performance on huge graphs | `networkx.simple_cycles` is good enough until ~10â´ edges. |
 | Live SSE flood when many nodes run in parallel | Coalesce token-delta events on the service side: emit at most one per node per 50 ms. |
 | Existing Compose flow regression | Keep Compose tab. Canvas tab is additive. Same RPCs underneath. |
-| Confusing UX on first launch | Ship a built-in "Hello flow" template (Trigger → Broad Research → Output). One click to instantiate. |
+| Confusing UX on first launch | Ship a built-in "Hello flow" template (Trigger â†’ Broad Research â†’ Output). One click to instantiate. |
 | Loops / infinite recursion | Hard cap on per-flow-run total node executions (e.g. 100). Configurable per flow. |
 | Cost runaway on parallel fan-out | Reuse existing per-card cost caps; flow-level cap as a sum across all node runs. Hard-stop on breach. |
 
 ## 8. How this fits the existing roadmap
 
-- **Phase 1–4 of the original plan**: built. Cards, dispatch,
+- **Phase 1â€“4 of the original plan**: built. Cards, dispatch,
   worktrees, History, Live page, providers (Claude, Gemini, Anthropic
   API, Google API, Ollama), CLI variants, annotator, basic GUI.
 - **This plan = Phase 5**: visual orchestration on top of the
@@ -351,3 +351,9 @@ A useful MVP through **Phase 4 ≈ two weeks of focused work**.
 4. Iterate: Phase 2 PR, Phase 3 PR, etc.
 5. Each phase ships behind a `Canvas` rail-button so users opt in
    gradually.
+
+## ShadowLoop Alignment Addendum
+
+- `ConsensusNode` is now a first-class flow node: fan-out to multiple candidate cards, fan-in through a judge card.
+- Review UX supports side-by-side candidate comparison and one-click winner selection, persisted as an artifact/event for auditability.
+- Flow execution events include token deltas for candidate and judge passes.

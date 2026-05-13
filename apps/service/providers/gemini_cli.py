@@ -248,7 +248,7 @@ class GeminiCLIProvider:
                 "agentic dispatch via the Gemini CLI is not yet wired; "
                 "pick a chat archetype (Broad Research, Narrow Research, "
                 "QA on Fix) or set the card's provider to 'google' with "
-                "a GOOGLE_API_KEY for the Code Edit archetype"
+                "a GOOGLE_API_KEY for the Code Planning Assistant archetype"
             ),
         )
 

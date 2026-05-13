@@ -15,7 +15,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, Callable, cast
 
 from apps.service.types import is_path_inside
 
@@ -65,6 +65,8 @@ class ToolExecutor(Protocol):
         tool_use_id: str,
         name: str,
         params: dict[str, Any],
+        *,
+        guard: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> ToolResult: ...
 
 
@@ -93,6 +95,8 @@ class WorktreeToolset:
     invocations: list[ToolInvocation] = field(default_factory=list)
     sandbox: object | None = None
     mcp_tools: dict[str, MCPRunTimeTool] = field(default_factory=dict)
+    on_plan_updated: Callable[[], None] | None = None
+    guard: Callable[[str, dict[str, Any]], None] | None = None
 
     def tools(self) -> list[ToolDef]:
         builtin = self._builtin_tools()
@@ -168,7 +172,13 @@ class WorktreeToolset:
         tool_use_id: str,
         name: str,
         params: dict[str, Any],
+        *,
+        guard: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> ToolResult:
+        g = guard or self.guard
+        if g:
+            g(name, params)
+
         invocation = ToolInvocation(
             tool_use_id=tool_use_id,
             name=name,
@@ -256,7 +266,12 @@ class WorktreeToolset:
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(encoded)
+        
         self.written_files.add(rel)
+        
+        if rel == "PLAN.md" and self.on_plan_updated:
+            self.on_plan_updated()
+            
         return {"path": rel, "bytes_written": len(encoded)}
 
     async def _list_files(self, path: str) -> dict[str, Any]:
@@ -314,7 +329,8 @@ class MCPRunTimeTool:
 
     async def invoke(self, params: dict[str, Any]) -> dict[str, Any]:
         try:
-            return await self.invoke_fn(self.tool_name, params)
+            res = await self.invoke_fn(self.tool_name, params)
+            return cast(dict[str, Any], res)
         except Exception as exc:
             return {"error": f"{type(exc).__name__}: {exc}"}
 

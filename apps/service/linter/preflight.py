@@ -177,6 +177,14 @@ _ARCHETYPE_RULES = {
         "must_mention": [r"\bgoal\b|\bquestion\b|\btopic\b"],
         "explanation": "Research archetype must state a goal or topic.",
     },
+    "ui-architect": {
+        "must_mention": [r"\b(apps/gui/main\.py|target|path|entrypoint)\b", r"\b(mermaid|diagram|map)\b"],
+        "explanation": "UI Architect must include a mapping target and diagram/map deliverable.",
+    },
+    "logic-liaison": {
+        "must_mention": [r"\b(apps/gui/main\.py|target|path|entrypoint)\b", r"\b(mermaid|diagram|map)\b"],
+        "explanation": "Logic Liaison must include a mapping target and diagram/map deliverable.",
+    },
 }
 
 

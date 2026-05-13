@@ -9,6 +9,7 @@ routes:
 
 * claude-cli — Claude Code on the user's Max / Pro plan
 * gemini-cli — Google Gemini CLI on the user's existing auth
+* codex-cli  - OpenAI Codex CLI on the user's existing auth
 * ollama    — local models, no network calls
 
 The API-keyed adapters (`anthropic`, `google`, eventually `openai`)
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 from apps.service.providers.anthropic import AnthropicProvider
 from apps.service.providers.claude_cli import ClaudeCLIProvider
+from apps.service.providers.codex_cli import CodexCLIProvider
 from apps.service.providers.gemini_cli import GeminiCLIProvider
 from apps.service.providers.google import GoogleProvider
 from apps.service.providers.ollama import OllamaProvider
@@ -50,6 +52,7 @@ def install_default_providers() -> None:
     # set so accidental dispatch never bills against an API account.
     register("claude-cli", ClaudeCLIProvider())
     register("gemini-cli", GeminiCLIProvider())
+    register("codex-cli", CodexCLIProvider())
     register("ollama", OllamaProvider())
 
 

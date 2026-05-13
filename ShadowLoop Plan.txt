@@ -1,0 +1,103 @@
+# Action Plan: Shadow-Plan Orchestration & Agentic Evaluation (High-Density Spec)
+
+**Version**: 1.1.0  
+**Status**: Expanded Draft  
+**Core Thesis**: Forced architectural intentionality via state-gated tool access.
+
+---
+
+## Phase 1: The Shadow-Plan Guard (State-Gated Orchestration)
+
+**Technical Specification**:
+Modify `RunDispatcher` in `apps/service/dispatch/dispatcher.py` to implement a transient "Intent State" machine. 
+
+*   **State Machine Logic**:
+    - Add `last_plan_turn: int | None` to the `Run` domain type.
+    - Define `MOD_TOOLS = {"replace", "write_file", "delete_file", "run_shell_command"}`.
+    - Define `PLAN_FILE = "PLAN.md"`.
+    - **Interception Hook**: Before `ToolResult` dispatch, check `if tool_name in MOD_TOOLS`.
+    - **Validation**: If `AUTONOMOUS` mode is active, reject the call unless `current_turn - last_plan_turn <= 1`.
+    - **Plan Detection**: Update `last_plan_turn` only if `write_file` or `replace` targets `PLAN.md`.
+*   **Success Look**: Zero "Vibe-only" edits in autonomous runs. Every modification has a trace in `PLAN.md`.
+*   **QA & Safeguards**:
+    - **Test Case A**: Agent calls `replace`. System returns `403 Shadow-Plan Violation`.
+    - **Test Case B**: Agent writes to `PLAN.md`, then calls `replace` in Turn N+1. System permits.
+    - **Safeguard**: Exclude `PLAN.md` from "Plan Detection" to prevent infinite planning recursion.
+
+---
+
+## Phase 2: Specialized Mapper Archetypes (PySide6 Structural Analysis)
+
+**Technical Specification**:
+Develop high-density `rg` (ripgrep) instruction sets for recursive codebase mapping.
+
+*   **UI Architect (Visual Hierarchy)**:
+    - **Focus**: Object trees and styling.
+    - **Regex Patterns**:
+        - `class\s+\w+\(QtWidgets\.\w+\):` (Inheritance tracking)
+        - `self\.\w+\s*=\s*QtWidgets\.\w+\(` (Widget instantiation)
+        - `\.addLayout\(|\.addWidget\(` (Layout nesting)
+        - `\.setStyleSheet\(` (CSS injection points)
+*   **Logic Liaison (Connectivity & Concurrency)**:
+    - **Focus**: Signal-Slot integrity and threading boundaries.
+    - **Regex Patterns**:
+        - `\.connect\(` (Signal wiring)
+        - `@QtCore\.Slot\(|@Slot\(` (Slot identification)
+        - `Signal\(|pyqtSignal\(` (Custom signal definitions)
+        - `QThread|QtCore\.QThread|moveToThread\(` (Concurrency hazards)
+*   **Implementation**: Persist as `.md` templates in `packs/archetypes/` with mandatory "Read-Only" system instructions.
+*   **Success Look**: Mapper Agents generate a complete, valid Mermaid.js diagram of the UI/Logic boundary.
+*   **QA**: 
+    - Verify Mappers only use `read_file`, `grep_search`, and `list_directory`.
+    - Validate generated maps against `apps/gui/main.py`.
+
+---
+
+## Phase 3: Agentic Evaluation Dashboard (SQL-Backed Analytics)
+
+**Technical Specification**:
+Implement an aggregation layer in `apps/service/store/events.py` to compute performance metrics.
+
+*   **SQL Schema Extensions**:
+    - Add `is_hallucination` (bool) and `plan_latency` (int) columns to `drone_actions` table metadata.
+*   **Metrics Logic**:
+    - **Hallucination Rate**: `SELECT COUNT(*) FROM events WHERE type='tool_error' AND run_id=X`.
+    - **Token Efficiency**: `chars_added / (input_tokens + output_tokens)`.
+    - **Re-plan Velocity**: Turns spent writing to `PLAN.md` relative to total turns.
+*   **GUI Implementation**:
+    - `AnalyticsPage` in `apps/gui/windows/`.
+    - Use `QtCharts` or a custom-pained `ContextGauge` to show 7-day rolling performance.
+*   **Success Look**: Comparative "Robot Leaderboard" showing cost-per-successful-PR.
+*   **QA**: 
+    - Cross-reference `usage` events with provider-billed totals.
+
+---
+
+## Phase 4: Parallel Consensus Orchestration (Adversarial QA)
+
+**Technical Specification**:
+Extend `FlowExecutor` to handle fan-out/fan-in parallel tasks.
+
+*   **Consensus Node Logic**:
+    - **Fan-out**: Clone the current workspace context into N ephemeral worktrees.
+    - **Execution**: Dispatch N `AgentNode` instances with identical prompts but different `card_id` (e.g., Claude vs. Gemini).
+    - **Fan-in**: Use a `JudgeNode` to perform a text-diff of the N `PLAN.md` outputs.
+*   **GUI Comparison**:
+    - Split-screen diff viewer in the `Review` tab showing conflicting implementation plans.
+*   **Success Look**: Operator chooses between two viable strategies with one click.
+*   **QA**: 
+    - Ensure `DockerSandbox` isolation for each parallel branch to prevent cross-contamination.
+
+---
+
+## Development & Safety Safeguards
+
+1.  **Strict Typing**: All new orchestration logic must pass `mypy --strict`.
+2.  **Turn Gating**: Hard-limit autonomous runs to 15 turns to prevent token-burn on recursive planning.
+3.  **Context Hygiene**: Shadow-Plans must be injected into the *next* turn's input to ensure the agent remembers its own intent.
+4.  **Signal Integrity**: Linter must flag any `replace` attempt that connects a signal to a method containing blocking I/O without a `QThread`.
+
+---
+
+**Approval**:  
+*Awaiting Operator Signature*

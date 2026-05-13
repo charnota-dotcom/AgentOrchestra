@@ -39,6 +39,11 @@ class NodeStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    WAITING = "waiting"
+    RELEASED = "released"
+    BLOCKED = "blocked"
+    TIMED_OUT = "timed_out"
+    REJECTED = "rejected"
 
 
 _STATUS_COLOUR = {
@@ -48,6 +53,11 @@ _STATUS_COLOUR = {
     NodeStatus.COMPLETED: QtGui.QColor("#1f7a3f"),
     NodeStatus.FAILED: QtGui.QColor("#b3261e"),
     NodeStatus.SKIPPED: QtGui.QColor("#5b6068"),
+    NodeStatus.WAITING: QtGui.QColor("#a96b00"),
+    NodeStatus.RELEASED: QtGui.QColor("#1f7a3f"),
+    NodeStatus.BLOCKED: QtGui.QColor("#b3261e"),
+    NodeStatus.TIMED_OUT: QtGui.QColor("#7a4a00"),
+    NodeStatus.REJECTED: QtGui.QColor("#7c2d12"),
 }
 
 

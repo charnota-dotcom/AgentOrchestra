@@ -14,7 +14,7 @@ the plan the operator says they're on.
 
 from __future__ import annotations
 
-DATA_AS_OF = "2026-05-10"
+DATA_AS_OF = "2026-05-12"
 
 
 # Plan caps.  Claude Code's per-window message caps depend on the
@@ -35,8 +35,8 @@ _CLAUDE_PLANS: list[dict[str, object]] = [
         "label": "Claude Max (5×)",
         "message_caps": [
             {"window": "5h", "model": "Sonnet", "messages": 225},
-            {"window": "weekly", "model": "Sonnet", "messages": "≈4500"},
-            {"window": "weekly", "model": "Opus", "messages": "≈225"},
+            {"window": "7d", "model": "Sonnet", "messages": "≈4500"},
+            {"window": "7d", "model": "Opus", "messages": "≈225"},
         ],
         "notes": "Per the published Max-5× tier.  Opus has its own weekly sub-cap.",
     },
@@ -45,8 +45,8 @@ _CLAUDE_PLANS: list[dict[str, object]] = [
         "label": "Claude Max (20×)",
         "message_caps": [
             {"window": "5h", "model": "Sonnet", "messages": 900},
-            {"window": "weekly", "model": "Sonnet", "messages": "≈18000"},
-            {"window": "weekly", "model": "Opus", "messages": "≈900"},
+            {"window": "7d", "model": "Sonnet", "messages": "≈18000"},
+            {"window": "7d", "model": "Opus", "messages": "≈900"},
         ],
         "notes": "Per the published Max-20× tier.  Opus has its own weekly sub-cap.",
     },
@@ -66,8 +66,10 @@ _GEMINI_PLANS: list[dict[str, object]] = [
         "id": "free",
         "label": "Gemini (free tier)",
         "message_caps": [
-            {"window": "daily", "model": "2.5 Pro", "messages": "limited (rate-throttled)"},
-            {"window": "daily", "model": "2.5 Flash", "messages": "higher than Pro"},
+            {"window": "24h", "model": "2.5 Pro", "messages": "limited (rate-throttled)"},
+            {"window": "24h", "model": "2.5 Flash", "messages": "higher than Pro"},
+            {"window": "24h", "model": "3 Pro (preview)", "messages": "preview-gated / varies"},
+            {"window": "24h", "model": "3 Flash (preview)", "messages": "preview-gated / varies"},
         ],
         "notes": "Free tier; expect frequent rate-limit replies on Pro.",
     },
@@ -75,7 +77,7 @@ _GEMINI_PLANS: list[dict[str, object]] = [
         "id": "ai-pro",
         "label": "Google AI Pro",
         "message_caps": [
-            {"window": "daily", "model": "2.5 Pro", "messages": 100},
+            {"window": "24h", "model": "2.5 Pro", "messages": 100},
         ],
         "notes": "Approx; Pro plan grants 100/day on 2.5 Pro plus generous Flash quota.",
     },
@@ -83,9 +85,30 @@ _GEMINI_PLANS: list[dict[str, object]] = [
         "id": "ai-ultra",
         "label": "Google AI Ultra",
         "message_caps": [
-            {"window": "daily", "model": "2.5 Pro", "messages": "≈500"},
+            {"window": "24h", "model": "2.5 Pro", "messages": "≈500"},
         ],
         "notes": "Approx; Ultra raises the Pro cap substantially.",
+    },
+]
+
+
+_CODEX_PLANS: list[dict[str, object]] = [
+    {
+        "id": "chatgpt-linked",
+        "label": "Codex (ChatGPT-linked account)",
+        "message_caps": [
+            {"window": "24h", "model": "Codex family", "messages": "not published as fixed caps"},
+        ],
+        "notes": "Usage visibility depends on OpenAI dashboard/account tier; verify live details in dashboard.",
+    },
+    {
+        "id": "api-tier",
+        "label": "Codex (API usage tiers)",
+        "message_caps": [
+            {"window": "24h", "model": "gpt-5-codex", "messages": "RPM/TPM by API tier"},
+            {"window": "24h", "model": "gpt-5.2/5.3-codex", "messages": "RPM/TPM by API tier"},
+        ],
+        "notes": "OpenAI API tiers apply request/token limits; see the Models and Rate Limits docs for your org.",
     },
 ]
 
@@ -101,11 +124,19 @@ _CONTEXT_WINDOWS: dict[str, int] = {
     "claude-opus-4-6": 200_000,
     "claude-haiku-4-5": 200_000,
     # Google
-    "gemini-2.5-pro": 2_000_000,
+    "gemini-2.5-pro": 1_000_000,
     "gemini-2.5-flash": 1_000_000,
+    "gemini-2.5-flash-lite": 1_048_576,
+    "gemini-3-pro-preview": 1_048_576,
+    "gemini-3-flash-preview": 1_048_576,
     "gemini-2.0-flash": 1_000_000,
     "gemini-1.5-pro": 2_000_000,
     "gemini-1.5-flash": 1_000_000,
+    # OpenAI Codex family
+    "gpt-5.3-codex": 400_000,
+    "gpt-5.2-codex": 400_000,
+    "gpt-5-codex": 400_000,
+    "codex-mini-latest": 400_000,
 }
 
 
@@ -115,6 +146,10 @@ def claude_plans() -> list[dict[str, object]]:
 
 def gemini_plans() -> list[dict[str, object]]:
     return [dict(p) for p in _GEMINI_PLANS]
+
+
+def codex_plans() -> list[dict[str, object]]:
+    return [dict(p) for p in _CODEX_PLANS]
 
 
 def context_window(model: str) -> int | None:

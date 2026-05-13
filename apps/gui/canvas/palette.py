@@ -32,6 +32,10 @@ _CONTROL_NODES = [
     ("output", "Output", "Final sink"),
 ]
 
+_STAGING_NODES = [
+    ("staging_area", "Staging Area", "Wait / gate / release"),
+]
+
 
 class _DragList(QtWidgets.QListWidget):
     """A QListWidget that emits a custom-MIME drag on item press."""
@@ -97,17 +101,29 @@ class PalettePanel(QtWidgets.QWidget):
             self.control_list.addItem(item)
         layout.addWidget(self.control_list)
 
-        layout.addWidget(self._section_header("Agent cards"))
+        layout.addWidget(self._section_header("Reaper cards"))
         self.cards_list = _DragList()
         self.cards_list.setStyleSheet(self._list_stylesheet())
         layout.addWidget(self.cards_list, stretch=1)
+
+        layout.addWidget(self._section_header("Staging"))
+        self.staging_list = _DragList()
+        self.staging_list.setStyleSheet(self._list_stylesheet())
+        for kind, name, desc in _STAGING_NODES:
+            item = QtWidgets.QListWidgetItem(f"{name}\n{desc}")
+            item.setData(
+                QtCore.Qt.ItemDataRole.UserRole,
+                {"kind": "control", "control_kind": kind},
+            )
+            self.staging_list.addItem(item)
+        layout.addWidget(self.staging_list)
 
         # Drones — deployed actions from the Drones tab.  Drag onto
         # the canvas to anchor an action as a node; double-click the
         # node to open a chat dialog scoped to that action.
         drones_header = QtWidgets.QHBoxLayout()
         drones_header.setContentsMargins(0, 0, 0, 0)
-        drones_header.addWidget(self._section_header("Drones"), stretch=1)
+        drones_header.addWidget(self._section_header("FPV Drones"), stretch=1)
         deploy_btn = QtWidgets.QPushButton("Deploy")
         deploy_btn.setStyleSheet(
             "QPushButton{padding:2px 8px;border:1px solid #1f6feb;"
@@ -115,7 +131,7 @@ class PalettePanel(QtWidgets.QWidget):
             "QPushButton:hover{background:#1860d6;}"
         )
         deploy_btn.setToolTip(
-            "Deploy a new drone action from a blueprint without leaving the canvas."
+            "Deploy a new FPV drone from a blueprint without leaving the canvas."
         )
         deploy_btn.clicked.connect(self._deploy_dialog)  # type: ignore[arg-type]
         drones_header.addWidget(deploy_btn)

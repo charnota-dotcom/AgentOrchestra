@@ -79,7 +79,7 @@ class ClaudeCLIProvider:
                 "wired; pick a chat archetype (Broad Research, "
                 "Narrow Research, QA on Fix) or set the card's "
                 "provider to 'anthropic' with an API key for the "
-                "Code Edit archetype"
+                "Code Planning Assistant archetype"
             ),
         )
 

@@ -36,7 +36,11 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from pathlib import PurePosixPath
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from apps.service.dispatch.tools import MCPRunTimeTool
 
 from apps.service.cost.meter import cost_for_call
 from apps.service.dispatch.bus import EventBus
@@ -57,6 +61,7 @@ from apps.service.types import (
     RunState,
     Step,
     StepKind,
+    ToolError,
     Workspace,
     assert_run_transition,
     long_id,
@@ -73,6 +78,33 @@ class DispatchError(Exception):
     pass
 
 
+MOD_TOOLS = {"replace", "write_file", "delete_file", "run_shell_command"}
+PLAN_FILE = "PLAN.md"
+AUTONOMOUS_TURN_LIMIT = 15
+
+
+def _is_plan_file_target(target: Any) -> bool:
+    """Return True when tool params target PLAN.md, tolerant of ./ prefixes."""
+    if not isinstance(target, str) or not target.strip():
+        return False
+    normalized = str(PurePosixPath(target.replace("\\", "/")))
+    return normalized == PLAN_FILE
+
+
+def _read_shadow_plan(worktree: Path) -> str:
+    """Best-effort PLAN.md reader used for turn-context injection."""
+    plan_path = worktree / PLAN_FILE
+    try:
+        if not plan_path.exists():
+            return ""
+        text = plan_path.read_text(encoding="utf-8", errors="replace").strip()
+        if not text:
+            return ""
+        return text[:4000]
+    except Exception:
+        return ""
+
+
 class RunDispatcher:
     """Stateless service object — one instance shared across all runs."""
 
@@ -86,7 +118,7 @@ class RunDispatcher:
         self.manager = manager
         self.bus = bus
         # Track in-flight runs so the GUI can request cancellation.
-        self._tasks: dict[str, asyncio.Task] = {}
+        self._tasks: dict[str, asyncio.Task[None]] = {}
         # Plan-approval gates: one event per Run that's waiting for the
         # human to nod off the plan before executing.
         self._plan_gates: dict[str, asyncio.Event] = {}
@@ -151,7 +183,7 @@ class RunDispatcher:
         task = asyncio.create_task(coro, name=f"run-{run.id}")
         self._tasks[run.id] = task
 
-        def _cleanup(_t: asyncio.Task) -> None:
+        def _cleanup(_t: asyncio.Task[None]) -> None:
             self._tasks.pop(run.id, None)
             self._soft_cap_warned.discard(run.id)
             self._plan_gates.pop(run.id, None)
@@ -509,18 +541,60 @@ class RunDispatcher:
             # before invoking the tool-using agent loop.
             if card.requires_plan:
                 await self._plan_phase(run, card, rendered_text)
+                # Plan phase completed and was explicitly approved.
+                # Seed planning recency so Turn 1 tool mutations are
+                # allowed by the Shadow-Plan guard.
+                run.last_plan_turn = 1
+                await self.store.db.execute(
+                    "UPDATE runs SET last_plan_turn = ? WHERE id = ?",
+                    (run.last_plan_turn, run.id),
+                )
+                await self.store.db.commit()
 
             await self._transition_run(run, RunState.EXECUTING)
 
             # 2. Open the agent loop with the worktree toolset.
             sandbox = await self._open_sandbox(card, Path(branch.worktree_path))
             mcp_tools, mcp_clients = await self._open_mcp_tools(card)
+
+            planned_this_turn = False
+            turn_count = 1
+
+            def on_plan_updated() -> None:
+                nonlocal planned_this_turn
+                planned_this_turn = True
+
+            def guard(tool_name: str, params: dict[str, Any]) -> None:
+                if tool_name in MOD_TOOLS:
+                    # Writing or replacing PLAN.md is always allowed (bootstrap/update).
+                    # We check 'path' (write_file) or 'file_path' (replace).
+                    target = params.get("path") or params.get("file_path")
+                    if tool_name in {"write_file", "replace"} and _is_plan_file_target(target):
+                        return
+
+                    if turn_count - (run.last_plan_turn or -1) > 1:
+                        raise ToolError(
+                            "403 Shadow-Plan Violation: You must document your intent "
+                            "in PLAN.md before modifying code."
+                        )
+
             toolset = WorktreeToolset(
                 worktree=Path(branch.worktree_path),
                 sandbox=sandbox,
                 mcp_tools=mcp_tools,
+                on_plan_updated=on_plan_updated,
+                guard=guard,
             )
             provider = get_provider(card.provider)
+            injected_plan = _read_shadow_plan(Path(branch.worktree_path))
+            user_message = rendered_text
+            if injected_plan:
+                user_message = (
+                    "Shadow Plan Context (inject for next-turn intent memory):\n"
+                    f"{injected_plan}\n\n"
+                    "Instruction:\n"
+                    f"{rendered_text}"
+                )
 
             tokens_in = tokens_out = 0
             seq = 0
@@ -531,9 +605,9 @@ class RunDispatcher:
                 async for ev in provider.run_with_tools(
                     card,
                     system=card.description,
-                    user_message=rendered_text,
+                    user_message=user_message,
                     executor=toolset,
-                    max_turns=card.max_turns,
+                    max_turns=min(max(1, card.max_turns), AUTONOMOUS_TURN_LIMIT),
                 ):
                     if ev.kind == "usage":
                         tokens_in = int(ev.payload.get("input_tokens") or 0)
@@ -606,6 +680,17 @@ class RunDispatcher:
                                 )
                             )
                     elif ev.kind == "turn_end":
+                        if planned_this_turn:
+                            run.last_plan_turn = turn_count
+                            await self.store.db.execute(
+                                "UPDATE runs SET last_plan_turn = ? WHERE id = ?",
+                                (run.last_plan_turn, run.id),
+                            )
+                            await self.store.db.commit()
+                            planned_this_turn = False
+
+                        turn_count = ev.payload.get("turn", turn_count) + 1
+
                         # If anything was written this turn, commit it.
                         written = toolset.reset_written()
                         if written and commit_count < card.max_commits_per_run:
@@ -748,7 +833,7 @@ class RunDispatcher:
                         branch.id,
                     )
 
-    async def _open_mcp_tools(self, card: PersonalityCard):
+    async def _open_mcp_tools(self, card: PersonalityCard) -> tuple[dict[str, MCPRunTimeTool], list[Any]]:
         """Resolve any MCP server names in card.tool_allowlist against
         the registry, open trusted ones, and return (tool_dict, clients).
         Untrusted / blocked / unknown / non-stdio entries are skipped
@@ -806,10 +891,10 @@ class RunDispatcher:
 
                 async def _invoke(
                     _real_name: str,
-                    params: dict,
+                    params: dict[str, Any],
                     _c: MCPClient = client,
                     _real: str = t.name,
-                ) -> dict:
+                ) -> dict[str, Any]:
                     return await _c.call_tool(_real, params)
 
                 out_tools[public_name] = MCPRunTimeTool(
@@ -820,7 +905,7 @@ class RunDispatcher:
                 )
         return out_tools, clients
 
-    async def _open_sandbox(self, card: PersonalityCard, worktree: Path):
+    async def _open_sandbox(self, card: PersonalityCard, worktree: Path) -> Any:
         """Open a sandbox per the card's tier; fall back to local on
         Docker errors and emit a warning event.
         """

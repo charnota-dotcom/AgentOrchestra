@@ -1,56 +1,63 @@
-# Changelog
+﻿# Changelog
 
-## Phase 7 — Agents, Skills & Stability (2026-05)
+## Unreleased - Vocabulary alignment (2026-05)
 
-Significant UX and reliability overhaul, refining the Drone model and
-introducing first-class autonomous Agent workflows.
+- The current product vocabulary now uses **FPV Drone**, **Reaper Drone**, and **Staging Area**.
+- Legacy labels remain documented only where they matter for compatibility or historical accuracy.
 
-- **Drones vs. Agents Split** — Separate UI sections for manual browser-based units ("Drones") and autonomous CLI-based units ("Agents").
-- **Standalone Skills Management** — Dedicated "Skills" tab for full CRUD management of agent superpower templates.  Auto-seeded with 20 popular templates (research, security, devops).
-- **Blueprint Refinement** — Context-aware creation workflow with "+ Drone" and "+ Agent" buttons.  Agents now use a mandatory popup skill selector instead of manual entry.
-- **Drone-to-Agent Conversion** — "Convert to Agent" workflow on the canvas and in the blueprint editor, allowing manual conversations to be upgraded to autonomous workflows while preserving history.
-- **Real-Time Streaming** — SSE-backed token deltas for both stand-alone chat and the Flow Canvas, mirroring the CLI's responsiveness.
-- **Peer-to-Peer "Talk"** — Cross-context communication enabled via User-set references. Agents can now "see" and build upon the conversation history of linked peers across different models.
-- **Core Stability Fixes** — Resolved parallel execution data races, hardened human approval gates, implemented optimistic concurrency locks for flow runs, and added a parent-PID watchdog to prevent orphaned service processes.
-- **UX Polish** — Relaxed horizontal window width constraints, fixed node header rendering, and added a 10-year-old level User Manual linked in the sidebar.
+## Phase 7 - FPV Drones, Reaper Drones & Stability (2026-05)
 
-## Phase 6 — Drone model (2026-05)
+Significant UX and reliability overhaul, refining the FPV Drone model and
+introducing first-class autonomous Reaper Drone workflows.
 
-The "Agent" abstraction has been replaced by the **Drone** model.
+- **FPV Drones vs. Reaper Drones Split** â€” Separate UI sections for manual browser-based units ("FPV Drones") and autonomous CLI-based units ("Reaper Drones").
+- **Standalone Skills Management** - Dedicated "Skills" tab for full CRUD management of Reaper Drone superpower templates.  Auto-seeded with 20 popular templates (research, security, devops).
+- **Blueprint Refinement** â€” Context-aware creation workflow with "+ FPV Drone" and "+ Reaper Drone" buttons.  Reaper Drones now use a mandatory popup skill selector instead of manual entry.
+- **Legacy conversion compatibility** â€” "Convert to Reaper Drone" workflow on the canvas and in the blueprint editor, allowing manual conversations to be upgraded to autonomous workflows while preserving history.
+- **Real-Time Streaming** â€” SSE-backed token deltas for both stand-alone chat and the Flow Canvas, mirroring the CLI's responsiveness.
+- **Peer-to-Peer "Talk"** â€” Cross-context communication enabled via User-set references. Reaper Drones can now "see" and build upon the conversation history of linked peers across different models.
+- **Core Stability Fixes** â€” Resolved parallel execution data races, hardened human approval gates, implemented optimistic concurrency locks for flow runs, and added a parent-PID watchdog to prevent orphaned service processes.
+- **Annotator Reliability** â€” Fixed a bug where startup loads would "mass-mint" duplicate FPV Drones for every existing annotation. Corrected annotation indexing and implemented self-healing action log deduplication to prevent thread overflow.
+- **Blueprints Fix** â€” Resolved a `TypeError` in the "+ FPV Drone" and "+ Reaper Drone" creation dialogs.
+- **UX Polish** â€” Relaxed horizontal window width constraints, fixed node header rendering, and added a 10-year-old level User Manual linked in the sidebar.
+
+## Phase 6 - FPV Drone / Reaper Drone model (2026-05)
+
+The old Drone / Agent split has been replaced by the **FPV Drone** / **Reaper Drone** / **Staging Area** model.
 See `docs/DRONE_MODEL.md` for the full design.
 
-- **Drone Blueprints** (operator-set frozen templates) and **Drone
+- **FPV Drone Blueprints** (operator-set frozen templates) and **FPV Drone
   Actions** (deployed instances with their own transcripts).  Each
   action snapshots its blueprint at deploy time so later blueprint
   edits never reach in-flight conversations.
-- **Authority matrix** — every action carries a snapshotted role
+- **Authority matrix** â€” every action carries a snapshotted role
   (`worker` / `supervisor` / `courier` / `auditor`) that gates
   cross-action mutations (`drones.append_reference`,
   `drones.append_skill`).  Auditors are read-only by construction.
-- **New tabs** — Blueprints (template editor) + Drones (deploy +
+- **New tabs** â€” Blueprints (template editor) + Drones (deploy +
   chat surface).
-- **Canvas palette** — "Conversations" section renamed to "Drones".
-  `+ New conversation` → `Deploy` button picks a blueprint + workspace
+- **Canvas palette** â€” "Conversations" section renamed to "Drones".
+  `+ New conversation` â†’ `Deploy` button picks a blueprint + workspace
   + first message in one shot.  Drag the resulting drone onto the
   canvas; double-click to open a small chat dialog.
-- **Agent rip-out** — `Agent` class, `agents.*` RPCs, `chat.send`,
+- **Legacy agent removal** â€” `Agent` class, `agents.*` RPCs, `chat.send`,
   `attachments.*`, `Attachment` class, `FOLLOWUP_PRESETS`, the Agents
   tab, the Chat tab, the canvas Conversations palette, lineage boxes,
   and lineage edges are gone.  The `agents` and `attachments` tables
   are dropped on next service startup (operator-approved).
-- **Deferred** — drones.send currently doesn't support attachments
+- **Deferred** â€” drones.send currently doesn't support attachments
   or cross-action references inlined into the prompt; both will
   return in a follow-up PR.  Lineage visualisation on the canvas
   needs re-design for the drone reference model (lists, not
   parent_ids) and is also deferred.
 
-## Phase 5 — PR #12 (merged 2026-05-10)
+## Phase 5 â€” PR #12 (merged 2026-05-10)
 
 Operator-facing additions in the big phase-5 super-PR:
 
 - **Image + Excel attachments end-to-end.**  `.png/.jpg/.gif/.webp`
   pass through to the CLI as `@<path>` references; `.xlsx/.xls/.csv`
-  render to one fenced markdown table per sheet (200 rows × 30 cols
+  render to one fenced markdown table per sheet (200 rows Ã— 30 cols
   cap) and inline into the prompt.  25 MB upload cap, sanitized
   filenames, cross-agent auth on every RPC.
 - **Repo-aware coding sessions.**  Bind an Agent to a Workspace; the
@@ -75,7 +82,7 @@ Operator-facing additions in the big phase-5 super-PR:
 - **Limits tab.**  Cards per provider (Claude Code / Gemini CLI) with
   plan picker + per-model caps + local message tally + attachment-
   storage breakdown.  Manual refresh, 5-minute cooldown.
-- **Operator panel.**  ★ pinned utilities (start / restart / ops /
+- **Operator panel.**  â˜… pinned utilities (start / restart / ops /
   limits) plus 1-8 numbered setup flow.  ``start.cmd`` pre-flight
   verifies both CLIs before launching; ``restart.cmd`` does a three-
   pass kill (window-title + port-listening) so supervisor-spawned
@@ -93,26 +100,26 @@ Operator-facing additions in the big phase-5 super-PR:
   polish.
 - **Comprehensive README rewrite** + retrospective ROADMAP.md.
 
-## Unreleased — Phase 5 (PR #13)
+## Unreleased â€” Phase 5 (PR #13)
 
 Continued phase-5 work on top of PR #12:
 
-- ``apps/gui/presets`` — new shared registry for model + thinking-depth
+- ``apps/gui/presets`` â€” new shared registry for model + thinking-depth
   presets and the canonical ``compose_system(...)`` assembler.  Single
   source of truth across the Chat tab, the Canvas "+ New conversation"
   dialog, and the Agents-tab "+ New agent" dialog.  Public API:
-  ``MODEL_PRESETS`` (12 rows × 4 modes), ``THINKING_PRESETS`` (Off /
+  ``MODEL_PRESETS`` (12 rows Ã— 4 modes), ``THINKING_PRESETS`` (Off /
   Normal / Hard / Very hard), ``compose_system``, ``model_label_for``.
   Both registries are exported as tuples so a buggy consumer can't
   corrupt them.
-- Chat tab refactored to consume the shared module — drops its local
+- Chat tab refactored to consume the shared module â€” drops its local
   ``_MODEL_PRESETS`` / ``_THINKING_PRESETS`` / ``_label_for`` / ``_skills_to_system``
   definitions.  Behaviour-preserving.
 - Canvas "+ New conversation" dialog redesigned: provider filter,
   full 12-row model + mode picker, thinking-depth dropdown, skills
-  field — same picker as the Chat tab.  ``compose_system`` produces
+  field â€” same picker as the Chat tab.  ``compose_system`` produces
   identical system prompts for identical inputs across screens.
-- Draft-canvas amber banner: "📐 Draft canvas — planning surface.  Run
+- Draft-canvas amber banner: "ðŸ“ Draft canvas â€” planning surface.  Run
   is disabled. Model / thinking / skills / repo binding all behave
   the same as the Chat tab; flip Draft off to dispatch."
 - Agents-tab "+ New agent" dialog: now slices ``MODEL_PRESETS`` for
@@ -121,8 +128,8 @@ Continued phase-5 work on top of PR #12:
 - AgentChatDialog header + ConversationNode subtitle/tooltip: use
   ``model_label_for`` so the canvas shows the friendly label
   ("Claude Sonnet 4.6") instead of the raw provider id.
-- Mid-thread thinking / skills changes now show a small amber hint —
-  "↳ Thinking / skills changes apply to the next New chat" — because
+- Mid-thread thinking / skills changes now show a small amber hint â€”
+  "â†³ Thinking / skills changes apply to the next New chat" â€” because
   the system prompt is locked at agent creation.
 - **QA round 3** (this commit batch): 7-agent audit pass plus follow-
   up fixes covering UX consistency (button styles, error toasts,
@@ -141,9 +148,9 @@ Continued phase-5 work on top of PR #12:
   auth, FlowVersionConflict on flows.update, flows.delete cancelling
   in-flight runs.
 
-## Unreleased — Phase 4
+## Unreleased â€” Phase 4
 
-Sprint 1 — multi-vendor agentic parity + sandbox tier.
+Sprint 1 â€” multi-vendor agentic parity + sandbox tier.
 - Gemini ``run_with_tools`` via google-genai's function-calling
   (generate_content + Tool[function_declarations]); per-turn
   function_call execution + function_response feed-back.  JSON-Schema
@@ -151,7 +158,7 @@ Sprint 1 — multi-vendor agentic parity + sandbox tier.
   recursively stripped from the input schema.
 - Ollama ``run_with_tools`` via the OpenAI-compatible
   /v1/chat/completions tool path.  Tolerant of malformed args (local
-  models often produce noisy JSON) — coerces to {} rather than
+  models often produce noisy JSON) â€” coerces to {} rather than
   aborting.
 - Minimal MCP stdio client (``apps/service/mcp/client.py``):
   initialize handshake, tools/list, tools/call.  Tolerant of
@@ -168,7 +175,7 @@ Sprint 1 — multi-vendor agentic parity + sandbox tier.
   SandboxError when the package or E2B_API_KEY is missing so the
   dispatcher falls back to LocalSandbox with a warning event.
 
-Sprint 2 — speculative parallelism + hot model swap.
+Sprint 2 â€” speculative parallelism + hot model swap.
 - ``apps/service/dispatch/speculative.py``: ``race(user_message,
   candidates)`` runs N (provider, model) chats in parallel; first
   acceptable response cancels the others.  Cancelled tasks still
@@ -180,14 +187,14 @@ Sprint 2 — speculative parallelism + hot model swap.
   routing change and a human-readable reason.  Pinned context caps
   per (provider, model) tunable in one place.
 
-Sprint 3 — backup/restore + distributed bus + A2A schema + update client.
+Sprint 3 â€” backup/restore + distributed bus + A2A schema + update client.
 - ``apps/service/store/backup.py``: ``.aobackup`` tar.gz format with
   JSON manifest + sqlite3 online backup API; refuses to restore
   forward-incompatible schemas; pre-restore copy of the current DB
   lands at ``target.sqlite.pre-restore`` so a botched restore is
   recoverable.
 - ``apps/service/dispatch/a2a.py``: Pydantic models for the A2A
-  protocol — PeerCapabilities, RunDelegation + Ack,
+  protocol â€” PeerCapabilities, RunDelegation + Ack,
   HandoffCardEnvelope, A2AEvent.  Wire format only; runtime path is
   V5.
 - ``apps/service/dispatch/nats_bridge.py``: optional bridge that
@@ -200,7 +207,7 @@ Sprint 3 — backup/restore + distributed bus + A2A schema + update client.
   asset, hashes the download, raises if the sha256 doesn't match.
   Install is always user-initiated.
 
-Sprint 4 — UI polish.
+Sprint 4 â€” UI polish.
 - ``apps/gui/widgets/diff_view.py``: QSyntaxHighlighter-based diff
   viewer paints + green, - red, hunk headers purple, file headers
   muted gray.  Review page uses a QStackedWidget to show DiffView
@@ -211,9 +218,9 @@ CI: provider field on PersonalityCard relaxed from
 Literal[\"anthropic\",...] to plain str so test fakes (failing,
 secondary, echo, vendorA, ...) no longer fail Pydantic validation.
 
-## Unreleased — Phase 3
+## Unreleased â€” Phase 3
 
-Sprint 1 — multi-vendor parity + sandbox + Mergiraf wire-up.
+Sprint 1 â€” multi-vendor parity + sandbox + Mergiraf wire-up.
 - Gemini agentic via google-genai function-calling; per-turn function
   call execution + function_response feed-back; JSON-schema field
   stripping for Gemini-incompatible keys.
@@ -230,7 +237,7 @@ Sprint 1 — multi-vendor parity + sandbox + Mergiraf wire-up.
   (~20 tree-sitter-supported globs).  Idempotent.  Wired into
   WorktreeManager assisted-merge mode.
 
-Sprint 2 — innovation + onboarding.
+Sprint 2 â€” innovation + onboarding.
 - MCP server registry with trust-on-first-use, SHA-256 fingerprint of
   command + args + url, and trust transitions UNTRUSTED -> TRUSTED ->
   BLOCKED.  RPCs: mcp.list / add / trust / block / remove.
@@ -239,14 +246,14 @@ Sprint 2 — innovation + onboarding.
   install).  Sentinel file at ~/.local/share/agentorchestra/
   first_run.done so it shows once.
 - Local-only voice dictation via lazy faster-whisper wrapper.
-  Composer's "🎙 Dictate" button picks an audio file, the service
+  Composer's "ðŸŽ™ Dictate" button picks an audio file, the service
   transcribes via dictation.transcribe, the result lands in the first
   text input.
 - Drift Sentinel: a single asyncio task subscribed to the EventBus
   flagging runs with N tool calls and zero commits, or N consecutive
   tool errors.  Started with the service.
 
-Sprint 3 — distribution.
+Sprint 3 â€” distribution.
 - Briefcase config (briefcase.toml) for macOS / Windows / Linux
   installers; mac entitlements for Hardened Runtime; stub for
   signing (the certs aren't shipped in this branch).
@@ -262,7 +269,7 @@ CI: ruff check + ruff format --check green tree-wide.
 
 ## Phase 2
 
-Sprint 1 — multi-vendor.
+Sprint 1 â€” multi-vendor.
 - Gemini chat adapter via the official google-genai SDK.
 - Ollama chat adapter via the OpenAI-compatible /v1/chat/completions
   endpoint at http://localhost:11434.
@@ -272,11 +279,11 @@ Sprint 1 — multi-vendor.
   model} dicts.  RunDispatcher tries the primary on open; on failure
   it walks the fallbacks before declaring the run aborted.
 
-Sprint 2 — innovations.
+Sprint 2 â€” innovations.
 - runs.replay re-runs a past Run with optional provider / model /
   instruction overrides.  Overrides clone the card so the original's
   accounting stays intact.  History page in the GUI grew a Recent
-  runs tab with a Replay… dialog.
+  runs tab with a Replayâ€¦ dialog.
 - Claude hook bridge: bundled `packs/hooks/agentorchestra-hook.sh`
   and an idempotent installer that edits `~/.claude/settings.json`
   to attach our entry to SessionStart / PreToolUse / PostToolUse /
@@ -289,13 +296,13 @@ Sprint 2 — innovations.
   cost; soft cap emits a warning event once; hard cap aborts the run
   cleanly.
 
-Sprint 3 — specialised archetypes.
+Sprint 3 â€” specialised archetypes.
 - Red Team adversarial reviewer card targeting another run's diff.
 - Tracker watcher card emitting structured HandoffCards.
 - Cross-vendor Consensus card + a fan-out + judge orchestrator
   (`apps/service/dispatch/consensus.py`).  RPC: runs.consensus.
 
-Sprint 4 — UI polish + safety.
+Sprint 4 â€” UI polish + safety.
 - Workspace map widget: per-workspace lanes with run state pips +
   costs, refresh button, Home page now splits into Active table +
   workspace map.
@@ -308,11 +315,11 @@ Tests: test_providers, test_replay, test_hook_installer,
 test_consensus, test_plan_act (integration).
 CI: ruff check + ruff format --check green tree-wide.
 
-## Phase 1 — MVP scaffold
+## Phase 1 â€” MVP scaffold
 
 This commit lays down the working scaffold for the multi-vendor desktop
 agent orchestrator.  Execution-ready end-to-end run dispatch is the
-next milestone (Phase 1 weeks 4–6); this commit covers everything
+next milestone (Phase 1 weeks 4â€“6); this commit covers everything
 upstream of that.
 
 ### Added
@@ -358,7 +365,7 @@ upstream of that.
   unit + integration on Ubuntu and macOS, Python 3.11 and 3.12.
 - Architecture and worktree design docs.
 
-### Deferred (Phase 1 weeks 4–6 and beyond)
+### Deferred (Phase 1 weeks 4â€“6 and beyond)
 
 - Real Run dispatch (the agent loop in a worktree)
 - Mergiraf binary integration and the assisted-merge UX

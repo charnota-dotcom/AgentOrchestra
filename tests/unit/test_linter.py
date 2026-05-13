@@ -55,3 +55,21 @@ def test_clean_text_passes() -> None:
     )
     issues = lint(text, archetype="broad-research")
     assert not has_blocking(issues)
+
+
+def test_ui_architect_requires_target_and_diagram_reference() -> None:
+    issues = lint(
+        "Please inspect the GUI and summarize structure.",
+        archetype="ui-architect",
+    )
+    rules = {i.rule for i in issues}
+    assert any(r.startswith("archetype:ui-architect") for r in rules)
+
+
+def test_logic_liaison_with_target_and_mermaid_passes() -> None:
+    text = (
+        "Target path: apps/gui/main.py. Map signal-slot boundaries and "
+        "produce a Mermaid diagram of logic flow."
+    )
+    issues = lint(text, archetype="logic-liaison")
+    assert not any(i.rule.startswith("archetype:logic-liaison") for i in issues)

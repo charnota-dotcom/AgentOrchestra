@@ -225,9 +225,9 @@ class DronesPage(QtWidgets.QWidget):
         v.setSpacing(8)
 
         header = QtWidgets.QHBoxLayout()
-        title_text = "Drones" if self.provider_mode == "manual" else "Agents"
+        title_text = "FPV Drones" if self.provider_mode == "manual" else "Reapers"
         if self.provider_mode == "all":
-            title_text = "Drones & Agents"
+            title_text = "FPV Drones & Reapers"
             
         title = QtWidgets.QLabel(title_text)
         title.setStyleSheet("font-size:14px;font-weight:600;color:#0f1115;")
@@ -240,7 +240,7 @@ class DronesPage(QtWidgets.QWidget):
             "QPushButton:hover{background:#1860d6;}"
         )
         deploy_btn.setToolTip(
-            "Pick a blueprint + (optional) workspace and spawn a fresh drone "
+            "Pick a blueprint + (optional) workspace and spawn a fresh FPV drone "
             "action.  The action's blueprint snapshot is frozen at deploy "
             "time — later blueprint edits don't affect this action."
         )

@@ -8,8 +8,10 @@ by the existing per-provider tests.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
+import json
 
 import pytest
 import pytest_asyncio
@@ -220,3 +222,145 @@ async def test_branch_skips_not_taken_path(
     assert refreshed.node_outputs.get("true_path") == "found: yes"
     # False path was skipped — never executed agent-2.
     assert "false_path" not in refreshed.node_outputs
+
+
+@pytest.mark.asyncio
+async def test_consensus_node_fanout_and_judge(store: EventStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    c1 = _card("card-c1", "Candidate1")
+    c2 = _card("card-c2", "Candidate2")
+    cj = _card("card-judge", "Judge")
+    await store.insert_card(c1)
+    await store.insert_card(c2)
+    await store.insert_card(cj)
+
+    monkeypatch.setattr(
+        provider_registry,
+        "get_provider",
+        lambda name: _StubProvider(
+            {
+                "card-c1": "answer A",
+                "card-c2": "answer B",
+                "card-judge": "winner: 1\nfinal: answer A",
+            }
+        ),
+    )
+
+    flow = Flow(
+        name="consensus",
+        nodes=[
+            {"id": "t", "type": "trigger"},
+            {
+                "id": "cn",
+                "type": "consensus",
+                "card_id": "card-judge",
+                "params": {"candidate_card_ids": ["card-c1", "card-c2"]},
+            },
+            {"id": "o", "type": "output"},
+        ],
+        edges=[
+            {"from_node": "t", "from_port": "start", "to_node": "cn", "to_port": "in"},
+            {"from_node": "cn", "from_port": "out", "to_node": "o", "to_port": "in"},
+        ],
+    )
+    await store.insert_flow(flow)
+
+    ex = FlowExecutor(store)
+    run = await ex.dispatch(flow)
+    task = ex._active.get(run.id)
+    assert task is not None
+    await task
+
+    refreshed = await store.get_flow_run(run.id)
+    assert refreshed is not None
+    assert refreshed.state == FlowState.FINISHED
+    cn_out = refreshed.node_outputs.get("cn")
+    assert cn_out is not None
+    payload = json.loads(cn_out)
+    assert len(payload["candidates"]) == 2
+    assert "winner" in payload["judge"]["output"]
+
+
+@pytest.mark.asyncio
+async def test_staging_area_manual_release(store: EventStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    card = _card("card-1", "Reaper")
+    await store.insert_card(card)
+
+    monkeypatch.setattr(
+        provider_registry,
+        "get_provider",
+        lambda name: _StubProvider({"card-1": "reaper reply"}),
+    )
+
+    flow = Flow(
+        name="staging",
+        nodes=[
+            {"id": "t", "type": "trigger"},
+            {
+                "id": "s",
+                "type": "staging_area",
+                "params": {"mode": "manual_release", "timeout_seconds": 5},
+            },
+            {"id": "o", "type": "output"},
+        ],
+        edges=[
+            {"from_node": "t", "from_port": "start", "to_node": "s", "to_port": "in"},
+            {"from_node": "s", "from_port": "out", "to_node": "o", "to_port": "in"},
+        ],
+    )
+    await store.insert_flow(flow)
+
+    ex = FlowExecutor(store)
+    run = await ex.dispatch(flow)
+    task = ex._active.get(run.id)
+    assert task is not None
+
+    for _ in range(20):
+        if await ex.approve_human(run.id, "s", True):
+            break
+        await asyncio.sleep(0.05)
+    else:
+        pytest.fail("staging node did not start waiting in time")
+    await task
+
+    refreshed = await store.get_flow_run(run.id)
+    assert refreshed is not None
+    assert refreshed.state == FlowState.FINISHED
+    assert "s" in refreshed.node_outputs
+    assert "start" in refreshed.node_outputs["s"]
+
+
+@pytest.mark.asyncio
+async def test_reaper_alias_runs_with_canonical_type(store: EventStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    card = _card("card-1", "ReaperAlias")
+    await store.insert_card(card)
+
+    monkeypatch.setattr(
+        provider_registry,
+        "get_provider",
+        lambda name: _StubProvider({"card-1": "alias reply"}),
+    )
+
+    flow = Flow(
+        name="alias-chain",
+        nodes=[
+            {"id": "t", "type": "trigger"},
+            {"id": "r", "type": "reaper", "card_id": "card-1"},
+            {"id": "o", "type": "output"},
+        ],
+        edges=[
+            {"from_node": "t", "from_port": "start", "to_node": "r", "to_port": "in"},
+            {"from_node": "r", "from_port": "out", "to_node": "o", "to_port": "in"},
+        ],
+    )
+    await store.insert_flow(flow)
+
+    ex = FlowExecutor(store)
+    run = await ex.dispatch(flow)
+    task = ex._active.get(run.id)
+    assert task is not None
+    await task
+
+    refreshed = await store.get_flow_run(run.id)
+    assert refreshed is not None
+    assert refreshed.state == FlowState.FINISHED
+    assert refreshed.node_outputs.get("r") == "alias reply"

@@ -1,4 +1,4 @@
-# WorktreeManager — Design
+﻿# WorktreeManager â€” Design
 
 (Canonical reference for the implementation in
 `apps/service/worktrees/manager.py`.)
@@ -7,31 +7,31 @@
 - Give every Run an isolated, throwaway working directory on its own
   branch with zero impact on the user's main branch or working tree.
 - Atomic, crash-safe creation, lifecycle, and cleanup.
-- Plain-English UX surface — no git terminology in default flows.
+- Plain-English UX surface â€” no git terminology in default flows.
 - Auto-detect stale, dead, or hung worktrees.
 - Clean integration with the merger, sandbox tiers, cost meter, and
   event store.
 
 ## Glossary
-- **Workspace** — one git repo registered with the app.
-- **Worktree** — a `git worktree` instance under `.agent-worktrees/`.
-- **Run** — a dispatched agent execution; 1 Run ↔ 1 worktree ↔ 1 branch.
-- **Base ref** — the immutable commit a Run forks from.
-- **Save point** — user-facing name for a commit on the agent branch.
-- **Combine** — user-facing name for a merge from agent branch into base.
+- **Workspace** â€” one git repo registered with the app.
+- **Worktree** â€” a `git worktree` instance under `.agent-worktrees/`.
+- **Run** â€” a dispatched agent execution; 1 Run â†” 1 worktree â†” 1 branch.
+- **Base ref** â€” the immutable commit a Run forks from.
+- **Save point** â€” user-facing name for a commit on the agent branch.
+- **Combine** â€” user-facing name for a merge from agent branch into base.
 
 ## State machine
 
 ```
 (none) -> CREATED -> ACTIVE <-> PAUSED
-                       │
-                       └─> AWAITING_REVIEW
-                              │
-                              ├─> MERGING -> MERGED -> CLEANED
-                              │      │
-                              │      └─> CONFLICTED -> MERGED|ABANDONED
-                              ├─> REJECTED -> CLEANED
-                              └─> ACTIVE
+                       â”‚
+                       â””â”€> AWAITING_REVIEW
+                              â”‚
+                              â”œâ”€> MERGING -> MERGED -> CLEANED
+                              â”‚      â”‚
+                              â”‚      â””â”€> CONFLICTED -> MERGED|ABANDONED
+                              â”œâ”€> REJECTED -> CLEANED
+                              â””â”€> ACTIVE
         any non-terminal -> STALE -> ABANDONED -> CLEANED
 ```
 
@@ -55,21 +55,21 @@ provenance.
 
 ## Sandbox tiers
 
-- **Tier 1 — devcontainer-style** (V1 default): worktree is the
+- **Tier 1 â€” devcontainer-style** (V1 default): worktree is the
   filesystem write boundary; tool allowlist enforced; symlinks not
   followed across the boundary.
-- **Tier 2 — Docker** (V2): cap-drop ALL, no network, mount worktree
+- **Tier 2 â€” Docker** (V2): cap-drop ALL, no network, mount worktree
   read-write, repo `.git` read-only.
-- **Tier 3 — E2B / Firecracker / Daytona** (V3): microVM isolation.
+- **Tier 3 â€” E2B / Firecracker / Daytona** (V3): microVM isolation.
 
 ## Three merge modes
 
 - **Combine cleanly** (default when no conflict predicted)
-- **Combine with help** — Mergiraf as the merge driver (V2; CLI shim
+- **Combine with help** â€” Mergiraf as the merge driver (V2; CLI shim
   in V1)
-- **Let me decide** — surfaces conflict markers in the diff viewer
+- **Let me decide** â€” surfaces conflict markers in the diff viewer
 
-## Failure modes — guarantees
+## Failure modes â€” guarantees
 
 - Every failure leaves git history intact and the user in a
   recoverable place.

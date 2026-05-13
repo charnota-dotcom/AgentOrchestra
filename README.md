@@ -1,10 +1,10 @@
-# AgentOrchestra
+﻿# AgentOrchestra
 
-**Desktop orchestrator for multi-vendor AI sub-agents on Windows.** Drive Claude Code (Max plan), Gemini CLI (Free / AI Pro / AI Ultra), and local Ollama models from a single PySide6 GUI: design reusable **Blueprints** (templates with provider, model, system persona, default skills + role), deploy them as **Drones** (live conversations with their own transcripts), drag drones onto a canvas, attach repos so they can read / edit code with their built-in file tools, and design dispatchable Flow graphs that hand a task off through Trigger → Agent → Branch → Merge → Human → Output nodes.
+**Desktop orchestrator for multi-vendor AI sub-agents on Windows.** Drive Claude Code, Gemini CLI, Codex CLI, and local Ollama models from a single PySide6 GUI: design reusable **Blueprints** (templates with provider, model, system persona, default skills + role), deploy them as **FPV Drones** (manual browser-based source bundles), drag FPV Drones onto a canvas, attach repos so they can read / edit code with their built-in file tools, and design dispatchable Flow graphs that hand a task off through Trigger â†’ Agent â†’ Branch â†’ Merge â†’ Human â†’ Output nodes.
 
-> **Heads up — Phase 6 rename.** The legacy "Agent" abstraction has been replaced by the Drone model (blueprints + actions).  Existing chats from earlier versions are dropped on first launch after the upgrade.  See `docs/DRONE_MODEL.md` for the design and `CHANGELOG.md` for what changed.
+> **Heads up â€” Phase 6 rename.** The legacy "Agent" abstraction now maps to Reaper Drone, the Drone model now maps to FPV Drone, and Staging Area is a separate first-class node.  Existing chats from earlier versions are dropped on first launch after the upgrade.  See `docs/DRONE_MODEL.md` for the design and `CHANGELOG.md` for what changed.
 
-Subscription-only by default — no API keys are required for the day-to-day flow. Auth piggybacks on whatever your local `claude` and `gemini` CLIs are already signed in to.
+Subscription-only by default â€” no API keys are required for the day-to-day flow. Auth piggybacks on whatever your local `claude` and `gemini` CLIs are already signed in to.
 
 ---
 
@@ -14,7 +14,7 @@ Subscription-only by default — no API keys are required for the day-to-day flo
 2. [Install & first run](#install--first-run)
 3. [Operator panel (Windows .cmd scripts)](#operator-panel-windows-cmd-scripts)
 4. [The GUI tabs in detail](#the-gui-tabs-in-detail)
-   - [Home](#home) · [Drones](#drones) · [Agents](#agents) · [Blueprints](#blueprints) · [Skills](#skills) · [Compose](#compose) · [Canvas](#canvas) · [History](#history) · [Limits](#limits) · [Settings](#settings)
+   - [Home](#home) Â· [FPV Drones](#drones) Â· [Reaper Drones](#Reaper Drones) Â· [Blueprints](#blueprints) Â· [Skills](#skills) Â· [Compose](#compose) Â· [Canvas](#canvas) Â· [Analytics](#analytics) Â· [History](#history) Â· [Limits](#limits) Â· [Settings](#settings)
 5. [Subsystems](#subsystems)
    - [Repo-aware coding sessions](#repo-aware-coding-sessions)
    - [Attachments (images + spreadsheets)](#attachments-images--spreadsheets)
@@ -39,13 +39,13 @@ AgentOrchestra is two cooperating processes: a long-lived **service** and a **GU
 
 The service does five things:
 
-1. **Drives sub-agents** through one of four providers — `claude-cli` (Claude Code), `gemini-cli`, `anthropic` (API), `google` (API), `ollama` — and normalises their stream events into one shape (`text_delta`, `assistant_message`, `tool_call`, `tool_result`, `usage`, `finish`, `error`).
-2. **Persists everything** to a single SQLite database (WAL mode, FTS5 search) — every Run, Branch, Step, Approval, Outcome, Event, Agent, Attachment, Flow, FlowRun, Workspace, Card, Template, Instruction.
-3. **Owns git worktrees** when an agentic Run is dispatched — branch per agent, optional Mergiraf merge, panic reset, drift sentinel.
-4. **Watches the host** — Claude session JSONL files and Claude Code hooks — so what you do interactively shows up in the orchestrator's history too.
+1. **Drives sub-agents** through CLI and API providers â€” `claude-cli` (Claude Code), `gemini-cli`, `codex-cli`, `anthropic` (API), `google` (API), `ollama` â€” and normalises their stream events into one shape (`text_delta`, `assistant_message`, `tool_call`, `tool_result`, `usage`, `finish`, `error`).
+2. **Persists everything** to a single SQLite database (WAL mode, FTS5 search) â€” every Run, Branch, Step, Approval, Outcome, Event, Agent, Attachment, Flow, FlowRun, Workspace, Card, Template, Instruction.
+3. **Owns git worktrees** when an agentic Run is dispatched â€” branch per agent, optional Mergiraf merge, panic reset, drift sentinel.
+4. **Watches the host** â€” Claude session JSONL files and Claude Code hooks â€” so what you do interactively shows up in the orchestrator's history too.
 5. **Exposes ~50 RPC methods** the GUI calls into. The full list is below.
 
-The GUI presents this as **ten rail tabs** (Home, Drones, Agents, Blueprints, Skills, Compose, Canvas, History, Limits, Settings) plus two stack pages (Live, Review) reached when you dispatch a Run from Compose.
+The GUI presents this as **eleven rail tabs** (Home, FPV Drones, Reaper Drones, Blueprints, Skills, Compose, Canvas, Analytics, History, Limits, Settings) plus two stack pages (Live, Review) reached when you dispatch a Run from Compose.
 
 ---
 
@@ -53,10 +53,10 @@ The GUI presents this as **ten rail tabs** (Home, Drones, Agents, Blueprints, Sk
 
 **Requirements:** Windows, Python 3.11+, GitHub Desktop (or `git` on PATH), and at least one of:
 
-- **Claude Code CLI** signed in via Max subscription — install from <https://docs.claude.com/en/docs/claude-code> then run `claude` once and `/login`.
-- **Gemini CLI** signed in via Google AI Studio / Workspace SSO / `GEMINI_API_KEY` — install from <https://github.com/google-gemini/gemini-cli> then run `gemini` once.
+- **Claude Code CLI** signed in via Max subscription â€” install from <https://docs.claude.com/en/docs/claude-code> then run `claude` once and `/login`.
+- **Gemini CLI** signed in via Google AI Studio / Workspace SSO / `GEMINI_API_KEY` â€” install from <https://github.com/google-gemini/gemini-cli> then run `gemini` once.
 
-Either is enough; both is better. **No Anthropic / Google API key is required** for the chat path.
+Any one is enough; more than one is better. **No Anthropic / Google API key is required** for the chat path.
 
 Optional installs unlock specific features:
 
@@ -69,7 +69,7 @@ Optional installs unlock specific features:
 | `pip install faster-whisper` | local voice dictation in Compose |
 | `pip install -e ".[google]"` | the Google API provider (only needed if you want to bypass the Gemini CLI) |
 
-The recommended first-run flow uses the **Operator Panel** below — it walks you through it.
+The recommended first-run flow uses the **Operator Panel** below â€” it walks you through it.
 
 ---
 
@@ -79,11 +79,11 @@ The recommended first-run flow uses the **Operator Panel** below — it walks yo
 
 | File | Step | What it does |
 |---|---|---|
-| `ops.cmd` | ★ | The Operator Panel itself — reads `manifest.json` so any new command shows up automatically. |
-| `start.cmd` | ★ | **Pre-flight verifier.** Probes `claude -p "…"` and `gemini -p "…"` headlessly. If at least one CLI replies, launches the GUI. If both fail, aborts with instructions to fix the auth. Use first-of-day. |
-| `restart.cmd` | ★ | **Everyday button.** Three-pass kill (window-title + port-listening on 8765) then launches a fresh GUI. Use after pulling a new commit, after `update.cmd`, or any time the running service is acting up. |
-| `limits.cmd` | ★ | Print whatever subscription / usage info the local CLIs expose. The GUI's **Limits** tab is the in-app version. |
-| `setup.cmd` | 1 | Create `.venv` and install AgentOrchestra + `[gui]` extras. Idempotent — re-run after a Python upgrade or if `.venv` goes missing. |
+| `ops.cmd` | â˜… | The Operator Panel itself â€” reads `manifest.json` so any new command shows up automatically. |
+| `start.cmd` | â˜… | **Pre-flight verifier.** Probes `claude -p "â€¦"` and `gemini -p "â€¦"` headlessly. If at least one CLI replies, launches the GUI. If both fail, aborts with instructions to fix the auth. Use first-of-day. |
+| `restart.cmd` | â˜… | **Everyday button.** Three-pass kill (window-title + port-listening on 8765) then launches a fresh GUI. Use after pulling a new commit, after `update.cmd`, or any time the running service is acting up. |
+| `limits.cmd` | â˜… | Print whatever subscription / usage info the local CLIs expose. The GUI's **Limits** tab is the in-app version. |
+| `setup.cmd` | 1 | Create `.venv` and install AgentOrchestra + `[gui]` extras. Idempotent â€” re-run after a Python upgrade or if `.venv` goes missing. |
 | `test-claude.cmd` | 2 | Smoke-test `claude` on PATH + a headless reply. If "Not logged in", run `claude` interactively and `/login`. |
 | `test-gemini.cmd` | 3 | Smoke-test `gemini` on PATH + a headless reply. Skip if you only use Claude. |
 | `launch.cmd` | 4 | Plain launch (no pre-flight). Faster than `start.cmd` when you trust the CLIs are signed in. |
@@ -92,7 +92,7 @@ The recommended first-run flow uses the **Operator Panel** below — it walks yo
 | `doctor.cmd` | 7 | Diagnose: prints Python version, venv health, port 8765 status, last service log lines. |
 | `reset.cmd` | 8 | **Destructive.** Wipe the SQLite store. Use only when nothing else helps. |
 
-The Operator Panel (`scripts/ops.py`) reads `manifest.json` so adding a new `.cmd` file plus a manifest entry surfaces it as a new button automatically — no GUI code change needed.
+The Operator Panel (`scripts/ops.py`) reads `manifest.json` so adding a new `.cmd` file plus a manifest entry surfaces it as a new button automatically â€” no GUI code change needed.
 
 ---
 
@@ -102,75 +102,81 @@ The Operator Panel (`scripts/ops.py`) reads `manifest.json` so adding a new `.cm
 
 Landing page. Shows a **Workspaces map** (registered repos with their last activity), an **Active runs** table (in-flight Runs across all workspaces), and a **Recent runs** table with one-row-per-Run history. A Refresh button re-pulls all three. The first time you open the app, a **first-run wizard** (`first_run.py`) walks you through the three CLI smoke tests so you know your subscriptions work before sending real prompts.
 
-### Drones
+### FPV Drones
 
 A dedicated tab for manual, browser-based robot friends.  These units use the `browser` provider and require the operator to copy/paste messages through their standard web browser (Claude.ai, ChatGPT, etc.).  Ideal for simple tasks or when you want to remain in control of every turn.
 
-### Agents
+### Reaper Drones
 
-A dedicated tab for autonomous robot friends.  These units use CLI-based providers (`claude-cli`, `gemini-cli`) to run all by themselves on your computer.  They can read your files, run code, and solve complex problems without any manual copy-pasting.
+A dedicated tab for autonomous robot friends.  These units use CLI-based providers (`claude-cli`, `gemini-cli`, `codex-cli`) to run all by themselves on your computer.  They can read your files, run code, and solve complex problems without any manual copy-pasting.
 
 ### Blueprints
 
 The **"Robot Plan"** workshop.  Create frozen templates for your friends:
-- **+ Drone** — Start a manual browser plan.
-- **+ Agent** — Start an autonomous CLI plan with integrated skill selection.
-- **Convert to Agent** — Select any Drone blueprint and upgrade it to an Agent brain at any time.
+- **+ FPV Drone** â€” Start a manual browser plan.
+- **+ Reaper Drone** â€” Start an autonomous CLI plan with integrated skill selection.
+- **Convert to Reaper Drone** â€” Select any Drone blueprint and upgrade it to an Reaper Drone brain at any time.
 
 ### Skills
 
-The **"Superpower"** management library.  Create, edit, and delete instruction templates (e.g. `/research-deep`, `/code-review`).  These are database-backed and can be easily picked from a popup window whenever you are making or deploying an Agent.
+The **"Superpower"** management library.  Create, edit, and delete instruction templates (e.g. `/research-deep`, `/code-review`).  These are database-backed and can be easily picked from a popup window whenever you are making or deploying a Reaper Drone.
 
 ### Compose
 
-The **operator-grade** instruction builder — for when you want a card-driven Run with a state machine, cost caps, and an approval gate, rather than a free-form chat.
+The **operator-grade** instruction builder â€” for when you want a card-driven Run with a state machine, cost caps, and an approval gate, rather than a free-form chat.
 
-- Pick a **PersonalityCard** (Broad Research, Narrow Research, QA-on-fix, Code-Edit, …). Cards are pydantic models with `provider`, `model`, `mode`, `cost: CostPolicy`, `blast_radius: BlastRadiusPolicy`, `sandbox_tier`, `tool_allowlist`, `fallbacks`, `auto_qa`, `requires_plan`, `max_turns`, …
+- Pick a **PersonalityCard** (Broad Research, Narrow Research, QA-on-fix, Code Planning Assistant, â€¦). Cards are pydantic models with `provider`, `model`, `mode`, `cost: CostPolicy`, `blast_radius: BlastRadiusPolicy`, `sandbox_tier`, `tool_allowlist`, `fallbacks`, `auto_qa`, `requires_plan`, `max_turns`, â€¦
 - Pick an **InstructionTemplate** (Banks-style with Jinja2 + front-matter). Variables you fill in get rendered into the prompt; the rendered text is persisted as an `Instruction`.
 - **Pre-flight linter** runs on the rendered text, surfacing risks (unbounded scope, ambiguous file paths, etc.) before dispatch.
 - **Cost forecast** uses the card's `cost.input_per_1k_tokens` / `output_per_1k_tokens` plus the linter's token estimate; per-run hard cap aborts the run, soft cap warns once.
-- **Voice dictation** button — opens the OS file picker, runs the audio through a local `faster-whisper` transcribe (fully on-device), drops the text into the instruction box. Audio extensions allow-listed; path resolved + checked at the RPC.
-- **Dispatch** — kicks off a `runs.dispatch` which builds a worktree + branch and runs the agent loop with the configured tools.
+- **Voice dictation** button â€” opens the OS file picker, runs the audio through a local `faster-whisper` transcribe (fully on-device), drops the text into the instruction box. Audio extensions allow-listed; path resolved + checked at the RPC.
+- **Dispatch** â€” kicks off a `runs.dispatch` which builds a worktree + branch and runs the agent loop with the configured tools.
 
 ### Canvas
 
 Drag-and-drop graph editor. Two distinct things live on the canvas:
 
-1. **BlueprintNodes** — wrap a `DroneBlueprint` template. Used by the Flow executor to dispatch a fresh single-shot run when a Flow runs.
-2. **DroneNodes** — wrap a persistent `DroneAction`. Drop one onto the canvas and double-click to reconfigure it. A 📂 marker shows in the subtitle when bound to a repo; the tooltip spells out provider, model, turn count, and repo.
+1. **BlueprintNodes** â€” wrap a `DroneBlueprint` template. Used by the Flow executor to dispatch a fresh single-shot run when a Flow runs.
+2. **DroneNodes** â€” wrap a persistent `DroneAction`. Drop one onto the canvas and double-click to reconfigure it. A ðŸ“‚ marker shows in the subtitle when bound to a repo; the tooltip spells out provider, model, turn count, and repo.
 
 **Key Features:**
 - **Edit on Double-Click:** Double-clicking any drone node opens the **Edit Drone** dialog (name, workspace, skills) without changing the original blueprint.
-- **Convert to Agent:** Right-click any manual browser drone to "promote" it to an autonomous CLI agent, preserving the full transcript.
+- **Convert to Reaper Drone:** Right-click any manual browser drone to "promote" it to an autonomous CLI Reaper Drone, preserving the full transcript.
 - **Peer References:** Non-directional edges between drone nodes act as implicit context providers, allowing agents to "talk" across different windows and models.
-- **Lineage:** Auto-draws translucent boxes around parent/child drone clusters.
+- **Lineage:** Auto-draws translucent boxes around parent/child FPV Drone clusters.
+
+### Analytics
+
+Operational analytics dashboard backed by `analytics.summary` and `analytics.leaderboard`.
+Tracks rolling metrics including hallucination proxy rate (tool-error incidence),
+token efficiency, re-plan velocity, and cost-per-success.
 
 ### History
 
-Read-only browser over every Run, Branch, Step, Approval, and Artifact. **FTS5 search** across instructions, artifacts, and salient event text — type anything in the search bar and you get ranked hits with `<b>highlighted</b>` snippets.
+Read-only browser over every Run, Branch, Step, Approval, and Artifact. **FTS5 search** across instructions, artifacts, and salient event text â€” type anything in the search bar and you get ranked hits with `<b>highlighted</b>` snippets.
 
 ### Limits
 
-**In-app subscription dashboard.** Lives at `apps/gui/windows/limits.py`. Refresh runs `limits.check` (which probes `claude --version` / `claude status` / `gemini --version` / `gemini status` headlessly) and `limits.usage` (which counts your own sends from the `provider_messages` table for daily / weekly / monthly windows).
+**In-app subscription dashboard.** Lives at `apps/gui/windows/limits.py`. Refresh runs `limits.check` (which probes `claude --version` / `claude status` / `gemini --version` / `gemini status` / `codex --version` headlessly) and `limits.usage` (which counts your own sends from the `provider_messages` table for 5h / 24h / 7d windows).
 
 **Cards rendered:**
 
-- **One per provider** (Claude Code / Gemini CLI). Each has:
-  - A plan picker (Pro / Max-5x / Max-20x / Team for Claude; Free / AI Pro / AI Ultra for Gemini). Plan registry lives at `apps/service/limits/__init__.py` with a `DATA_AS_OF` date so you know how stale the published numbers are.
+- **One per provider** (Claude Code / Gemini CLI / Codex CLI). Each has:
+  - A plan picker sourced from `apps/service/limits/__init__.py` with a `DATA_AS_OF` date so you know how stale the published numbers are.
   - Per-model message caps for the selected plan.
-  - **Local tally** — `X / cap` rendered against your own send count for the relevant window. The tally is canonical for your own usage; the published cap is canonical for what your subscription buys.
+  - **Local tally** â€” `X / cap` rendered against your own send count for the relevant window. The tally is canonical for your own usage; the published cap is canonical for what your subscription buys.
   - Links to the official dashboards for the operator-of-truth.
-- **Context-window summary card** — every model the orchestrator knows the token-budget for, in one sortable list. From `context_windows()`.
-- **Attachment storage card** — total file count + bytes uploaded across all agents, plus a per-agent breakdown sorted by bytes. From `attachments.usage`. Useful when you want to know which agent is eating disk.
+- **Context-window summary card** â€” every model the orchestrator knows the token-budget for, in one sortable list. From `context_windows()`.
+- **Attachment storage card** â€” total file count + bytes uploaded across all agents, plus a per-agent breakdown sorted by bytes. From `attachments.usage`. Useful when you want to know which agent is eating disk.
 
-**Cooldown.** The Refresh button is gated to once per 5 minutes (`_REFRESH_COOLDOWN_SECONDS = 300`) so the CLI status calls — which take real subprocess time — can't be hammered.
+**Cooldown.** The Refresh button is gated to once per 5 minutes (`_REFRESH_COOLDOWN_SECONDS = 300`) so the CLI status calls â€” which take real subprocess time â€” can't be hammered.
 
 ### Settings
 
 - **Service URL** (default `http://127.0.0.1:8765`).
-- **Token** — sourced from the OS keyring. The service mints one at startup if missing; the GUI looks it up via `hook_token()`.
-- **MCP server registry** — list / add / trust / block / remove MCP servers. Trusted servers are exposed to cards whose `tool_allowlist` includes them.
-- **Hook installer** — install / uninstall the Claude Code hook scripts (`packs/hooks/`) so JSONL session files land in our ingestion path.
+- **Token** â€” sourced from the OS keyring. The service mints one at startup if missing; the GUI looks it up via `hook_token()`.
+- **MCP server registry** â€” list / add / trust / block / remove MCP servers. Trusted servers are exposed to cards whose `tool_allowlist` includes them.
+- **Hook installer** â€” install / uninstall the Claude Code hook scripts (`packs/hooks/`) so JSONL session files land in our ingestion path.
 
 ---
 
@@ -178,10 +184,10 @@ Read-only browser over every Run, Branch, Step, Approval, and Artifact. **FTS5 s
 
 ### Repo-aware coding sessions
 
-When an Agent has `workspace_id` set, the CLI runs with `cwd=<repo_path>` so its built-in tools operate against the project. Two ways to get there:
+When a Reaper Drone has `workspace_id` set, the CLI runs with `cwd=<repo_path>` so its built-in tools operate against the project. Two ways to get there:
 
-1. **Clone from a git URL** — Chat tab → Clone from git…, or Canvas palette → Clone…. Runs `git clone --quiet [-b <branch>] [--depth N] -- <url> <dest>` into `<data_dir>/clones/<sanitized-name>`. URLs starting with `-` and containing control chars are rejected; pre-existing dest paths are refused; half-finished clones are cleaned up on failure; 5-minute timeout.
-2. **Register an existing local repo** — Add repo… picks a directory and runs `WorktreeManager.register_workspace`, which validates the path is a working tree (not a bare repo) and that no `agent/*` branches exist yet (so the worktree namespace is clean).
+1. **Clone from a git URL** â€” Chat tab â†’ Clone from gitâ€¦, or Canvas palette â†’ Cloneâ€¦. Runs `git clone --quiet [-b <branch>] [--depth N] -- <url> <dest>` into `<data_dir>/clones/<sanitized-name>`. URLs starting with `-` and containing control chars are rejected; pre-existing dest paths are refused; half-finished clones are cleaned up on failure; 5-minute timeout.
+2. **Register an existing local repo** â€” Add repoâ€¦ picks a directory and runs `WorktreeManager.register_workspace`, which validates the path is a working tree (not a bare repo) and that no `agent/*` branches exist yet (so the worktree namespace is clean).
 
 Once bound, every send to that Agent:
 
@@ -189,7 +195,7 @@ Once bound, every send to that Agent:
 - Builds a richer **system prompt** that:
   - Names the workspace and the **current branch**.
   - Tells the model not to push / force / `rm -rf` without explicit go-ahead, to prefer small reviewable diffs, and to run `git status` / `git diff` before non-trivial changes.
-  - Inlines the **first project-convention file** found at the repo root: `CLAUDE.md` → `AGENTS.md` → `GEMINI.md` → `.cursorrules` → `.cursor/rules.md`. Capped at 8 KB with a truncation marker. Symlinks pointing outside the repo are refused.
+  - Inlines the **first project-convention file** found at the repo root: `CLAUDE.md` â†’ `AGENTS.md` â†’ `GEMINI.md` â†’ `.cursorrules` â†’ `.cursor/rules.md`. Capped at 8 KB with a truncation marker. Symlinks pointing outside the repo are refused.
 - The canvas chat dialog refreshes the **live git status banner** after the send, so you see what changed.
 
 The **Switch branch** button calls `workspaces.switch_branch` (`git switch [-c] -- <branch>`). Branch names starting with `-` or containing whitespace are rejected; the `--` separator is belt-and-braces.
@@ -198,20 +204,20 @@ The **Switch branch** button calls `workspaces.switch_branch` (`git switch [-c] 
 
 Operators drag-drop or paperclip files into the Chat tab or canvas chat dialog. Supported:
 
-- **Images:** `.png` `.jpg` `.jpeg` `.gif` `.webp` — passed through to the CLI as `@<path>` references the model can `Read`. With Pillow installed, oversized images are downscaled to 1600 px on the long edge (JPEG re-encoded at quality 85). `MAX_IMAGE_PIXELS = 50,000,000` guards against decompression bombs. GIFs are passed through unchanged to preserve animation.
-- **Spreadsheets:** `.xlsx` `.xls` `.csv` — rendered to one fenced markdown table per sheet, **once at upload time**, capped at 200 rows × 30 cols per sheet with truncation markers. Subsequent sends reuse the cached `rendered_text` so we don't re-parse. `openpyxl` for `.xlsx`, `xlrd` for `.xls` (with `release_resources()` so the file isn't held mmap-open on Windows). Missing optional dep falls back to embedding raw bytes with a "could not render" warning.
+- **Images:** `.png` `.jpg` `.jpeg` `.gif` `.webp` â€” passed through to the CLI as `@<path>` references the model can `Read`. With Pillow installed, oversized images are downscaled to 1600 px on the long edge (JPEG re-encoded at quality 85). `MAX_IMAGE_PIXELS = 50,000,000` guards against decompression bombs. GIFs are passed through unchanged to preserve animation.
+- **Spreadsheets:** `.xlsx` `.xls` `.csv` â€” rendered to one fenced markdown table per sheet, **once at upload time**, capped at 200 rows Ã— 30 cols per sheet with truncation markers. Subsequent sends reuse the cached `rendered_text` so we don't re-parse. `openpyxl` for `.xlsx`, `xlrd` for `.xls` (with `release_resources()` so the file isn't held mmap-open on Windows). Missing optional dep falls back to embedding raw bytes with a "could not render" warning.
 
-**Hard 25 MB upload cap** — pre-checked at the GUI before reading + base64-encoding (which run in `asyncio.to_thread` so a big file doesn't freeze the event loop), and re-checked at the RPC. **Sanitized filename** rejects whitespace / `@` / `\n\r\t` so the `@<path>` token can't break the CLI's prompt tokenizer or smuggle in extra files. The data dir's path is also checked for whitespace at upload time for the same reason.
+**Hard 25 MB upload cap** â€” pre-checked at the GUI before reading + base64-encoding (which run in `asyncio.to_thread` so a big file doesn't freeze the event loop), and re-checked at the RPC. **Sanitized filename** rejects whitespace / `@` / `\n\r\t` so the `@<path>` token can't break the CLI's prompt tokenizer or smuggle in extra files. The data dir's path is also checked for whitespace at upload time for the same reason.
 
-**Storage layout:** `<data_dir>/attachments/<agent_id>/<id>__<sanitized_name>`. Schema in `apps/service/store/schema.sql` under `CREATE TABLE attachments` with `ON DELETE CASCADE` on `agent_id`. **Cross-agent auth** — every `attachments.delete`, `.list`, and the internal `update_attachment_turn` require the `agent_id` and refuse to act on rows that don't belong to it.
+**Storage layout:** `<data_dir>/attachments/<agent_id>/<id>__<sanitized_name>`. Schema in `apps/service/store/schema.sql` under `CREATE TABLE attachments` with `ON DELETE CASCADE` on `agent_id`. **Cross-agent auth** â€” every `attachments.delete`, `.list`, and the internal `update_attachment_turn` require the `agent_id` and refuse to act on rows that don't belong to it.
 
-When an Agent references another Agent (see below), the referencing Agent's prompt also gets the referenced Agent's spreadsheet `rendered_text` inlined (capped 100 KB total across all references). Image attachments don't transfer through references — re-attach them if the new Agent needs to see them.
+When a Reaper Drone references another Agent (see below), the referencing Agent's prompt also gets the referenced Agent's spreadsheet `rendered_text` inlined (capped 100 KB total across all references). Image attachments don't transfer through references â€” re-attach them if the new Agent needs to see them.
 
-The **Limits → Attachment storage** card surfaces total disk usage broken down by agent.
+The **Limits â†’ Attachment storage** card surfaces total disk usage broken down by agent.
 
 ### Peer Communication (References)
 
-Agents from independent contexts can "talk" to each other when linked by the operator. Each referenced unit's full conversation history is injected into the agent's system prompt as read-only context. This is cross-provider safe: a Gemini-CLI Agent reading a Claude-CLI Agent's transcript just sees plain text.
+Reaper Drones from independent contexts can "talk" to each other when linked by the operator. Each referenced unit's full conversation history is injected into the agent's system prompt as read-only context. This is cross-provider safe: a Gemini-CLI Agent reading a Claude-CLI Agent's transcript just sees plain text.
 
 Established via:
 - **Standalone:** "Edit references" button in the Drones or Agents chat pane.
@@ -223,14 +229,15 @@ Peer history is capped at 20,000 characters to prevent blowing the context windo
 
 A `Flow` is `{nodes: [...], edges: [...]}` plus name, description, version, `is_draft`. Node types:
 
-- **Trigger** — entry point. No inputs.
-- **Agent** — references a `card_id`; its `params.goal` overrides the upstream input as the prompt.
-- **Branch** — boolean condition; routes to the `true` or `false` port. Downstream nodes whose only inputs come through the not-taken port are marked `skipped`.
-- **Merge** — concatenates inputs.
-- **Human** — pauses the run; emits `flow.node.human_pending` and waits for `flows.approve_human` from the GUI.
-- **Output** — terminal sink.
+- **Trigger** â€” entry point. No inputs.
+- **Reaper Drone** â€” references a `card_id`; its `params.goal` overrides the upstream input as the prompt.
+- **Consensus** â€” fans out one question to multiple candidate cards, then fans in through a judge card to produce a ranked/merged outcome.
+- **Branch** â€” boolean condition; routes to the `true` or `false` port. Downstream nodes whose only inputs come through the not-taken port are marked `skipped`.
+- **Merge** â€” concatenates inputs.
+- **Human** â€” pauses the run; emits `flow.node.human_pending` and waits for `flows.approve_human` from the GUI.
+- **Output** â€” terminal sink.
 
-The **FlowExecutor** validates the graph (no cycles, no dangling edges), topologically sorts, and dispatches in **waves** — every node whose dependencies are all complete runs concurrently via `asyncio.gather`. Cancellation cascades to in-flight node tasks (so child CLI subprocesses get reaped). Per-card cache is pre-populated once per run to avoid stampeding `store.list_cards()`.
+The **FlowExecutor** validates the graph (no cycles, no dangling edges), topologically sorts, and dispatches in **waves** â€” every node whose dependencies are all complete runs concurrently via `asyncio.gather`. Cancellation cascades to in-flight node tasks (so child CLI subprocesses get reaped). Per-card cache is pre-populated once per run to avoid stampeding `store.list_cards()`.
 
 Events: `flow.node.queued / started / token_delta / completed / failed / skipped / human_pending` flow through the EventBus and SSE channel keyed by the `flow_run_id`.
 
@@ -242,10 +249,10 @@ Events: `flow.node.queued / started / token_delta / completed / failed / skipped
 
 A `Workspace` is a registered local git working tree. The **WorktreeManager** owns four things:
 
-- `register_workspace(path)` — validate, mark `.agent-worktrees/` as excluded, persist the row.
-- `clone_workspace(url, dest_dir, ...)` — clone first, then register.
-- `create(run_id, workspace, card)` — for an agentic Run: cut a `agent/<run-id>` branch + worktree under `<repo>/.agent-worktrees/<run-id>`, isolated from the user's main checkout.
-- `commit / merge / approve / reject / abandon` — life-cycle for the branch the agent works on.
+- `register_workspace(path)` â€” validate, mark `.agent-worktrees/` as excluded, persist the row.
+- `clone_workspace(url, dest_dir, ...)` â€” clone first, then register.
+- `create(run_id, workspace, card)` â€” for an agentic Run: cut a `agent/<run-id>` branch + worktree under `<repo>/.agent-worktrees/<run-id>`, isolated from the user's main checkout.
+- `commit / merge / approve / reject / abandon` â€” life-cycle for the branch the agent works on.
 
 A **per-workspace file lock** prevents two runs from clobbering the same `.agent-worktrees/` directory. Stale runs are swept on a timer; the **Drift sentinel** notices when an agent commit has wandered too far off the base ref.
 
@@ -262,29 +269,29 @@ A **per-workspace file lock** prevents two runs from clobbering the same `.agent
 ## Architecture
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│  GUI process                                               │
-│  PySide6 + qasync — single window, 8 rail tabs             │
-└────────────────────────┬───────────────────────────────────┘
-                         │ JSON-RPC over 127.0.0.1:8765 (token-auth)
-                         │ SSE for live event streams (run-id channels)
-┌────────────────────────┴───────────────────────────────────┐
-│  Service process (Python 3.11+, asyncio, uvicorn)          │
-│  ┌────────────────┬─────────────────┬───────────────────┐  │
-│  │ DISPATCH       │  INGESTION      │ STATE / STORE     │  │
-│  │ chat.send      │ JSONL watcher   │ SQLite + FTS5     │  │
-│  │ agents.send    │ Hook receiver   │ Event log         │  │
-│  │ runs.dispatch  │                 │ WorktreeMgr       │  │
-│  │ FlowExecutor   │ Stream parsers  │ Cards + Templates │  │
-│  ├────────────────┼─────────────────┼───────────────────┤  │
-│  │ PROVIDERS      │  TOOLS          │ POLICY            │  │
-│  │ claude-cli     │ MCP registry    │ Cost meter        │  │
-│  │ gemini-cli     │ Worktree tools  │ Pre-flight linter │  │
-│  │ anthropic API  │ Whisper         │ Approvals (HITL)  │  │
-│  │ google API     │ Attachments     │ Drift sentinel    │  │
-│  │ ollama HTTP    │ render pipeline │ Keyring secrets   │  │
-│  └────────────────┴─────────────────┴───────────────────┘  │
-└────────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  GUI process                                               â”‚
+â”‚  PySide6 + qasync â€” single window, 8 rail tabs             â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                         â”‚ JSON-RPC over 127.0.0.1:8765 (token-auth)
+                         â”‚ SSE for live event streams (run-id channels)
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  Service process (Python 3.11+, asyncio, uvicorn)          â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”‚
+â”‚  â”‚ DISPATCH       â”‚  INGESTION      â”‚ STATE / STORE     â”‚  â”‚
+â”‚  â”‚ chat.send      â”‚ JSONL watcher   â”‚ SQLite + FTS5     â”‚  â”‚
+â”‚  â”‚ agents.send    â”‚ Hook receiver   â”‚ Event log         â”‚  â”‚
+â”‚  â”‚ runs.dispatch  â”‚                 â”‚ WorktreeMgr       â”‚  â”‚
+â”‚  â”‚ FlowExecutor   â”‚ Stream parsers  â”‚ Cards + Templates â”‚  â”‚
+â”‚  â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤  â”‚
+â”‚  â”‚ PROVIDERS      â”‚  TOOLS          â”‚ POLICY            â”‚  â”‚
+â”‚  â”‚ claude-cli     â”‚ MCP registry    â”‚ Cost meter        â”‚  â”‚
+â”‚  â”‚ gemini-cli     â”‚ Worktree tools  â”‚ Pre-flight linter â”‚  â”‚
+â”‚  â”‚ anthropic API  â”‚ Whisper         â”‚ Approvals (HITL)  â”‚  â”‚
+â”‚  â”‚ google API     â”‚ Attachments     â”‚ Drift sentinel    â”‚  â”‚
+â”‚  â”‚ ollama HTTP    â”‚ render pipeline â”‚ Keyring secrets   â”‚  â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 The service is started by `agentorchestra-service`. The GUI (`agentorchestra-gui`) auto-spawns the service if it isn't running (`apps/gui/service_supervisor.py`, with `CREATE_NO_WINDOW` on Windows so you don't see a console pop). On Quit, the GUI runs `RpcClient.aclose()` to completion via `loop.run_until_complete` so the httpx pool / TLS sockets close cleanly.
@@ -297,12 +304,12 @@ The service is started by `agentorchestra-service`. The GUI (`agentorchestra-gui
 
 ```
 <data_dir>/
-├── agentorchestra.sqlite      single SQLite DB (WAL + FTS5)
-├── agentorchestra.sqlite-wal
-├── agentorchestra.sqlite-shm
-├── attachments/<agent_id>/    uploaded images + spreadsheets
-├── clones/<repo-name>/        managed git clones (workspaces.clone)
-└── logs/                      service rotating log
+â”œâ”€â”€ agentorchestra.sqlite      single SQLite DB (WAL + FTS5)
+â”œâ”€â”€ agentorchestra.sqlite-wal
+â”œâ”€â”€ agentorchestra.sqlite-shm
+â”œâ”€â”€ attachments/<agent_id>/    uploaded images + spreadsheets
+â”œâ”€â”€ clones/<repo-name>/        managed git clones (workspaces.clone)
+â””â”€â”€ logs/                      service rotating log
 ```
 
 Schema is `apps/service/store/schema.sql`, applied via `executescript()` at startup. Column-additive migrations live in `EventStore._migrate` (e.g. `agents.workspace_id`, `agents.parent_preset`, `agents.reference_agent_ids`) with a `_has_column` guard so they're idempotent.
@@ -313,14 +320,16 @@ The token used for RPC auth is stored in the **OS keyring** (`keyring` package) 
 
 ## Safety model
 
-- **Subscription-only by default.** No API key path is opened in the standard chat / agent flow. The `anthropic` and `google` providers exist for the API-key route to the worktree-bound dispatcher, but the chat surface stays on `claude-cli` / `gemini-cli`.
+- **Subscription-only by default.** No API key path is opened in the standard chat / agent flow. The `anthropic` and `google` providers exist for the API-key route to the worktree-bound dispatcher, but the chat surface stays on `claude-cli` / `gemini-cli` / `codex-cli`.
 - **Localhost-only RPC.** The service binds `127.0.0.1:8765`. Token auth on top so a malicious local browser tab can't enumerate.
-- **Sandbox tiers** — `LocalSandbox` (default), `DockerSandbox` (cap-drop ALL, no-new-privileges, read-only root + tmpfs `/tmp`, no network unless card opts in, bind-mount of the worktree at `/workspace`). The DockerSandbox passes file paths via positional `sh` args (`sh -c '... "$1"'` style) so a malicious filename can't break out of the shell quoting.
-- **Path-injection guards** on every operator-supplied path: attachments filename rejects whitespace / `@` / `\n\r\t`; dictation audio paths must be regular files with allow-listed extensions; workspaces.clone refuses URLs starting with `-` or containing control chars (allows `@` so SSH URLs `git@github.com:…` work); switch_branch refuses names starting with `-` or containing whitespace.
+- **Sandbox tiers** â€” `LocalSandbox` (default), `DockerSandbox` (cap-drop ALL, no-new-privileges, read-only root + tmpfs `/tmp`, no network unless card opts in, bind-mount of the worktree at `/workspace`). The DockerSandbox passes file paths via positional `sh` args (`sh -c '... "$1"'` style) so a malicious filename can't break out of the shell quoting.
+- **Path-injection guards** on every operator-supplied path: attachments filename rejects whitespace / `@` / `\n\r\t`; dictation audio paths must be regular files with allow-listed extensions; workspaces.clone refuses URLs starting with `-` or containing control chars (allows `@` so SSH URLs `git@github.com:â€¦` work); switch_branch refuses names starting with `-` or containing whitespace.
 - **Cross-agent attachment auth** on every attachment RPC.
-- **CSRF / replay** — RPC token is a random 256-bit secret minted at first start.
-- **HITL approval gates** — the `Approval` table records who approved what when, with `risk_signals` JSON and a free-form note.
+- **CSRF / replay** â€” RPC token is a random 256-bit secret minted at first start.
+- **HITL approval gates** â€” the `Approval` table records who approved what when, with `risk_signals` JSON and a free-form note.
 - **Cost caps** per-card with a hard cap (aborts) and soft cap (warns once).
+- **Shadow-Plan guard** â€” autonomous mutation tools are state-gated; code modifications require recent intent captured in `PLAN.md` or the run receives `403 Shadow-Plan Violation`.
+- **Autonomous turn cap** â€” autonomous tool loops are hard-capped at 15 turns.
 - **Drift sentinel** flags worktree branches that have wandered too far from the base ref before merge.
 - **Coding-session prompt header** explicitly tells the agent not to push / force / `rm -rf` without explicit go-ahead. The CLI's own permission prompts still apply for write tools.
 
@@ -342,7 +351,7 @@ All under `127.0.0.1:8765`, JSON-RPC body, `Authorization: Bearer <token>`. Stre
 | `workspaces.git_status` | Branch, ahead/behind, modified/staged/untracked counts, last commit. |
 | `workspaces.switch_branch` | `git switch [-c] -- <branch>`. |
 
-### Agents (named persistent conversations)
+### Reaper Drones (named persistent conversations)
 
 | Method | Purpose |
 |---|---|
@@ -361,13 +370,13 @@ All under `127.0.0.1:8765`, JSON-RPC body, `Authorization: Bearer <token>`. Stre
 | Method | Purpose |
 |---|---|
 | `attachments.upload` | Persist + render (markdown for spreadsheets, optional resize for images). 25 MB cap. |
-| `attachments.list` | Per-agent — requires `agent_id`. |
-| `attachments.delete` | Per-agent — requires both `id` and `agent_id`. |
+| `attachments.list` | Per-agent â€” requires `agent_id`. |
+| `attachments.delete` | Per-agent â€” requires both `id` and `agent_id`. |
 | `attachments.usage` | Per-agent + grand totals. Renders the Limits-tab storage card. |
 
 ### Cards / Templates / Runs / Branches
 
-`cards.list`, `templates.render`, `templates.get`, `runs.list`, `runs.dispatch`, `runs.approve`, `runs.reject`, `runs.cancel`, `runs.replay`, `runs.consensus`, `runs.approve_plan`, `runs.artifacts`.
+`cards.list`, `templates.render`, `templates.get`, `runs.list`, `runs.dispatch`, `runs.approve`, `runs.reject`, `runs.cancel`, `runs.replay`, `runs.consensus`, `runs.select_consensus_winner`, `runs.approve_plan`, `runs.artifacts`.
 
 ### Flows
 
@@ -375,7 +384,7 @@ All under `127.0.0.1:8765`, JSON-RPC body, `Authorization: Bearer <token>`. Stre
 
 ### Chat (one-shot)
 
-`chat.send` — single-turn chat used by some non-Agent surfaces.
+`chat.send` â€” single-turn chat used by some non-Agent surfaces.
 
 ### Limits
 
@@ -433,63 +442,63 @@ CI runs lint + ruff format-check + the full test suite on GitHub Actions on ever
 
 ```
 apps/
-├── gui/                         PySide6 GUI process
-│   ├── canvas/                  Flow + ConversationNode canvas
-│   │   ├── page.py              CanvasPage orchestrator
-│   │   ├── chat_dialog.py       Per-Agent chat dialog
-│   │   ├── lineage_box.py       Translucent cluster wrap
-│   │   ├── nodes/               BaseNode, ConversationNode, AgentNode, …
-│   │   ├── edges.py             Directional + labelled edges
-│   │   ├── palette.py           Left palette + + New conversation
-│   │   └── commands.py          Undo-stack QUndoCommand subclasses
-│   ├── windows/                 Tabs (chat, agents, composer, history, limits, settings, …)
-│   ├── ipc/                     RpcClient (httpx) + SSE consumer
-│   ├── annotator.py             Optional pyside6_annotator integration
-│   └── service_supervisor.py    Auto-spawn the service
-└── service/                     Orchestrator service process
-    ├── main.py                  ASGI entrypoint, RPC registration
-    ├── types.py                 Domain types: Agent, Workspace, Flow, FlowRun,
-    │                            PersonalityCard, Run, Branch, Step, Approval,
-    │                            Outcome, Event, Attachment, …
-    ├── attachments/             render pipeline (csv / xlsx / xls / images)
-    ├── agents/                  follow-up presets + instruction renderer
-    ├── cards/                   Seed cards (Broad-Research, QA-on-fix, …); CRUD lives in store/events.py
-    ├── cost/                    Forecasts + price tables
-    ├── dispatch/                ChatSession + Run lifecycle + EventBus + drift sentinel
-    ├── dictation/               faster-whisper wrapper
-    ├── flows/                   FlowExecutor (waves, cancellation, validation)
-    ├── hitl/                    Approval gates
-    ├── ingestion/               JSONL watcher, Claude hook receiver, OTel
-    ├── ipc/                     JSON-RPC Starlette server + SSE
-    ├── limits/                  Hardcoded plan registry + context_windows()
-    ├── linter/                  Pre-flight instruction linter
-    ├── mcp/                     MCP server registry + client
-    ├── providers/               LLMProvider adapters: anthropic, claude_cli,
-    │                            google, gemini_cli, ollama
-    ├── sandbox/                 LocalSandbox + DockerSandbox
-    ├── secrets/                 OS-keyring wrapper
-    ├── store/                   schema.sql + EventStore (aiosqlite + FTS5)
-    ├── templates/               Banks / Jinja2 template engine
-    ├── updates/                 Signed-update verifier
-    └── worktrees/               WorktreeManager + git_cli wrapper + merger
+â”œâ”€â”€ gui/                         PySide6 GUI process
+â”‚   â”œâ”€â”€ canvas/                  Flow + ConversationNode canvas
+â”‚   â”‚   â”œâ”€â”€ page.py              CanvasPage orchestrator
+â”‚   â”‚   â”œâ”€â”€ chat_dialog.py       Per-Agent chat dialog
+â”‚   â”‚   â”œâ”€â”€ lineage_box.py       Translucent cluster wrap
+â”‚   â”‚   â”œâ”€â”€ nodes/               BaseNode, ConversationNode, AgentNode, â€¦
+â”‚   â”‚   â”œâ”€â”€ edges.py             Directional + labelled edges
+â”‚   â”‚   â”œâ”€â”€ palette.py           Left palette + + New conversation
+â”‚   â”‚   â””â”€â”€ commands.py          Undo-stack QUndoCommand subclasses
+â”‚   â”œâ”€â”€ windows/                 Tabs (chat, agents, composer, history, limits, settings, â€¦)
+â”‚   â”œâ”€â”€ ipc/                     RpcClient (httpx) + SSE consumer
+â”‚   â”œâ”€â”€ annotator.py             Optional pyside6_annotator integration
+â”‚   â””â”€â”€ service_supervisor.py    Auto-spawn the service
+â””â”€â”€ service/                     Orchestrator service process
+    â”œâ”€â”€ main.py                  ASGI entrypoint, RPC registration
+    â”œâ”€â”€ types.py                 Domain types: Agent, Workspace, Flow, FlowRun,
+    â”‚                            PersonalityCard, Run, Branch, Step, Approval,
+    â”‚                            Outcome, Event, Attachment, â€¦
+    â”œâ”€â”€ attachments/             render pipeline (csv / xlsx / xls / images)
+    â”œâ”€â”€ agents/                  follow-up presets + instruction renderer
+    â”œâ”€â”€ cards/                   Seed cards (Broad-Research, QA-on-fix, â€¦); CRUD lives in store/events.py
+    â”œâ”€â”€ cost/                    Forecasts + price tables
+    â”œâ”€â”€ dispatch/                ChatSession + Run lifecycle + EventBus + drift sentinel
+    â”œâ”€â”€ dictation/               faster-whisper wrapper
+    â”œâ”€â”€ flows/                   FlowExecutor (waves, cancellation, validation)
+    â”œâ”€â”€ hitl/                    Approval gates
+    â”œâ”€â”€ ingestion/               JSONL watcher, Claude hook receiver, OTel
+    â”œâ”€â”€ ipc/                     JSON-RPC Starlette server + SSE
+    â”œâ”€â”€ limits/                  Hardcoded plan registry + context_windows()
+    â”œâ”€â”€ linter/                  Pre-flight instruction linter
+    â”œâ”€â”€ mcp/                     MCP server registry + client
+    â”œâ”€â”€ providers/               LLMProvider adapters: anthropic, claude_cli,
+    â”‚                            codex_cli, google, gemini_cli, ollama
+    â”œâ”€â”€ sandbox/                 LocalSandbox + DockerSandbox
+    â”œâ”€â”€ secrets/                 OS-keyring wrapper
+    â”œâ”€â”€ store/                   schema.sql + EventStore (aiosqlite + FTS5)
+    â”œâ”€â”€ templates/               Banks / Jinja2 template engine
+    â”œâ”€â”€ updates/                 Signed-update verifier
+    â””â”€â”€ worktrees/               WorktreeManager + git_cli wrapper + merger
 packs/
-├── archetypes/                  Bundled cards (Broad-Research, QA-on-fix, …)
-├── hooks/                       Claude hook scripts
-└── (otel-presets/ — planned, not shipped)
+â”œâ”€â”€ archetypes/                  Bundled cards (Broad-Research, QA-on-fix, â€¦)
+â”œâ”€â”€ hooks/                       Claude hook scripts
+â””â”€â”€ (otel-presets/ â€” planned, not shipped)
 scripts/
-├── manifest.json                Operator-panel command manifest
-├── ops.cmd / ops.py             Panel host
-├── start.cmd / restart.cmd / stop.cmd / launch.cmd / setup.cmd
-├── test-claude.cmd / test-gemini.cmd
-├── update.cmd / doctor.cmd / reset.cmd
-└── limits.cmd
+â”œâ”€â”€ manifest.json                Operator-panel command manifest
+â”œâ”€â”€ ops.cmd / ops.py             Panel host
+â”œâ”€â”€ start.cmd / restart.cmd / stop.cmd / launch.cmd / setup.cmd
+â”œâ”€â”€ test-claude.cmd / test-gemini.cmd
+â”œâ”€â”€ update.cmd / doctor.cmd / reset.cmd
+â””â”€â”€ limits.cmd
 tests/
-├── unit/                        Per-module tests (no network)
-├── integration/                 Filesystem + git
-└── e2e/                         End-to-end flows
+â”œâ”€â”€ unit/                        Per-module tests (no network)
+â”œâ”€â”€ integration/                 Filesystem + git
+â””â”€â”€ e2e/                         End-to-end flows
 docs/
-├── user/
-└── dev/                         Architecture, design notes, runbooks
+â”œâ”€â”€ user/
+â””â”€â”€ dev/                         Architecture, design notes, runbooks
 ```
 
 ---

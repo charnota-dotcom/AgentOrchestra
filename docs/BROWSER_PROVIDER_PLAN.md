@@ -1,13 +1,13 @@
-# Cross-vendor chat orchestration — feature plan
+﻿# Cross-vendor chat orchestration â€” feature plan
 
-Status: design — implementation in flight across three sister PRs.
+Status: design â€” implementation in flight across three sister PRs.
 
 ---
 
 ## Context
 
-The drone abstraction today binds each conversation to one of three
-providers — `claude-cli`, `gemini-cli`, `anthropic` (API). Each has a
+The FPV Drone abstraction today binds each conversation to one of three
+providers â€” `claude-cli`, `gemini-cli`, `anthropic` (API). Each has a
 downside for the operator:
 
 * **CLI** is agentic; the model plans tool use instead of just chatting.
@@ -15,8 +15,8 @@ downside for the operator:
 * **No way** to take a conversation from one service to another, or to
   run several services side-by-side from one workspace.
 
-The operator wants a third path — let the browser tab do the inference;
-the app does everything around it — plus better awareness of conversation
+The operator wants a third path â€” let the browser tab do the inference;
+the app does everything around it â€” plus better awareness of conversation
 length and a way to move conversations across services. This plan ships
 those capabilities as three PRs.
 
@@ -26,27 +26,27 @@ those capabilities as three PRs.
 
 | # | Branch | Scope | LOC | Independent? |
 |---|--------|-------|-----|--------------|
-| 1 | `claude/token-tracking` | New `apps/service/tokens/` sub-package; token-estimate + context-window lookup; `prompt_tokens` / `transcript_tokens` / `context_window` on every `drones.send` response; `ContextGauge` widget rendered in Drones tab + canvas chat dialog. Lights up for every drone, every provider, no other UX change. | ~150 | yes |
-| 2 | `claude/browser-provider` | New `apps/gui/browser_bridge/` sub-package; `Blueprint.chat_url` + `DroneAction.bound_chat_url`; `BrowserBridgeDialog` with copy + paste + clipboard listener; `CF_HTML` SourceURL extraction; multi-drone parallel routing; link-back to browser; handoff menu (continuation / fork / plain). | ~400 | uses PR 1's gauge in the dialog header; otherwise independent |
+| 1 | `claude/token-tracking` | New `apps/service/tokens/` sub-package; token-estimate + context-window lookup; `prompt_tokens` / `transcript_tokens` / `context_window` on every `drones.send` response; `ContextGauge` widget rendered in FPV Drones tab + canvas chat dialog. Lights up for every FPV Drone, every provider, no other UX change. | ~150 | yes |
+| 2 | `claude/browser-provider` | New `apps/gui/browser_bridge/` sub-package; `Blueprint.chat_url` + `DroneAction.bound_chat_url`; `BrowserBridgeDialog` with copy + paste + clipboard listener; `CF_HTML` SourceURL extraction; multi-FPV Drone parallel routing; link-back to browser; handoff menu (continuation / fork / plain). | ~400 | uses PR 1's gauge in the dialog header; otherwise independent |
 | 3 | `claude/claude-cli-stream-json` | Promote `apps/service/providers/claude_cli.py` to a sub-package; parse `--output-format stream-json` event stream; extend transcript-entry schema for `tool_call` / `tool_result` / `subagent` kinds; GUI renderers. | ~300 | yes |
 
-Recommended order: 1 → 2 → 3.
+Recommended order: 1 â†’ 2 â†’ 3.
 
 ---
 
-## PR 1 — Token & context-window tracking
+## PR 1 â€” Token & context-window tracking
 
 ### Sub-package layout
 
 ```
 apps/service/tokens/
-├── __init__.py        # estimate_tokens(text, *, provider, model) -> int
-│                      # context_window(provider, model) -> int | None
-│                      # estimate_action_total(action, system_prompt) -> int
-├── estimate.py        # v1: char/4 heuristic with future-pluggable hook
-├── limits.py          # CONTEXT_WINDOWS table (provider, model) -> int
-└── tests/
-    └── test_estimate.py
+â”œâ”€â”€ __init__.py        # estimate_tokens(text, *, provider, model) -> int
+â”‚                      # context_window(provider, model) -> int | None
+â”‚                      # estimate_action_total(action, system_prompt) -> int
+â”œâ”€â”€ estimate.py        # v1: char/4 heuristic with future-pluggable hook
+â”œâ”€â”€ limits.py          # CONTEXT_WINDOWS table (provider, model) -> int
+â””â”€â”€ tests/
+    â””â”€â”€ test_estimate.py
 ```
 
 Pure functions, no I/O, no Qt, no `apps.gui` imports. Same hard-import
@@ -67,11 +67,11 @@ PR 2) return three extra fields:
 ```
 
 `context_window` is `null` for unknown `(provider, model)` pairs.
-Existing callers ignore unknown keys — pure additive change.
+Existing callers ignore unknown keys â€” pure additive change.
 
 ### GUI widget
 
-`apps/gui/widgets/context_gauge.py` — small `QWidget` with three layers:
+`apps/gui/widgets/context_gauge.py` â€” small `QWidget` with three layers:
 a label `~12.4K / 200K tokens (est)`, a horizontal progress bar coloured
 by percentage, and a trailing percent string. Hidden when
 `context_window is None`.
@@ -79,20 +79,20 @@ by percentage, and a trailing percent string. Hidden when
 Colour bands:
 
 * <60% green
-* 60–80% amber (consider forking the drone soon)
-* 80–95% orange (next turn at risk of truncation)
-* ≥95% red (truncation imminent — fork now)
+* 60â€“80% amber (consider forking the FPV Drone soon)
+* 80â€“95% orange (next turn at risk of truncation)
+* â‰¥95% red (truncation imminent â€” fork now)
 
 Rendered in:
 
-1. Drones tab footer (per-drone running total)
+1. FPV Drones tab footer (per-FPV Drone running total)
 2. Canvas chat dialog footer (same data, smaller layout)
 3. `BrowserBridgeDialog` header (PR 2; per-turn prompt size + projected
    post-paste total)
 
 ### Estimation accuracy
 
-v1 uses `max(1, len(text) // 4)` — accurate ±30% on English. Labelled
+v1 uses `max(1, len(text) // 4)` â€” accurate Â±30% on English. Labelled
 `~` and `(est)` so the operator never confuses it for an exact count.
 Amber starts at 60%, leaving headroom. v2 (separate future PR) plugs in
 real tokenizers (`tiktoken`, `anthropic.count_tokens`, SentencePiece)
@@ -101,32 +101,32 @@ behind the same `estimate_tokens()` signature.
 ### Out of scope (PR 1)
 
 * Exact per-provider tokenizers
-* Auto-forking a drone when total > 80%
+* Auto-forking an FPV Drone when total > 80%
 * Cost-in-dollars overlay
 * Transcript summarisation when nearing limit
 
 ---
 
-## PR 2 — Browser provider, URL routing, link-back, handoff
+## PR 2 â€” Browser provider, URL routing, link-back, handoff
 
 ### Sub-package layout
 
 ```
 apps/gui/browser_bridge/
-├── __init__.py             # public: BrowserBridgeDialog, ClipboardRouter
-├── README.md
-├── dialog.py               # BrowserBridgeDialog: prompt textbox +
-│                           # listener status + paste-back textbox
-├── clipboard_listener.py   # OS-level watcher; parses CF_HTML/text-html
-│                           # for SourceURL
-├── clipboard_router.py     # multi-drone routing based on source URL
-├── url_launcher.py         # webbrowser.open + cross-platform clipboard set
-├── handoff.py              # format renderers: continuation / fork / plain
-└── tests/
-    ├── conftest.py
-    ├── test_url_launcher.py
-    ├── test_clipboard_router.py
-    └── test_handoff.py
+â”œâ”€â”€ __init__.py             # public: BrowserBridgeDialog, ClipboardRouter
+â”œâ”€â”€ README.md
+â”œâ”€â”€ dialog.py               # BrowserBridgeDialog: prompt textbox +
+â”‚                           # listener status + paste-back textbox
+â”œâ”€â”€ clipboard_listener.py   # OS-level watcher; parses CF_HTML/text-html
+â”‚                           # for SourceURL
+â”œâ”€â”€ clipboard_router.py     # multi-FPV Drone routing based on source URL
+â”œâ”€â”€ url_launcher.py         # webbrowser.open + cross-platform clipboard set
+â”œâ”€â”€ handoff.py              # format renderers: continuation / fork / plain
+â””â”€â”€ tests/
+    â”œâ”€â”€ conftest.py
+    â”œâ”€â”€ test_url_launcher.py
+    â”œâ”€â”€ test_clipboard_router.py
+    â””â”€â”€ test_handoff.py
 ```
 
 Hard rule: no `apps.service.*` or `apps.gui.ipc.*` imports inside this
@@ -180,16 +180,16 @@ Branch in `drones_send`: when `blueprint_snapshot.provider == "browser"`:
 
 New RPCs:
 
-* `drones.append_assistant_turn(action_id, content)` — appends the
+* `drones.append_assistant_turn(action_id, content)` â€” appends the
   assistant turn from the operator's paste. Returns updated action +
   fresh token totals.
-* `drones.bind_chat_url(action_id, url)` — pins `bound_chat_url`. Called
+* `drones.bind_chat_url(action_id, url)` â€” pins `bound_chat_url`. Called
   automatically after the first paste-back lands; also exposed as a
-  manual "Re-link…" action in the GUI.
-* `drones.export(action_id, format)` — returns formatted handoff text;
-  `format ∈ {"continuation", "fork", "plain"}`.
+  manual "Re-linkâ€¦" action in the GUI.
+* `drones.export(action_id, format)` â€” returns formatted handoff text;
+  `format âˆˆ {"continuation", "fork", "plain"}`.
 
-### Clipboard listener — what it captures
+### Clipboard listener â€” what it captures
 
 ```python
 @dataclass
@@ -214,33 +214,33 @@ OS support:
 `ClipboardRouter` wraps the listener:
 
 1. Clipboard fires with `source_url`.
-2. Router finds the drone whose `bound_chat_url == source_url` — routes
+2. Router finds the drone whose `bound_chat_url == source_url` â€” routes
    there.
 3. If none bound, finds drones whose `chat_url` is a prefix match. One
-   match → ask "save for drone X?". Multiple → small picker.
-4. No match → silent skip; debug-mode logs the rejected event.
+   match â†’ ask "save for drone X?". Multiple â†’ small picker.
+4. No match â†’ silent skip; debug-mode logs the rejected event.
 
-Five browser drones, five tabs, app auto-routes.
+Five browser FPV Drones, five tabs, app auto-routes.
 
 ### Link back to the browser
 
 Three surfaces, all wired to `webbrowser.open(action.bound_chat_url)`:
 
-1. Drones tab header: `🔗 claude.ai/chat/4f8…` icon next to drone title.
+1. FPV Drones tab header: `ðŸ”— claude.ai/chat/4f8â€¦` icon next to drone title.
 2. Canvas `DroneActionNode` tooltip on hover.
 3. Canvas chat dialog header: same icon.
 
-`bound_chat_url is None` → icon hidden. Operator can hit "Re-link…" to
+`bound_chat_url is None` â†’ icon hidden. Operator can hit "Re-linkâ€¦" to
 clear and rebind on next paste.
 
-### Handoff menu — three formats (v1)
+### Handoff menu â€” three formats (v1)
 
-Popover menu in the Drones tab and canvas chat dialog:
+Popover menu in the FPV Drones tab and canvas chat dialog:
 
 | Format | Contents | Best for |
 |--------|----------|----------|
 | Continuation prompt | Persona + skills + every prior turn, framed as "pick up from the last user turn" | Continuing in a fresh tab of the same or a different service |
-| Fork — same role, fresh start | Persona + skills only, no prior turns | Spawning a sibling conversation with the same character |
+| Fork â€” same role, fresh start | Persona + skills only, no prior turns | Spawning a sibling conversation with the same character |
 | Plain transcript | User / assistant turns only, no system framing | Sharing, doc embedding, code review |
 
 Each option copies to clipboard + shows a toast with the estimated token
@@ -250,25 +250,25 @@ count + an "Open <service> in browser" shortcut.
 
 * System tray + global hotkey (sketched in plan as Rung 3, future PR)
 * Browser extension (Rung 4, separate project)
-* Auto-typing into the browser (PyAutoGUI-style — explicitly avoided)
+* Auto-typing into the browser (PyAutoGUI-style â€” explicitly avoided)
 * Service-specific handoff formats (v2; v1's universal Continuation
   format works across claude.ai / ChatGPT / Gemini)
 
 ---
 
-## PR 3 — claude-cli stream-json sub-agent capture
+## PR 3 â€” claude-cli stream-json sub-agent capture
 
 ### Sub-package layout
 
 ```
 apps/service/providers/claude_cli/
-├── __init__.py             # public re-export of ClaudeCLIProvider
-├── provider.py             # ClaudeCLIProvider class (was claude_cli.py)
-├── session.py              # ClaudeCLIChatSession (was inside the same file)
-├── stream_parser.py        # parse claude --output-format stream-json events
-└── tests/
-    ├── test_stream_parser.py
-    └── test_session.py
+â”œâ”€â”€ __init__.py             # public re-export of ClaudeCLIProvider
+â”œâ”€â”€ provider.py             # ClaudeCLIProvider class (was claude_cli.py)
+â”œâ”€â”€ session.py              # ClaudeCLIChatSession (was inside the same file)
+â”œâ”€â”€ stream_parser.py        # parse claude --output-format stream-json events
+â””â”€â”€ tests/
+    â”œâ”€â”€ test_stream_parser.py
+    â””â”€â”€ test_session.py
 ```
 
 ### Transcript-entry schema
@@ -291,12 +291,12 @@ Schema stays `list[dict[str, Any]]`. Old transcripts continue to work.
 
 ### GUI rendering
 
-Drones tab + chat dialog render each kind distinctly:
+FPV Drones tab + chat dialog render each kind distinctly:
 
-* `user` / `assistant` — today's blue/grey bubbles
-* `tool_call` — collapsible monospace card "Used Bash: `ls -la`"
-* `tool_result` — same, with truncated output
-* `subagent` — nested mini-bubble with delegated prompt + result,
+* `user` / `assistant` â€” today's blue/grey bubbles
+* `tool_call` â€” collapsible monospace card "Used Bash: `ls -la`"
+* `tool_result` â€” same, with truncated output
+* `subagent` â€” nested mini-bubble with delegated prompt + result,
   collapsible
 
 Operator collapses agentic detail to see just user/assistant, expands to
@@ -310,7 +310,7 @@ see the full thinking trail.
 
 ---
 
-## Data model deltas — consolidated
+## Data model deltas â€” consolidated
 
 ```python
 # apps/service/types.py
@@ -321,7 +321,7 @@ class DroneAction:
     bound_chat_url: str | None = None   # PR 2
 
 # transcript entries gain optional new kinds (PR 3)
-# no class change — existing list[dict[str, Any]] accepts them
+# no class change â€” existing list[dict[str, Any]] accepts them
 ```
 
 SQLite migrations consolidated:
@@ -340,10 +340,10 @@ PR 3 needs no schema change (transcript is already JSON-blob).
 
 | Risk | PR | Mitigation |
 |------|----|------------|
-| Token estimate is off by 30% — operator hits the wall before the gauge warns | 1 | `~ (est)` labelling; amber starts at 60% leaving headroom; v2 plugs in real tokenizers |
-| Unknown model pair → gauge hidden | 1 | Document how to extend `CONTEXT_WINDOWS`; future RPC `tokens.context_window` so GUI can query without hard-coding |
+| Token estimate is off by 30% â€” operator hits the wall before the gauge warns | 1 | `~ (est)` labelling; amber starts at 60% leaving headroom; v2 plugs in real tokenizers |
+| Unknown model pair â†’ gauge hidden | 1 | Document how to extend `CONTEXT_WINDOWS`; future RPC `tokens.context_window` so GUI can query without hard-coding |
 | Operator pastes wrong content into the paste-back | 2 | Dialog shows captured source URL prominently; mismatch with `bound_chat_url` triggers a warning |
-| Operator copies from a non-browser source → no source URL | 2 | Listener falls back to single-drone-dialog routing |
+| Operator copies from a non-browser source â†’ no source URL | 2 | Listener falls back to single-drone-dialog routing |
 | Sub-agent stream-json format changes between claude-code versions | 3 | Parser is version-tolerant; unknown event kinds skipped with a debug-log entry |
 
 ---
@@ -352,19 +352,19 @@ PR 3 needs no schema change (transcript is already JSON-blob).
 
 After all three PRs land + `Update + Restart`:
 
-1. **Token tracking** — every drone in the Drones tab shows a gauge in
+1. **Token tracking** â€” every drone in the Drones tab shows a gauge in
    its footer. Pick a drone with a few turns; gauge displays a small
    percentage. Send another turn; numbers update.
-2. **Browser provider** — create a new blueprint with `provider: browser`
+2. **Browser provider** â€” create a new blueprint with `provider: browser`
    and a chat URL. Deploy a drone. Send a message: browser opens, prompt
    in clipboard, paste, get reply, copy, dialog toasts, save. Transcript
    shows both turns. Re-link icon points at the bound conversation URL.
-3. **Parallel routing** — deploy two browser drones in different tabs.
+3. **Parallel routing** â€” deploy two browser drones in different tabs.
    Send messages from both. Copies from each tab route to the right
    drone automatically.
-4. **Handoff** — pick a drone, hit Handoff → Continuation prompt, paste
+4. **Handoff** â€” pick a drone, hit Handoff â†’ Continuation prompt, paste
    into a different service's tab, confirm the conversation picks up.
-5. **Sub-agent capture** — send a complex task to a claude-cli drone
+5. **Sub-agent capture** â€” send a complex task to a claude-cli drone
    (e.g. "find every file in this repo containing 'foo'"). Transcript
    shows the tool_call / tool_result entries inline with the final
    assistant turn. Each is collapsible.
@@ -376,16 +376,16 @@ After all three PRs land + `Update + Restart`:
 These are sketched here so they don't get re-litigated when someone
 revisits this area later:
 
-1. **Exact tokenizers** — `tiktoken` for GPT, `anthropic.count_tokens`
+1. **Exact tokenizers** â€” `tiktoken` for GPT, `anthropic.count_tokens`
    for Claude, SentencePiece for Gemini. Pluggable behind the same
    `estimate_tokens()` signature.
-2. **System tray + global hotkey** — Rung 3 of the browser-bridge ladder.
+2. **System tray + global hotkey** â€” Rung 3 of the browser-bridge ladder.
    ~30 LOC on top of PR 2.
-3. **Browser extension** — Rung 4. Distinct security and packaging
+3. **Browser extension** â€” Rung 4. Distinct security and packaging
    work; only worth it if Rung 2 friction proves intolerable.
-4. **Auto-fork on context approach** — when `transcript_tokens > 80% *
+4. **Auto-fork on context approach** â€” when `transcript_tokens > 80% *
    context_window`, offer to fork the drone with a summarised history.
-5. **Cost-in-dollars overlay** — pair tokens with $/token for paid
+5. **Cost-in-dollars overlay** â€” pair tokens with $/token for paid
    providers; estimate run cost.
-6. **Cross-service handoff polish** — per-service tagged formats
+6. **Cross-service handoff polish** â€” per-service tagged formats
    (Claude prefers XML, GPT prefers plain, Gemini is flexible).

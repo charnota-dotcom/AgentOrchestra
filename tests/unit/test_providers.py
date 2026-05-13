@@ -33,6 +33,7 @@ def test_default_registry_lists_subscription_only() -> None:
     names = known_providers()
     assert "claude-cli" in names
     assert "gemini-cli" in names
+    assert "codex-cli" in names
     assert "ollama" in names
     # API-keyed adapters are imported but deliberately not registered.
     assert "anthropic" not in names

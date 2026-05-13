@@ -45,6 +45,8 @@ from apps.service.store.events import EventStore
 from apps.service.templates.engine import render
 from apps.service.tokens import context_window, estimate_action_total, estimate_tokens
 from apps.service.types import (
+    Artifact,
+    ArtifactKind,
     BlueprintVersionConflict,
     DroneAction,
     DroneBlueprint,
@@ -782,6 +784,44 @@ class Handlers:
             ],
             "cost_usd": result.cost_usd,
         }
+
+    async def runs_select_consensus_winner(self, params: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(params["run_id"])
+        winner_index = int(params["winner_index"])
+        note = str(params.get("note") or "")
+        if winner_index < 1:
+            raise ValueError("winner_index must be >= 1")
+        cur = await self.store.db.execute(
+            "SELECT title, body FROM artifacts WHERE run_id = ? AND kind = 'transcript' ORDER BY created_at",
+            (run_id,),
+        )
+        rows = await cur.fetchall()
+        winner_prefix = f"Candidate #{winner_index}"
+        winner = next((r for r in rows if str(r["title"]).startswith(winner_prefix)), None)
+        if winner is None:
+            raise ValueError(f"candidate artifact not found for winner_index={winner_index}")
+        body = f"Selected winner: {winner['title']}"
+        if note:
+            body += f"\n\nOperator note:\n{note}"
+        body += f"\n\n{winner['body']}"
+        await self.store.insert_artifact(
+            Artifact(
+                run_id=run_id,
+                kind=ArtifactKind.SUMMARY,
+                title="Consensus winner selection",
+                body=body,
+            )
+        )
+        await self.store.append_event(
+            Event(
+                source=EventSource.SYSTEM,
+                kind=EventKind.RUN_STATE_CHANGED,
+                run_id=run_id,
+                payload={"action": "consensus_winner_selected", "winner_index": winner_index},
+                text=f"consensus winner selected: #{winner_index}",
+            )
+        )
+        return {"ok": True, "winner_index": winner_index, "winner_title": winner["title"]}
 
     async def runs_replay(self, params: dict[str, Any]) -> dict[str, Any]:
         run = await self.dispatcher.replay(
@@ -1879,10 +1919,23 @@ class Handlers:
                 "exit": -1,
             }
         )
+        # Codex CLI: capture version, then run the same auth/readiness
+        # probe used by the provider and the launcher.
+        codex_version = await _run(["codex", "--version"])
+        from apps.service.providers.codex_cli import _probe_codex_auth
+
+        codex_probe_ok, codex_probe_detail = await _probe_codex_auth(timeout=8.0)
+        codex_status = {
+            "ok": codex_probe_ok,
+            "stdout": codex_probe_detail if codex_probe_ok else "",
+            "stderr": "" if codex_probe_ok else codex_probe_detail,
+            "exit": 0 if codex_probe_ok else -1,
+        }
 
         from apps.service.limits import (
             DATA_AS_OF,
             claude_plans,
+            codex_plans,
             context_windows,
             gemini_plans,
         )
@@ -1929,6 +1982,22 @@ class Handlers:
                         "dashboards above show live usage."
                     ),
                 },
+                {
+                    "id": "codex-cli",
+                    "label": "Codex CLI",
+                    "version": codex_version,
+                    "status": codex_status,
+                    "plans": codex_plans(),
+                    "dashboards": [
+                        {"label": "OpenAI Usage", "url": "https://platform.openai.com/usage"},
+                        {"label": "OpenAI Limits", "url": "https://platform.openai.com/settings/organization/limits"},
+                    ],
+                    "note": (
+                        "Codex CLI does not expose a stable headless remaining-quota command. "
+                        "Use the dashboards above as source of truth; the status row below "
+                        "is an auth/readiness probe."
+                    ),
+                },
             ],
         }
 
@@ -1953,12 +2022,32 @@ class Handlers:
             "7d": (now - timedelta(days=7)).isoformat(),
         }
         out: dict[str, dict[str, int]] = {}
-        for provider in ("claude-cli", "gemini-cli"):
+        for provider in ("claude-cli", "gemini-cli", "codex-cli"):
             counts: dict[str, int] = {}
             for label, since_iso in windows.items():
                 counts[label] = await self.store.count_provider_messages(provider, since_iso)
             out[provider] = counts
         return {"providers": out, "checked_at": now.isoformat()}
+
+    async def analytics_summary(self, params: dict[str, Any]) -> dict[str, Any]:
+        days = int(params.get("days", 7) or 7)
+        workspace_id = params.get("workspace_id")
+        card_id = params.get("card_id")
+        return await self.store.analytics_summary(
+            days=days,
+            workspace_id=workspace_id,
+            card_id=card_id,
+        )
+
+    async def analytics_leaderboard(self, params: dict[str, Any]) -> dict[str, Any]:
+        days = int(params.get("days", 7) or 7)
+        group_by = str(params.get("group_by", "card") or "card")
+        min_samples = int(params.get("min_samples", 1) or 1)
+        return await self.store.analytics_leaderboard(
+            days=days,
+            group_by=group_by,
+            min_samples=min_samples,
+        )
 
     async def hooks_status(self, params: dict[str, Any]) -> dict[str, Any]:
         return hook_status()
@@ -2007,6 +2096,7 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("runs.cancel", h.runs_cancel)
     server.register("runs.replay", h.runs_replay)
     server.register("runs.consensus", h.runs_consensus)
+    server.register("runs.select_consensus_winner", h.runs_select_consensus_winner)
     server.register("runs.approve_plan", h.runs_approve_plan)
     server.register("runs.artifacts", h.runs_artifacts)
     server.register("search", h.search)
@@ -2048,6 +2138,8 @@ def _install_handlers(server: JsonRpcServer, h: Handlers) -> None:
     server.register("hook.received", h.hook_received)
     server.register("limits.check", h.limits_check)
     server.register("limits.usage", h.limits_usage)
+    server.register("analytics.summary", h.analytics_summary)
+    server.register("analytics.leaderboard", h.analytics_leaderboard)
     server.register("hooks.status", h.hooks_status)
     server.register("hooks.install", h.hooks_install)
     server.register("hooks.uninstall", h.hooks_uninstall)

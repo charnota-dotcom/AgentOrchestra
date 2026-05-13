@@ -219,7 +219,7 @@ class HistoryPage(QtWidgets.QWidget):
         # Subscription / local providers only — no API-keyed entries
         # in the dropdown so accidental Replay never bills against
         # an API account.
-        provider_input.addItems(["", "claude-cli", "gemini-cli", "ollama"])
+        provider_input.addItems(["", "claude-cli", "gemini-cli", "codex-cli", "ollama"])
         model_input = QtWidgets.QLineEdit()
         model_input.setPlaceholderText("(blank to keep original model)")
         form.addRow("Provider override:", provider_input)

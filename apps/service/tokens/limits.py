@@ -8,7 +8,8 @@ Values come from each vendor's published documentation as of
 2026-05.  Sources:
 
 * Anthropic Claude Sonnet/Opus/Haiku 4.x: 200 K context.
-* Google Gemini 2.5 Pro: 1 M; 2.5 Flash: 1 M.
+* Google Gemini 2.5/3.x: roughly 1 M input window on current text models.
+* OpenAI Codex-family models: 400 K context.
 
 To add a new model: append to ``CONTEXT_WINDOWS`` below.  Provider
 strings match the ``Blueprint.provider`` enum exactly (``claude-cli``,
@@ -36,6 +37,14 @@ CONTEXT_WINDOWS: dict[tuple[str, str], int] = {
     ("gemini-cli", "gemini-2.0-flash"): 1_000_000,
     ("gemini-cli", "gemini-2.5-flash"): 1_000_000,
     ("gemini-cli", "gemini-2.5-pro"): 1_000_000,
+    ("gemini-cli", "gemini-2.5-flash-lite"): 1_048_576,
+    ("gemini-cli", "gemini-3-pro-preview"): 1_048_576,
+    ("gemini-cli", "gemini-3-flash-preview"): 1_048_576,
+    # --- Codex CLI family ---
+    ("codex-cli", "gpt-5.3-codex"): 400_000,
+    ("codex-cli", "gpt-5.2-codex"): 400_000,
+    ("codex-cli", "gpt-5-codex"): 400_000,
+    ("codex-cli", "codex-mini-latest"): 400_000,
     # --- Browser mode (operator types into a web tab) ---
     # Browser-mode drones share model names with their underlying
     # service; reuse the same numbers.

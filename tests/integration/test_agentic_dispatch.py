@@ -7,6 +7,7 @@ REVIEWING, and approval cleanly merges.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -35,12 +36,22 @@ pytestmark = pytest.mark.integration
 
 
 class _FakeAgenticProvider:
-    """Yields one tool_call (write_file), then ends the turn."""
+    """Yields a plan, then one tool_call (write_file), then ends."""
 
     name = "fake-agentic"
 
+    class _ChatSession:
+        async def send(self, message):  # type: ignore[no-untyped-def]
+            yield StreamEvent(kind="text_delta", text="1. Read README\n2. Add agent.txt\n")
+            yield StreamEvent(kind="assistant_message", text="plan")
+            yield StreamEvent(kind="usage", payload={"input_tokens": 5, "output_tokens": 3})
+            yield StreamEvent(kind="finish")
+
+        async def close(self):  # type: ignore[no-untyped-def]
+            return None
+
     async def open_chat(self, card, *, system=None):  # type: ignore[no-untyped-def]
-        raise NotImplementedError
+        return self._ChatSession()
 
     async def run_with_tools(  # type: ignore[no-untyped-def]
         self,
@@ -104,13 +115,14 @@ async def _seed(store, archetype: str = "code-edit"):  # type: ignore[no-untyped
     )
     await store.insert_template(template)
     card = PersonalityCard(
-        name="Code Edit",
+        name="Plan Act",
         archetype=archetype,
         description="d",
         template_id=template.id,
         provider="fake-agentic",
         model="claude-sonnet-4-5",
         mode=CardMode.AGENTIC,
+        requires_plan=True,
         cost=CostPolicy(),
         blast_radius=BlastRadiusPolicy(),
         sandbox_tier=SandboxTier.DEVCONTAINER,
@@ -149,6 +161,17 @@ async def test_agentic_dispatch_creates_branch_commits_and_diff(
         instruction_id=instruction.id,
         rendered_text="please write hello",
     )
+    for _ in range(50):
+        fetched = await store.get_run(run.id)
+        if fetched and fetched.state is RunState.AWAITING_APPROVAL:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError("run did not reach AWAITING_APPROVAL")
+
+    ok = await dispatcher.approve_plan(run.id)
+    assert ok
+
     await dispatcher._tasks[run.id]
 
     fetched = await store.get_run(run.id)
@@ -189,6 +212,17 @@ async def test_agentic_approve_merges_into_base(
         instruction_id=instruction.id,
         rendered_text="please write hello",
     )
+    for _ in range(50):
+        fetched = await store.get_run(run.id)
+        if fetched and fetched.state is RunState.AWAITING_APPROVAL:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError("run did not reach AWAITING_APPROVAL")
+
+    ok = await dispatcher.approve_plan(run.id)
+    assert ok
+
     await dispatcher._tasks[run.id]
 
     await dispatcher.approve(run.id, note="lgtm")

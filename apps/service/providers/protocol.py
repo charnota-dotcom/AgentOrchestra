@@ -73,7 +73,7 @@ class ChatSession(Protocol):
 
 
 class LLMProvider(Protocol):
-    name: Literal["claude-cli", "gemini-cli", "anthropic", "google", "openai", "ollama"]
+    name: Literal["claude-cli", "gemini-cli", "codex-cli", "anthropic", "google", "openai", "ollama"]
 
     async def open_chat(
         self,

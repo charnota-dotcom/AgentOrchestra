@@ -47,10 +47,12 @@ from apps.gui.canvas.nodes.control import (
     TriggerNode,
 )
 from apps.gui.canvas.nodes.drone_action import DroneActionNode
+from apps.gui.canvas.nodes.staging_area import StagingAreaNode
 from apps.gui.canvas.palette import PALETTE_MIME, PalettePanel
 from apps.gui.canvas.ports import Port, PortDirection
 from apps.gui.canvas.scene import CanvasScene
 from apps.gui.canvas.view import CanvasView
+from apps.service.flows.node_types import canonical_node_type
 from apps.gui.ipc.sse_client import SseClient
 
 if TYPE_CHECKING:
@@ -69,6 +71,18 @@ _CONTROL_FACTORY = {
     "merge": MergeNode,
     "human": HumanNode,
     "output": OutputNode,
+    "staging_area": StagingAreaNode,
+}
+
+_NODE_FACTORY = {
+    "trigger": TriggerNode,
+    "branch": BranchNode,
+    "merge": MergeNode,
+    "human": HumanNode,
+    "output": OutputNode,
+    "reaper": AgentNode,
+    "fpv_drone": DroneActionNode,
+    "staging_area": StagingAreaNode,
 }
 
 
@@ -531,7 +545,7 @@ class CanvasPage(QtWidgets.QWidget):
             or target_port.owner is source.owner  # no self-loops
         ):
             return
-        edge = Edge(source, target_port)
+        edge = Edge(source, target_port, directional=True)
         self.undo_stack.push(AddEdgeCommand(self.scene, edge))
 
     def _cancel_edge_drag(self) -> None:
@@ -664,6 +678,7 @@ class CanvasPage(QtWidgets.QWidget):
                     "from_port": e.source.name if e.source else "",
                     "to_node": e.target.owner.node_id if e.target else "",
                     "to_port": e.target.name if e.target else "",
+                    "directional": bool(e.directional),
                 }
                 for e in self.scene.edges()
                 if e.source and e.target
@@ -722,7 +737,7 @@ class CanvasPage(QtWidgets.QWidget):
             node_type = n.get("type")
             node_id = n.get("id") or _node_id()
             node: BaseNode | None = None
-            if node_type == "agent":
+            if canonical_node_type(str(node_type or "")) == "reaper":
                 card_id = n.get("card_id")
                 # We don't have a cards.get RPC; pull from the cards
                 # we already cached in the palette.
@@ -738,11 +753,13 @@ class CanvasPage(QtWidgets.QWidget):
                 agent_node = AgentNode(node_id, card)
                 agent_node.goal_override = (n.get("params") or {}).get("goal", "")
                 node = agent_node
-            elif node_type in _CONTROL_FACTORY:
-                node = _CONTROL_FACTORY[node_type](node_id)
-                if node_type == "branch" and isinstance(node, BranchNode):
+            elif canonical_node_type(str(node_type or "")) in _CONTROL_FACTORY and canonical_node_type(
+                str(node_type or "")
+            ) != "staging_area":
+                node = _CONTROL_FACTORY[canonical_node_type(str(node_type or ""))](node_id)
+                if canonical_node_type(str(node_type or "")) == "branch" and isinstance(node, BranchNode):
                     node.pattern = (n.get("params") or {}).get("pattern", ".*")
-            elif node_type == "drone_action":
+            elif canonical_node_type(str(node_type or "")) == "fpv_drone":
                 action_id = n.get("action_id")
                 # Pull from the palette's drones list if it's been
                 # populated; the canvas opened before the list async
@@ -757,6 +774,8 @@ class CanvasPage(QtWidgets.QWidget):
                     {"id": action_id, "blueprint_snapshot": {"name": "Missing drone"}},
                 )
                 node = DroneActionNode(node_id, action)
+            elif canonical_node_type(str(node_type or "")) == "staging_area":
+                node = StagingAreaNode(node_id, params=n.get("params") or {})
             else:
                 continue
 
@@ -780,8 +799,7 @@ class CanvasPage(QtWidgets.QWidget):
                 dst_node.input_ports[0] if dst_node.input_ports else None,
             )
             if src_port and dst_port:
-                edge = Edge(src_port, dst_port)
-                edge.directional = bool(e.get("directional", False))
+                edge = Edge(src_port, dst_port, directional=bool(e.get("directional", True)))
                 self.scene.add_edge(edge)
         self.inspector.show_for([])
         self.view.fit_all()
@@ -849,12 +867,38 @@ class CanvasPage(QtWidgets.QWidget):
                 node.set_status(NodeStatus.QUEUED)
             elif kind == "flow.node.started":
                 node.set_status(NodeStatus.RUNNING)
+            elif kind in ("flow.node.waiting", "flow.node.human_pending"):
+                node.set_status(NodeStatus.WAITING)
+                reason = payload.get("reason") or payload.get("preview") or ""
+                if reason:
+                    node.set_body(str(reason)[:200])
+            elif kind == "flow.node.released":
+                node.set_status(NodeStatus.RELEASED)
+                reason = payload.get("reason") or payload.get("preview") or ""
+                if reason:
+                    node.set_body(str(reason)[:200])
+            elif kind == "flow.node.blocked":
+                node.set_status(NodeStatus.BLOCKED)
+                reason = payload.get("reason") or payload.get("preview") or ""
+                if reason:
+                    node.set_body(str(reason)[:200])
+            elif kind == "flow.node.timed_out":
+                node.set_status(NodeStatus.TIMED_OUT)
+                reason = payload.get("reason") or payload.get("preview") or ""
+                if reason:
+                    node.set_body(str(reason)[:200])
+            elif kind == "flow.node.rejected":
+                node.set_status(NodeStatus.REJECTED)
+                reason = payload.get("reason") or payload.get("preview") or ""
+                if reason:
+                    node.set_body(str(reason)[:200])
             elif kind == "flow.node.token_delta":
                 delta = payload.get("delta", "")
                 if delta:
                     node.set_body(delta[-200:])
             elif kind == "flow.node.completed":
-                node.set_status(NodeStatus.COMPLETED)
+                if node.status() != NodeStatus.RELEASED:
+                    node.set_status(NodeStatus.COMPLETED)
                 preview = (payload.get("output") or "")[:200]
                 if preview:
                     node.set_body(preview)
@@ -862,6 +906,8 @@ class CanvasPage(QtWidgets.QWidget):
                 node.set_status(NodeStatus.FAILED)
                 err = payload.get("error") or "failed"
                 node.set_body(err[:200])
+            elif kind == "flow.node.skipped":
+                node.set_status(NodeStatus.SKIPPED)
 
 
 class NodeAnnotationProxy(QtWidgets.QLabel):

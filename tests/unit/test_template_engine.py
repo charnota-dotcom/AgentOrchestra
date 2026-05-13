@@ -68,3 +68,22 @@ def test_load_seed_templates(tmp_path) -> None:
         assert t.archetype
         assert t.name
         assert t.variables
+
+
+def test_phase2_mapper_templates_include_required_contracts() -> None:
+    from pathlib import Path
+
+    ui_path = Path("packs/archetypes/ui_architect.md")
+    logic_path = Path("packs/archetypes/logic_liaison.md")
+    if not ui_path.exists() or not logic_path.exists():
+        pytest.skip("phase2 mapper templates not present in this checkout")
+
+    ui = ui_path.read_text(encoding="utf-8").lower()
+    logic = logic_path.read_text(encoding="utf-8").lower()
+
+    assert "read-only analysis only" in ui
+    assert "read-only analysis only" in logic
+    assert "mermaid.js diagram" in ui
+    assert "mermaid.js diagram" in logic
+    assert r"\.addlayout\(|\.addwidget\(" in ui
+    assert r"qthread|qtcore\.qthread|movetothread\(" in logic

@@ -25,15 +25,23 @@ async def store(tmp_path: Path) -> AsyncIterator[EventStore]:
 async def test_flow_round_trip(store: EventStore) -> None:
     flow = Flow(
         name="hello",
-        nodes=[{"id": "n1", "type": "trigger"}],
-        edges=[],
+        nodes=[{"id": "n1", "type": "trigger"}, {"id": "n2", "type": "output"}],
+        edges=[{"from_node": "n1", "from_port": "start", "to_node": "n2", "to_port": "in", "directional": True}],
     )
     await store.insert_flow(flow)
     fetched = await store.get_flow(flow.id)
     assert fetched is not None
     assert fetched.name == "hello"
-    assert fetched.nodes == [{"id": "n1", "type": "trigger"}]
-    assert fetched.edges == []
+    assert fetched.nodes == [{"id": "n1", "type": "trigger"}, {"id": "n2", "type": "output"}]
+    assert fetched.edges == [
+        {
+            "from_node": "n1",
+            "from_port": "start",
+            "to_node": "n2",
+            "to_port": "in",
+            "directional": True,
+        }
+    ]
 
 
 @pytest.mark.asyncio

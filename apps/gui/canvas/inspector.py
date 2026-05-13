@@ -121,6 +121,7 @@ class InspectorPanel(QtWidgets.QWidget):
         # Local import to dodge a circular dependency with nodes/agent.py
         from apps.gui.canvas.nodes.agent import AgentNode
         from apps.gui.canvas.nodes.control import BranchNode
+        from apps.gui.canvas.nodes.staging_area import StagingAreaNode
 
         self._current_node = node
         body = QtWidgets.QWidget()
@@ -145,6 +146,57 @@ class InspectorPanel(QtWidgets.QWidget):
 
             goal_box.textChanged.connect(commit_goal)  # type: ignore[arg-type]
             v.addWidget(goal_box, stretch=1)
+        elif isinstance(node, StagingAreaNode):
+            v.addWidget(self._small(f"Mode: {node.mode.replace('_', ' ')}"))
+            v.addWidget(self._small("Release / gating settings"))
+            mode_input = QtWidgets.QComboBox()
+            mode_input.addItems(
+                [
+                    "wait_for_all",
+                    "wait_for_any",
+                    "threshold",
+                    "manual_release",
+                    "agent_decision",
+                    "budget_gate",
+                    "quality_gate",
+                ]
+            )
+            mode_input.setCurrentText(node.mode)
+            mode_input.currentTextChanged.connect(node.set_mode)  # type: ignore[arg-type]
+            v.addWidget(mode_input)
+
+            threshold_input = QtWidgets.QSpinBox()
+            threshold_input.setMinimum(1)
+            threshold_input.setMaximum(999)
+            threshold_input.setValue(node.threshold)
+            threshold_input.valueChanged.connect(node.set_threshold)  # type: ignore[arg-type]
+            v.addWidget(self._small("Threshold:"))
+            v.addWidget(threshold_input)
+
+            timeout_input = QtWidgets.QSpinBox()
+            timeout_input.setMinimum(0)
+            timeout_input.setMaximum(3600)
+            timeout_input.setSpecialValueText("No timeout")
+            timeout_input.setValue(node.timeout_seconds or 0)
+
+            def commit_timeout(value: int) -> None:
+                node.set_timeout_seconds(value or None)
+
+            timeout_input.valueChanged.connect(commit_timeout)  # type: ignore[arg-type]
+            v.addWidget(self._small("Timeout (seconds):"))
+            v.addWidget(timeout_input)
+
+            summary_input = QtWidgets.QPlainTextEdit(node.summary_hint)
+            summary_input.setPlaceholderText("Optional release summary or note.")
+            summary_input.setMinimumHeight(90)
+
+            def commit_summary() -> None:
+                node.summary_hint = summary_input.toPlainText().strip()
+                node.sync_view()
+
+            summary_input.textChanged.connect(commit_summary)  # type: ignore[arg-type]
+            v.addWidget(self._small("Summary hint:"))
+            v.addWidget(summary_input, stretch=1)
         elif isinstance(node, BranchNode):
             v.addWidget(self._small("Regex pattern matched against the upstream text:"))
             pattern_input = QtWidgets.QLineEdit(node.pattern)
@@ -201,6 +253,7 @@ class InspectorPanel(QtWidgets.QWidget):
 
         directional_cb.stateChanged.connect(toggle_directional)  # type: ignore[arg-type]
         v.addWidget(directional_cb)
+        v.addWidget(self._small("Unchecked means a simple context line with no execution arrowhead."))
 
         v.addStretch(1)
 

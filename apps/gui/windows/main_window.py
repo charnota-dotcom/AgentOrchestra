@@ -20,6 +20,7 @@ from apps.gui.annotator import setup_annotator
 from apps.gui.canvas.page import CanvasPage
 from apps.gui.windows.blueprints import BlueprintsPage
 from apps.gui.windows.composer import ComposerPage
+from apps.gui.windows.analytics import AnalyticsPage
 from apps.gui.windows.drones import DronesPage
 from apps.gui.windows.first_run import FirstRunWizard, first_run_pending
 from apps.gui.windows.history import HistoryPage
@@ -62,6 +63,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.history = HistoryPage(self.client)
         self.settings = SettingsPage(self.client)
         self.canvas = CanvasPage(self.client)
+        self.analytics = AnalyticsPage(self.client)
         self.blueprints = BlueprintsPage(self.client)
         self.skills = SkillsPage(self.client)
         self.drones = DronesPage(self.client, sse=self.sse, provider_mode="manual")
@@ -75,11 +77,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.addWidget(self.history)  # 4
         self.stack.addWidget(self.settings)  # 5
         self.stack.addWidget(self.canvas)  # 6
-        self.stack.addWidget(self.limits)  # 7
-        self.stack.addWidget(self.blueprints)  # 8
-        self.stack.addWidget(self.skills)  # 9
-        self.stack.addWidget(self.drones)  # 10
-        self.stack.addWidget(self.agents)  # 11
+        self.stack.addWidget(self.analytics)  # 7
+        self.stack.addWidget(self.limits)  # 8
+        self.stack.addWidget(self.blueprints)  # 9
+        self.stack.addWidget(self.skills)  # 10
+        self.stack.addWidget(self.drones)  # 11
+        self.stack.addWidget(self.agents)  # 12
 
         self.setCentralWidget(central)
 
@@ -144,6 +147,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "Skills",
             "Compose",
             "Canvas",
+            "Analytics",
             "History",
             "Limits",
             "Settings",
@@ -181,19 +185,20 @@ class MainWindow(QtWidgets.QMainWindow):
         return rail
 
     # Map rail button index -> stack widget index.
-    # Home → 0, Drones → 10, Agents → 11, Blueprints → 8, Skills → 9,
-    # Compose → 1, Canvas → 6, History → 4, Limits → 7, Settings → 5
+    # Home → 0, Drones → 11, Agents → 12, Blueprints → 9, Skills → 10,
+    # Compose → 1, Canvas → 6, Analytics → 7, History → 4, Limits → 8, Settings → 5
     _NAV_TO_STACK = {
         0: 0,
-        1: 10,
-        2: 11,
-        3: 8,
-        4: 9,
+        1: 11,
+        2: 12,
+        3: 9,
+        4: 10,
         5: 1,
         6: 6,
-        7: 4,
-        8: 7,
-        9: 5,
+        7: 7,
+        8: 4,
+        9: 8,
+        10: 5,
     }
 
     def _wire_navigation(self) -> None:

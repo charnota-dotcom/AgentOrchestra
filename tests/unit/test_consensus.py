@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from apps.service.dispatch.bus import EventBus
 from apps.service.dispatch.consensus import run_consensus
+from apps.service.main import Handlers
 from apps.service.providers.protocol import StreamEvent
 from apps.service.providers.registry import register
 from apps.service.types import (
@@ -132,3 +134,35 @@ async def test_consensus_requires_two_candidates(store) -> None:
         consensus_template_id=template.id,
     )
     assert len(result.candidates) == 1
+
+
+@pytest.mark.asyncio
+async def test_select_consensus_winner_persists_summary(store, tmp_path) -> None:
+    card, template = await _seed_consensus_card(store)
+    result = await run_consensus(
+        store,
+        EventBus(),
+        question="winner?",
+        judge_provider="judge",
+        judge_model="m",
+        candidates=[("vendorA", "x"), ("vendorB", "y")],
+        consensus_card_id=card.id,
+        consensus_template_id=template.id,
+    )
+    handlers = Handlers(
+        store=store,
+        manager=SimpleNamespace(),  # type: ignore[arg-type]
+        dispatcher=SimpleNamespace(),  # type: ignore[arg-type]
+        data_dir=tmp_path,
+    )
+    out = await handlers.runs_select_consensus_winner(
+        {"run_id": result.run_id, "winner_index": 1, "note": "pick one"}
+    )
+    assert out["ok"] is True
+    cur = await store.db.execute(
+        "SELECT title, body FROM artifacts WHERE run_id = ? AND title = 'Consensus winner selection'",
+        (result.run_id,),
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    assert "Selected winner: Candidate #1" in row["body"]
