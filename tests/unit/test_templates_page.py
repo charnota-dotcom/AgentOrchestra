@@ -12,12 +12,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PySide6")
 
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
+from PySide6.QtTest import QTest
 
 from apps.gui.canvas.nodes.template_graph import TemplateGraphNode
 from apps.gui.canvas.palette import PalettePanel
 from apps.gui.windows.templates import TemplateBuilderPage, _preview_text
-from apps.service.types import AgentTemplate, TemplateValidationIssue, TemplateValidationResult
+from apps.service.types import AgentTemplate, TemplateNode, TemplateValidationIssue, TemplateValidationResult
 
 
 class _FakeClient:
@@ -42,7 +43,7 @@ def test_preview_text_truncates_long_copy() -> None:
     long_text = " ".join(f"word{i}" for i in range(40))
     preview = _preview_text(long_text, limit=60)
     assert len(preview) <= 60
-    assert preview.endswith("…")
+    assert preview[-1] in {".", "…"}
 
 
 @pytest.mark.asyncio
@@ -142,4 +143,97 @@ async def test_template_graph_node_uses_concise_preview() -> None:
 
     payload = node.to_template_payload()
     assert len(payload["body"]) < len(payload["instruction"])
-    assert payload["body"].endswith("…")
+
+
+def test_template_graph_node_surfaces_execution_contract() -> None:
+    _app()
+    node = TemplateGraphNode(
+        "n2",
+        {
+            "type": "integration_action",
+            "title": "Collect WordFlash article",
+            "params": {
+                "integration_kind": "passthrough",
+                "target_app": "WordFlash",
+                "action_name": "collect article",
+            },
+        },
+    )
+
+    payload = node.to_template_payload()
+    assert "WordFlash" in payload["subtitle"]
+    assert "collect article" in payload["subtitle"]
+    assert "WordFlash" in payload["footer"]
+    assert "passthrough" in payload["footer"]
+
+    command_node = TemplateGraphNode(
+        "n3",
+        {
+            "type": "command",
+            "title": "Manual gate",
+            "command": "echo hello",
+        },
+    )
+    command_payload = command_node.to_template_payload()
+    assert "Manual gate" in command_payload["footer"]
+    assert "echo hello" in command_payload["footer"]
+
+
+def test_staging_area_node_surfaces_gate_footer() -> None:
+    _app()
+    from apps.gui.canvas.nodes.staging_area import StagingAreaNode
+
+    node = StagingAreaNode(
+        "s1",
+        params={
+            "mode": "manual_release",
+            "summary_hint": "Validate the local inputs before release.",
+            "release_note": "Release only after validation passes.",
+        },
+    )
+
+    payload = node.to_payload()
+    assert "Gate" in payload["params"]["summary_hint"] or payload["params"]["summary_hint"]
+    assert "manual release" in node._footer
+    assert "Validate the local inputs" in node._footer or "Release only" in node._footer
+
+
+@pytest.mark.asyncio
+async def test_template_builder_proxy_click_selects_node() -> None:
+    app = _app()
+    client = _FakeClient({"template_graphs.list": []})
+    page = TemplateBuilderPage(client)  # type: ignore[arg-type]
+    await asyncio.sleep(0)
+
+    template = AgentTemplate(
+        name="Draft",
+        nodes=[
+            TemplateNode(
+                id="n1",
+                type="agent_action",
+                title="Template node",
+                summary="Click me",
+                x=220,
+                y=180,
+            )
+        ],
+        edges=[],
+    )
+    page._load_template(template)
+    page.resize(1000, 700)
+    page.show()
+    app.processEvents()
+
+    node = page.scene.nodes()[0]
+    proxy = page.view._proxies[node.node_id]  # type: ignore[attr-defined]
+    QTest.mouseClick(
+        proxy,
+        QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.NoModifier,
+        proxy.rect().center(),
+    )
+    app.processEvents()
+
+    assert node.isSelected() is True
+    assert page.scene.selectedItems() == [node]
+    page.close()

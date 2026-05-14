@@ -42,6 +42,7 @@ from apps.gui.canvas.nodes.base import BaseNode, NodeStatus
 from apps.gui.canvas.nodes.control import (
     BranchNode,
     HumanNode,
+    IntegrationActionNode,
     MergeNode,
     OutputNode,
     TriggerNode,
@@ -71,6 +72,7 @@ _CONTROL_FACTORY = {
     "merge": MergeNode,
     "human": HumanNode,
     "output": OutputNode,
+    "integration_action": IntegrationActionNode,
     "staging_area": StagingAreaNode,
 }
 
@@ -323,6 +325,8 @@ class CanvasPage(QtWidgets.QWidget):
             node = cls(_node_id())
         elif kind == "agent":
             node = AgentNode(_node_id(), payload.get("card", {}))
+        elif kind == "integration_action":
+            node = IntegrationActionNode(_node_id())
         elif kind == "drone_action":
             action = payload.get("action") or {}
             # If this exact drone is already on the canvas, don't
@@ -424,6 +428,16 @@ class CanvasPage(QtWidgets.QWidget):
         if kind == "agent":
             card = node_data.get("card") or {}
             return AgentNode(_node_id(), card)
+        if kind == "integration_action":
+            params = node_data.get("params") or {}
+            node = IntegrationActionNode(
+                _node_id(),
+                title=str(node_data.get("title") or "Machine action"),
+                subtitle=str(node_data.get("subtitle") or ""),
+                body=str(node_data.get("body") or ""),
+                params=dict(params),
+            )
+            return node
         if kind == "control":
             control_kind = str(node_data.get("control_kind") or "")
             cls = _CONTROL_FACTORY.get(control_kind)
@@ -432,6 +446,19 @@ class CanvasPage(QtWidgets.QWidget):
             node = cls(_node_id())
             if control_kind == "branch" and isinstance(node, BranchNode):
                 node.pattern = str((node_data.get("params") or {}).get("pattern") or ".*")
+            if control_kind == "integration_action" and isinstance(node, IntegrationActionNode):
+                params = node_data.get("params") or {}
+                node._title = str(node_data.get("title") or node.title())
+                node._subtitle = str(node_data.get("subtitle") or node._subtitle)
+                node.integration_kind = str(params.get("integration_kind") or "mcp_tool")
+                node.target_app = str(params.get("target_app") or "")
+                node.action_name = str(params.get("action_name") or "")
+                node.server_id = str(params.get("server_id") or "")
+                node.tool_name = str(params.get("tool_name") or "")
+                node.arguments_text = str(params.get("arguments") or "")
+                node.summary_hint = str(params.get("summary_hint") or "")
+                node.release_note = str(params.get("release_note") or "")
+                node.sync_view()
             if control_kind == "staging_area" and isinstance(node, StagingAreaNode):
                 params = node_data.get("params") or {}
                 node.set_mode(str(params.get("mode") or "manual_release"))
@@ -896,6 +923,14 @@ class CanvasPage(QtWidgets.QWidget):
                     {"id": action_id, "blueprint_snapshot": {"name": "Missing drone"}},
                 )
                 node = DroneActionNode(node_id, action)
+            elif canonical_node_type(str(node_type or "")) == "integration_action":
+                node = IntegrationActionNode(
+                    node_id,
+                    title=str(n.get("title") or "Machine action"),
+                    subtitle=str(n.get("subtitle") or ""),
+                    body=str(n.get("body") or ""),
+                    params=dict(n.get("params") or {}),
+                )
             elif canonical_node_type(str(node_type or "")) == "staging_area":
                 node = StagingAreaNode(node_id, params=n.get("params") or {})
             else:
@@ -1034,26 +1069,41 @@ class CanvasPage(QtWidgets.QWidget):
 
 class NodeAnnotationProxy(QtWidgets.QLabel):
     """Hidden widget that overlays a canvas node to make it 'visible'
-    to the annotator.  Passes all mouse events through to the
-    viewport so canvas interaction remains unbroken.
+    to the annotator.  It stays hit-testable for the annotator and
+    mirrors the node's selection behavior on click.
     """
 
     def __init__(self, node: BaseNode, parent: QtWidgets.QWidget) -> None:
         super().__init__(parent)
         self.node = node
         self.setObjectName(node.node_id)
+        self.setAccessibleName(node.title())
         # Bug 16: Removed self.setText() as it was causing UI overlap.
         # The annotator can use objectName or parent titles for context.
         self.setStyleSheet("background:transparent;")
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         # Invisible target.
         pass
 
-    # Forward all interaction to the viewport parent.
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            if not (
+                event.modifiers()
+                & (
+                    QtCore.Qt.KeyboardModifier.ControlModifier
+                    | QtCore.Qt.KeyboardModifier.ShiftModifier
+                )
+            ):
+                scene = self.node.scene()
+                if scene is not None:
+                    scene.clearSelection()
+            self.node.setSelected(True)
+            event.accept()
+            return
         event.ignore()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:

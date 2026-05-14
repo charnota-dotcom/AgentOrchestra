@@ -122,6 +122,8 @@ The **"Robot Plan"** workshop.  Create frozen templates for your friends:
 The **graph-template builder**.  Create reusable agent-team flow graphs, validate them, export Mermaid previews, and publish them to the canvas sidebar.
 
 - Deploy a template onto the Canvas to stamp out native-looking cards and links.
+- Use `integration_action` nodes for executable app/tool steps. Their cards show the target app, action name, and transport so it is obvious what will run.
+- Treat `command` nodes as legacy manual gates only; they do not execute app code.
 - Edit nodes, edges, and deployment mapping in a dedicated builder instead of mixing them into the instruction-template engine.
 - `templates.render` and `templates.get` still refer to instruction templates; graph templates use the new `template_graphs.*` RPCs.
 

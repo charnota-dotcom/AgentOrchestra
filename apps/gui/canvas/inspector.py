@@ -121,6 +121,7 @@ class InspectorPanel(QtWidgets.QWidget):
         # Local import to dodge a circular dependency with nodes/agent.py
         from apps.gui.canvas.nodes.agent import AgentNode
         from apps.gui.canvas.nodes.control import BranchNode
+        from apps.gui.canvas.nodes.control import IntegrationActionNode
         from apps.gui.canvas.nodes.staging_area import StagingAreaNode
 
         self._current_node = node
@@ -148,6 +149,7 @@ class InspectorPanel(QtWidgets.QWidget):
             v.addWidget(goal_box, stretch=1)
         elif isinstance(node, StagingAreaNode):
             v.addWidget(self._small(f"Mode: {node.mode.replace('_', ' ')}"))
+            v.addWidget(self._small("Manual gate only; this node does not execute app code."))
             v.addWidget(self._small("Release / gating settings"))
             mode_input = QtWidgets.QComboBox()
             mode_input.addItems(
@@ -197,6 +199,72 @@ class InspectorPanel(QtWidgets.QWidget):
             summary_input.textChanged.connect(commit_summary)  # type: ignore[arg-type]
             v.addWidget(self._small("Summary hint:"))
             v.addWidget(summary_input, stretch=1)
+        elif isinstance(node, IntegrationActionNode):
+            title_input = QtWidgets.QLineEdit(node.title())
+            title_input.setPlaceholderText("collect WordFlash article")
+            summary_input = QtWidgets.QLineEdit(node.summary_hint)
+            summary_input.setPlaceholderText("Configured action summary")
+            body_input = QtWidgets.QPlainTextEdit(node._body)
+            body_input.setPlaceholderText("Short body text shown on the card.")
+            body_input.setMinimumHeight(90)
+
+            kind_input = QtWidgets.QLineEdit(node.integration_kind)
+            kind_input.setPlaceholderText("mcp_tool")
+            app_input = QtWidgets.QLineEdit(node.target_app)
+            app_input.setPlaceholderText("WordFlash")
+            action_input = QtWidgets.QLineEdit(node.action_name)
+            action_input.setPlaceholderText("collect article")
+            server_input = QtWidgets.QLineEdit(node.server_id)
+            server_input.setPlaceholderText("trusted MCP server id")
+            tool_input = QtWidgets.QLineEdit(node.tool_name)
+            tool_input.setPlaceholderText("tool name")
+            args_box = QtWidgets.QPlainTextEdit(node.arguments_text)
+            args_box.setMinimumHeight(90)
+            args_box.setPlaceholderText("Arguments payload (text or JSON)")
+
+            def commit_content() -> None:
+                node._title = title_input.text().strip() or "Machine action"
+                node.summary_hint = summary_input.text().strip()
+                node.set_body(body_input.toPlainText().strip())
+                node.sync_view()
+
+            def commit_action() -> None:
+                node.integration_kind = kind_input.text().strip() or "mcp_tool"
+                node.target_app = app_input.text().strip()
+                node.action_name = action_input.text().strip()
+                node.server_id = server_input.text().strip()
+                node.tool_name = tool_input.text().strip()
+                node.arguments_text = args_box.toPlainText().strip()
+                node.sync_view()
+
+            for widget in (title_input, summary_input):
+                widget.editingFinished.connect(commit_content)  # type: ignore[arg-type]
+            body_input.textChanged.connect(commit_content)  # type: ignore[arg-type]
+            for widget in (kind_input, app_input, action_input, server_input, tool_input):
+                widget.editingFinished.connect(commit_action)  # type: ignore[arg-type]
+            args_box.textChanged.connect(commit_action)  # type: ignore[arg-type]
+
+            v.addWidget(self._heading("Content"))
+            v.addWidget(self._small("Header"))
+            v.addWidget(title_input)
+            v.addWidget(self._small("Summary"))
+            v.addWidget(summary_input)
+            v.addWidget(self._small("Body"))
+            v.addWidget(body_input, stretch=1)
+            v.addWidget(self._heading("Machine code"))
+            v.addWidget(self._small("Configured action shown at the bottom of the card."))
+            v.addWidget(self._small("Integration kind:"))
+            v.addWidget(kind_input)
+            v.addWidget(self._small("Target app:"))
+            v.addWidget(app_input)
+            v.addWidget(self._small("Action name:"))
+            v.addWidget(action_input)
+            v.addWidget(self._small("MCP server id:"))
+            v.addWidget(server_input)
+            v.addWidget(self._small("MCP tool name:"))
+            v.addWidget(tool_input)
+            v.addWidget(self._small("Arguments:"))
+            v.addWidget(args_box, stretch=1)
         elif isinstance(node, BranchNode):
             v.addWidget(self._small("Regex pattern matched against the upstream text:"))
             pattern_input = QtWidgets.QLineEdit(node.pattern)

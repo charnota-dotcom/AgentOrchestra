@@ -2,462 +2,74 @@
   "for_app": "agentorchestra",
   "attempts": [
     {
-      "annotation_index": 15,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Implemented a NodeAnnotationProxy system on the canvas. Because canvas cards are QGraphicsItems rather than QWidgets, the annotator was unable to 'see' them. I added invisible QWidgets that shadow each card in the viewport, allowing the annotator to latch onto them while passing all interaction through to the canvas.",
-      "change_overview": [
-        "apps/gui/canvas/page.py: Added NodeAnnotationProxy class",
-        "apps/gui/canvas/page.py: Updated _CanvasViewWithDrop to manage proxies",
-        "apps/gui/canvas/page.py: Wired signals for movement, zoom, pan, and undo/redo"
-      ],
-      "risk_level": "Low",
-      "risk_note": "The proxies are invisible and ignore all mouse events, so they should not affect normal canvas interaction.",
-      "next_steps": [
-        "Verify card selection with the annotator tool on the canvas."
-      ],
-      "files_changed": [
-        "apps/gui/canvas/page.py"
-      ],
-      "annotation_excerpt": "I cannot select an individual card on the canvas"
-    },
-    {
-      "annotation_index": 16,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Fixed UI overlap issue in NodeAnnotationProxy. I removed the explicit title text from the proxy widget to prevent it from overlapping with the actual node header, while ensuring it remains detectable by the annotator via its objectName.",
-      "change_overview": [
-        "apps/gui/canvas/page.py: Removed setText() from NodeAnnotationProxy"
-      ],
-      "risk_level": "Low",
-      "risk_note": "No visual changes to the node itself; only affects the invisible annotator target.",
-      "next_steps": [
-        "Verify that the annotator still identifies cards correctly without the overlapping text."
-      ],
-      "files_changed": [
-        "apps/gui/canvas/page.py"
-      ],
-      "annotation_excerpt": "review this element for UI, the text is overlapping"
-    },
-    {
-      "annotation_index": 17,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Relaxed minimum width constraints to allow the app to be resized to ~1/3 of the screen. I replaced fixed widths in the main navigation rail, canvas palette, and inspector with flexible minimum and maximum widths.",
-      "change_overview": [
-        "apps/gui/windows/main_window.py: Replaced fixed width with min/max on navigation rail",
-        "apps/gui/canvas/page.py: Replaced fixed width with min/max on palette and inspector"
-      ],
-      "risk_level": "Low",
-      "risk_note": "Side panels can now be slightly narrower or wider depending on the window size.",
-      "next_steps": [
-        "Verify that the app can be resized horizontally to a narrow state."
-      ],
-      "files_changed": [
-        "apps/gui/windows/main_window.py",
-        "apps/gui/canvas/page.py"
-      ],
-      "annotation_excerpt": "I want to be able to resize the app horizontally"
-    },
-    {
-      "annotation_index": 18,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Implemented individual drone card selection for the annotator and added editing functionality. Each drone now uses a custom DroneCardWidget, allowing the annotator to identify it. I also added an 'Edit' button and double-click support to modify drone properties like workspace and skills.",
-      "change_overview": [
-        "apps/gui/windows/drones.py: Added DroneCardWidget and _EditDroneDialog",
-        "apps/gui/windows/drones.py: Updated DronesPage to use widgets for list items and added edit handlers",
-        "apps/service/main.py: Added drones.update RPC to the backend"
-      ],
-      "risk_level": "Low",
-      "risk_note": "None.",
-      "next_steps": [
-        "Verify drone card selection with the annotator.",
-        "Verify that double-clicking or clicking 'Edit' opens the edit dialog."
-      ],
-      "files_changed": [
-        "apps/gui/windows/drones.py",
-        "apps/service/main.py"
-      ],
-      "annotation_excerpt": "I want to select individual drone cards"
-    },
-    {
-      "annotation_index": 19,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Enabled linking between drone cards on the canvas with support for both simple and directional lines. I added input/output ports to DroneActionNode and updated the inspector to allow toggling the 'Directional' property and setting custom labels for any selected edge.",
-      "change_overview": [
-        "apps/gui/canvas/nodes/drone_action.py: Added input/output ports",
-        "apps/gui/canvas/scene.py: Enabled edge selection",
-        "apps/gui/canvas/inspector.py: Added edge property editor (label, directional toggle)",
-        "apps/gui/canvas/page.py: Unified deletion logic for nodes and edges",
-        "apps/gui/canvas/edges.py: Increased arrowhead size to 30.0"
-      ],
-      "risk_level": "Low",
-      "risk_note": "Edges are now selectable, which might slightly change selection behavior when clicking near lines.",
-      "next_steps": [
-        "Connect two drone cards on the canvas.",
-        "Select the edge and toggle 'Directional' in the inspector."
-      ],
-      "files_changed": [
-        "apps/gui/canvas/nodes/drone_action.py",
-        "apps/gui/canvas/scene.py",
-        "apps/gui/canvas/inspector.py",
-        "apps/gui/canvas/page.py",
-        "apps/gui/canvas/edges.py"
-      ],
-      "annotation_excerpt": "I want to be able to link the drone cards"
-    },
-    {
-      "annotation_index": 20,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Updated Flow execution logic to respect edge directionality. Non-directional edges now trigger parallel execution (nodes fire in the same wave), while directional edges enforce sequential execution (downstream waits for upstream).",
-      "change_overview": [
-        "apps/gui/canvas/page.py: Included 'directional' flag in flow serialization/deserialization",
-        "apps/service/flows/executor.py: Modified wave calculation to only wait for directional dependencies"
-      ],
-      "risk_level": "Medium",
-      "risk_note": "Changing wave logic affects execution order; complex graphs with mixed edge types should be tested.",
-      "next_steps": [
-        "Create a flow with two nodes connected by a directional line; verify sequential run.",
-        "Create a flow with two nodes connected by a non-directional line; verify parallel run."
-      ],
-      "files_changed": [
-        "apps/gui/canvas/page.py",
-        "apps/service/flows/executor.py"
-      ],
-      "annotation_excerpt": "adjust the logic, so if the line is not directional"
-    },
-    {
-      "annotation_index": 21,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Fixed drone card header rendering. I refactored the painting logic to use clipping, ensuring that header backgrounds are perfectly solid and flush against the top rounded corners. I also fixed a geometry bug where taller nodes would have incomplete white backgrounds.",
-      "change_overview": [
-        "apps/gui/canvas/nodes/base.py: Refactored _paint_full and _paint_compact to use clipping for solid headers",
-        "apps/gui/canvas/nodes/base.py: Fixed body rect and outline to use self._height instead of NODE_HEIGHT"
-      ],
-      "risk_level": "Low",
-      "risk_note": "Rendering logic is now more robust; visual appearance of rounded corners is improved.",
-      "next_steps": [
-        "Verify header solidity on various drone and agent cards on the canvas."
-      ],
-      "files_changed": [
-        "apps/gui/canvas/nodes/base.py"
-      ],
-      "annotation_excerpt": "the headers on the drone cards onthe canvas look wrong"
-    },
-    {
-      "annotation_index": 22,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Enabled editing and renaming of deployed drones directly from the canvas via double-click. I updated the double-click handler on DroneActionNode to open the edit dialog, added a 'Name' field to the dialog for instance-level renames, and ensured canvas nodes refresh their titles immediately after an update.",
-      "change_overview": [
-        "apps/gui/canvas/page.py: Updated double-click handler and added _edit_drone_instance",
-        "apps/gui/windows/drones.py: Added 'Name' field to _EditDroneDialog",
-        "apps/service/main.py: Updated drones.update RPC to handle name changes in blueprint_snapshot"
-      ],
-      "risk_level": "Low",
-      "risk_note": "Renaming a deployed instance does not affect the original blueprint logic.",
-      "next_steps": [
-        "Double-click a drone card on the canvas and rename it.",
-        "Verify that the canvas node title updates instantly."
-      ],
-      "files_changed": [
-        "apps/gui/canvas/page.py",
-        "apps/gui/windows/drones.py",
-        "apps/service/main.py"
-      ],
-      "annotation_excerpt": "when double clicking on the card, it should allow to edit"
-    },
-    {
-      "annotation_index": 20,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Enforced restricted model selection based on the selected provider. I centralized provider and model presets into apps/gui/presets.py and updated the Blueprints editor and creation dialog to use these presets. Model selection is now limited to valid IDs for each provider via a non-editable QComboBox.",
-      "change_overview": [
-        "apps/gui/presets.py: Added PROVIDERS and PROVIDER_MODELS source of truth",
-        "apps/gui/windows/blueprints.py: Updated editor and dialog to use centralized presets and non-editable combo boxes",
-        "tests/unit/test_blueprints_page.py: Updated tests to match centralized presets"
-      ],
-      "risk_level": "Low",
-      "risk_note": "Users can no longer type arbitrary model strings in the Blueprints editor.",
-      "next_steps": [
-        "Open the Blueprints tab and verify that the model list changes when the provider is switched.",
-        "Verify that models can only be selected from the predefined list."
-      ],
-      "files_changed": [
-        "apps/gui/presets.py",
-        "apps/gui/windows/blueprints.py",
-        "tests/unit/test_blueprints_page.py"
-      ],
-      "annotation_excerpt": "the providers should only have models available"
-    },
-    {
-      "annotation_index": 21,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Enabled multi-selection and bulk deletion on the Drones page. I updated the drones list to support ExtendedSelection (Ctrl/Shift clicking) and added a 'Select all' button. The 'Delete' button now handles multiple items, performing bulk deletions in parallel on the service.",
-      "change_overview": [
-        "apps/gui/windows/drones.py: Enabled ExtendedSelection and added 'Select all' button",
-        "apps/gui/windows/drones.py: Refactored deletion logic to handle multiple IDs via asyncio.gather"
-      ],
-      "risk_level": "Low",
-      "risk_note": "Deleting many drones at once is permanent; the confirmation dialog now shows the count.",
-      "next_steps": [
-        "Use Ctrl+click to select multiple drones and click 'Delete'.",
-        "Use the 'Select all' button to highlight all drones in the list."
-      ],
-      "files_changed": [
-        "apps/gui/windows/drones.py"
-      ],
-      "annotation_excerpt": "delete selected button is not enough, we need to delete multiple"
-    },
-    {
-      "annotation_index": 23,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Split 'Drones' and 'Agents' into separate UI sections. 'Drones' now exclusively shows manual/browser-based units (copy-paste interaction), while a new 'Agents' section shows autonomous CLI-based units. I refactored DronesPage to support provider filtering and updated the main navigation rail.",
-      "change_overview": [
-        "apps/gui/windows/drones.py: Added provider_mode filter and updated sidebar title",
-        "apps/gui/windows/main_window.py: Added 'Agents' button and wired it to a filtered DronesPage instance"
-      ],
-      "risk_level": "Low",
-      "risk_note": "Deployed actions are now split across two tabs; users should check 'Agents' for CLI units.",
-      "next_steps": [
-        "Verify that browser-mode units appear in 'Drones'.",
-        "Verify that CLI-mode units appear in 'Agents'."
-      ],
-      "files_changed": [
-        "apps/gui/windows/drones.py",
-        "apps/gui/windows/main_window.py"
-      ],
-      "annotation_excerpt": "create a section for agents"
-    },
-    {
+      "response_id": "agentorchestra-annotation-24-comment1-20260513-225058",
       "annotation_index": 24,
       "version": "0.1.2",
       "status": "shipped",
-      "description": "Implemented an Agent Skills library and drone-to-agent lifecycle conversion. I added 20 prepopulated skill templates for agents, restricted their selection to autonomous units, and added a 'Convert to Agent' feature on the canvas to transition manual conversations into autonomous workflows.",
+      "description": "I split the response into separate replies per follow-up so the thread stays chronological and each comment gets its own AI action entry instead of being bundled together.",
       "change_overview": [
-        "apps/gui/presets.py: Added 20 AGENT_SKILLS templates",
-        "apps/gui/widgets/skills_picker.py: Updated to show templates for agents only",
-        "apps/gui/canvas/page.py: Implemented 'Convert to autonomous Agent...' context menu and logic",
-        "apps/gui/windows/drones.py: Added _ConvertDroneDialog and integrated SkillsPicker browse buttons",
-        "apps/service/main.py: Updated drones.update to support provider/model patching"
+        "Queued one action-log response per follow-up comment",
+        "Kept the replies in chronological order"
       ],
       "risk_level": "Low",
-      "risk_note": "Conversion is a destructive change to the drone's identity (provider swap) but preserves history.",
+      "risk_note": "Logging-only change; no runtime behavior change in the host app.",
       "next_steps": [
-        "Right-click a manual drone on the canvas and select 'Convert to autonomous Agent...'.",
-        "Open the Blueprints tab and use 'Browse...' next to Default skills to see the 20 templates."
+        "Restart the app so the annotator ingests the new queued replies",
+        "Confirm each follow-up appears with a separate AI action row"
       ],
       "files_changed": [
-        "apps/gui/presets.py",
-        "apps/gui/widgets/skills_picker.py",
+        "_pending_actions.json"
+      ],
+      "annotation_excerpt": "there should be a response to each comment, this section is meant to be a conversation, in chronological order",
+      "first_seen_version": "0.1.2",
+      "notes": "Once-only response for the conversation-order complaint."
+    },
+    {
+      "response_id": "agentorchestra-annotation-24-comment2-20260513-225058",
+      "annotation_index": 24,
+      "version": "0.1.2",
+      "status": "partial",
+      "description": "The card-selection fix is still not behaving as intended in your running app, so I’m treating selection as unresolved and will re-check the canvas hit-testing and proxy layering rather than assuming the previous patch took effect.",
+      "change_overview": [
+        "Re-verify canvas hit-testing for node proxies",
+        "Check that the updated card-selection code is actually the copy being loaded at runtime"
+      ],
+      "risk_level": "Low",
+      "risk_note": "No data model change; this is a runtime UI-path verification issue.",
+      "next_steps": [
+        "Restart the app and confirm the loaded pyside6_annotator path",
+        "Re-test a direct card click after reload"
+      ],
+      "files_changed": [
         "apps/gui/canvas/page.py",
-        "apps/gui/windows/drones.py",
-        "apps/service/main.py"
+        "apps/gui/canvas/nodes/base.py"
       ],
-      "annotation_excerpt": "sreate a skills section for the agents"
+      "annotation_excerpt": "the card selection is still not working.",
+      "first_seen_version": "0.1.2",
+      "notes": "Once-only response with response_id to avoid duplicate replay."
     },
     {
-      "annotation_index": 25,
+      "response_id": "agentorchestra-annotation-24-comment3-20260513-225058",
+      "annotation_index": 24,
       "version": "0.1.2",
-      "status": "shipped",
-      "description": "Applied architectural fixes based on the logic-level gap analysis. Resolved parallel data loss, enforced strict human approval failures, fixed snapshot mutation anti-patterns via a new 'name' field, added flow run concurrency locks, implemented a parent-PID watchdog for the supervisor, and ensured cascading telemetry deletions.",
+      "status": "partial",
+      "description": "The Context button regression is also still open. I changed the dialog handoff so the button records the chosen mode and starts capture after the menu returns, but I want to verify that the review dialog is actually reaching the manager before marking it fixed.",
       "change_overview": [
-        "apps/service/flows/executor.py: Fixed race condition, human gate skips, and added run_locks.",
-        "apps/service/main.py: Added --parent-pid to serve() and fixed snapshot mutation in drones_update.",
-        "apps/service/store/events.py: Added cascading delete for flows and 'name' column migration."
-      ],
-      "risk_level": "High",
-      "risk_note": "These are core backend structural changes; database schema was successfully migrated.",
-      "next_steps": [
-        "Run end-to-end integration tests to ensure basic functionality persists."
-      ],
-      "files_changed": [
-        "apps/service/flows/executor.py",
-        "apps/service/main.py",
-        "apps/service/store/events.py",
-        "apps/service/store/schema.sql"
-      ],
-      "annotation_excerpt": "do a logic level bug hunt for the application functionality"
-    },
-    {
-      "annotation_index": 26,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Implemented 'Flights' (multi-agent group templates). I updated the database schema and types to support an 'is_flight' property on Flows, allowing operators to save and deploy groups of agents together. Also updated architectural documentation to clarify how parallel CLI instances already natively guarantee completely isolated context windows.",
-      "change_overview": [
-        "apps/service/types.py: Added is_flight boolean to the Flow model.",
-        "apps/service/store/schema.sql: Migrated flows table to include is_flight.",
-        "apps/service/store/events.py: Handled is_flight in insert_flow and update_flow.",
-        "docs/FLOW_CANVAS_PLAN.md: Documented Flights and parallel context isolation."
+        "Deferred context-capture handoff until after the review menu closes",
+        "Avoided starting capture from inside the modal menu stack"
       ],
       "risk_level": "Low",
-      "risk_note": "Foundation laid in the backend schema; ready for UI integration of 'Save as Flight' in the future.",
+      "risk_note": "Small Qt interaction change; contained to the annotator UI.",
       "next_steps": [
-        "Read docs/FLOW_CANVAS_PLAN.md for an overview of the new Flight capability."
+        "Click Context again after restarting the app",
+        "Confirm capture_context_for starts and the comment window appears"
       ],
       "files_changed": [
-        "apps/service/types.py",
-        "apps/service/store/schema.sql",
-        "apps/service/store/events.py",
-        "docs/FLOW_CANVAS_PLAN.md",
-        "docs/dev/architecture.md"
+        "pyside6_annotator_pkg/pyside6_annotator/dialogs.py"
       ],
-      "annotation_excerpt": "allow for the set of agents to be grouped, call them Flights"
-    },
-    {
-      "annotation_index": 27,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Implemented real-time chat streaming for agents and drones. I added a dedicated SSE endpoint for individual drone actions and updated the service to emit incremental text deltas as they arrive from CLI providers. The GUI now subscribes to these deltas for word-by-word responsive rendering.",
-      "change_overview": [
-        "apps/service/ipc/sse.py: Added make_drone_stream_route.",
-        "apps/service/ipc/server.py: Registered /stream/drones endpoint.",
-        "apps/service/main.py: Updated drones.send to emit token deltas.",
-        "apps/gui/windows/drones.py: Implemented _consume_drone_stream for live transcript updates."
-      ],
-      "risk_level": "Medium",
-      "risk_note": "Real-time streaming increases the number of concurrent HTTP/SSE connections between GUI and service.",
-      "next_steps": [
-        "Send a message to an autonomous agent and verify the reply streams in real-time."
-      ],
-      "files_changed": [
-        "apps/service/ipc/sse.py",
-        "apps/service/ipc/server.py",
-        "apps/service/main.py",
-        "apps/gui/windows/drones.py"
-      ],
-      "annotation_excerpt": "ensure agents that are ruunning are also streaming"
-    },
-    {
-      "annotation_index": 28,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Implemented peer-to-peer agent communication ('Talk'). Agents from independent contexts can now share conversation history when linked by the operator. The orchestrator automatically fetches peer transcripts and injects them into the agent's system prompt, enabling cross-model collaboration.",
-      "change_overview": [
-        "apps/service/main.py: Updated drones_send to inject referenced peer transcripts.",
-        "apps/service/flows/executor.py: Enabled non-directional edges as context providers in _run_agent.",
-        "apps/gui/windows/drones.py: Added 'References' editor to manually link drones.",
-        "docs/DRONE_MODEL.md: Documented how peer communication works across contexts."
-      ],
-      "risk_level": "Low",
-      "risk_note": "Injecting long peer histories consumes context window tokens; added a 20k character safety cap per peer.",
-      "next_steps": [
-        "Use the 'Edit references' button in the Drones tab to link two active conversations.",
-        "Verify that the agent acknowledges the linked context in its next reply."
-      ],
-      "files_changed": [
-        "apps/service/main.py",
-        "apps/service/flows/executor.py",
-        "apps/gui/windows/drones.py",
-        "docs/DRONE_MODEL.md",
-        "docs/dev/architecture.md"
-      ],
-      "annotation_excerpt": "ensure agents from independent contexts can talk to each other"
-    },
-    {
-      "annotation_index": 29,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Implemented standalone Skills management tab. Users can now create, edit, and delete custom skill templates (Superpowers) via a dedicated UI. These skills are persisted in the database and automatically seeded with 20 popular choices. I also updated the User Manual to explain skill management at a 10yo level.",
-      "change_overview": [
-        "apps/service/store/schema.sql: Added skills table.",
-        "apps/service/store/events.py: Added Skill CRUD methods and auto-seeding logic.",
-        "apps/service/main.py: Added skills.create/update/delete RPCs and updated skills.list.",
-        "apps/gui/windows/skills.py: Created new Skills management page.",
-        "apps/gui/windows/main_window.py: Added Skills tab to navigation rail.",
-        "docs/USER_MANUAL.md: Added section on managing superpowers."
-      ],
-      "risk_level": "Low",
-      "risk_note": "Skill templates are now database-backed; the old hardcoded presets are used only for initial seeding.",
-      "next_steps": [
-        "Go to the Skills tab and create a new custom superpower.",
-        "Use the 'Browse...' button in Blueprints to pick your new skill."
-      ],
-      "files_changed": [
-        "apps/service/store/schema.sql",
-        "apps/service/store/events.py",
-        "apps/service/main.py",
-        "apps/gui/windows/skills.py",
-        "apps/gui/windows/main_window.py",
-        "docs/USER_MANUAL.md"
-      ],
-      "annotation_excerpt": "did you create a section for managing skills"
-    },
-    {
-      "annotation_index": 30,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Refined Blueprints to support distinct 'Drone' and 'Agent' workflows. I added '+ Drone' and '+ Agent' creation buttons with context-specific fields (e.g. Chat URL for drones, Skill popup for agents). I also added a 'Convert to Agent' button in the editor and updated the User Manual.",
-      "change_overview": [
-        "apps/gui/windows/blueprints.py: Added split creation buttons and context-aware editor fields.",
-        "apps/gui/windows/blueprints.py: Implemented _NewBlueprintDialog with popup skill selection for Agents.",
-        "apps/gui/windows/blueprints.py: Added 'Convert to Agent' button for manual templates.",
-        "docs/USER_MANUAL.md: Updated instructions for the new Blueprint workflows."
-      ],
-      "risk_level": "Low",
-      "risk_note": "Users must now choose a type (Drone/Agent) during blueprint creation.",
-      "next_steps": [
-        "Create a new Agent blueprint and use the 'Browse...' button to select skills.",
-        "Convert an existing Drone blueprint to an Agent using the new button in the editor."
-      ],
-      "files_changed": [
-        "apps/gui/windows/blueprints.py",
-        "docs/USER_MANUAL.md"
-      ],
-      "annotation_excerpt": "Blueprints section should have options for drone and agent creation"
-    },
-    {
-      "annotation_index": 31,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Resolved GUI connection race conditions and fixed annotator navigation indices. I implemented a wait_for_service check in the GUI startup to prevent RPC calls before the service is listening, and updated the annotator's internal screen-to-stack mapping to include all newly added pages.",
-      "change_overview": [
-        "apps/gui/service_supervisor.py: Added wait_for_service function.",
-        "apps/gui/main.py: Integrated wait_for_service into GUI startup sequence.",
-        "apps/gui/annotator.py: Updated _SCREEN_TO_STACK_INDEX for all 12 pages."
-      ],
-      "risk_level": "Low",
-      "risk_note": "Startup may take slightly longer (up to 10s wait for service), but is much more stable.",
-      "next_steps": [
-        "Restart the app and verify it boots cleanly without RPC error dialogs."
-      ],
-      "files_changed": [
-        "apps/gui/service_supervisor.py",
-        "apps/gui/main.py",
-        "apps/gui/annotator.py"
-      ],
-      "annotation_excerpt": "2026-05-12 10:18:14,916 ERROR qasync._QEventLoop Exception in callback"
-    },
-    {
-      "annotation_index": 32,
-      "version": "0.1.2",
-      "status": "shipped",
-      "description": "Further stability hardening for GUI and Annotator. I fixed a persistent annotator crash by setting a class-level default for _screen_signal_connected, implemented re-entrancy guards on Home/History page reloads to prevent RuntimeError loops, and increased the service boot timeout to 30s.",
-      "change_overview": [
-        "apps/gui/annotator.py: Set FloatingAnnotationBar._screen_signal_connected at class level.",
-        "apps/gui/windows/home.py: Added _reloading boolean guard to _reload_async.",
-        "apps/gui/windows/history.py: Added _reloading boolean guard to _reload_runs.",
-        "apps/gui/main.py: Increased wait_for_service timeout to 30.0s."
-      ],
-      "risk_level": "Low",
-      "risk_note": "Reliability is significantly improved; no behavioral changes beyond error prevention.",
-      "next_steps": [
-        "Verify clean startup on slow system environments.",
-        "Open annotator and ensure no showEvent crashes occur."
-      ],
-      "files_changed": [
-        "apps/gui/annotator.py",
-        "apps/gui/windows/home.py",
-        "apps/gui/windows/history.py",
-        "apps/gui/main.py"
-      ],
-      "annotation_excerpt": "review the new error log and advise if progress was made"
+      "annotation_excerpt": "the context button is not springing up a comment window, as it did before",
+      "first_seen_version": "0.1.2",
+      "notes": "Once-only response for the context-button regression."
     }
   ]
 }

@@ -12,6 +12,8 @@ NODE_TYPE_ALIASES: dict[str, str] = {
     "fpv_drone": "fpv_drone",
     "staging-area": "staging_area",
     "staging_area": "staging_area",
+    "integration-action": "integration_action",
+    "integration_action": "integration_action",
 }
 
 
@@ -23,6 +25,7 @@ NODE_TYPE_LABELS: dict[str, str] = {
     "output": "Output",
     "reaper": "Reaper",
     "fpv_drone": "FPV Drone",
+    "integration_action": "Machine Action",
     "staging_area": "Staging Area",
     "consensus": "Consensus",
 }
@@ -51,4 +54,3 @@ def normalize_flow_node(node: dict[str, Any]) -> dict[str, Any]:
 
 def normalize_flow_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [normalize_flow_node(n) for n in nodes]
-

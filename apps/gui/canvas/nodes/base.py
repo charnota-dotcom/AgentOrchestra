@@ -81,12 +81,14 @@ class BaseNode(QtWidgets.QGraphicsObject):
         title: str,
         subtitle: str = "",
         body: str = "",
+        footer: str = "",
     ) -> None:
         super().__init__()
         self.node_id = node_id
         self._title = title
         self._subtitle = subtitle
         self._body = body
+        self._footer = footer
         self._status = NodeStatus.IDLE
         self.input_ports: list[Port] = []
         self.output_ports: list[Port] = []
@@ -125,6 +127,29 @@ class BaseNode(QtWidgets.QGraphicsObject):
         self.double_clicked.emit()
         super().mouseDoubleClickEvent(event)
 
+    def mousePressEvent(
+        self,
+        event: QtWidgets.QGraphicsSceneMouseEvent,
+    ) -> None:
+        # Clicking a node should always select that card, even if the
+        # view's default rubber-band handling or a surrounding proxy
+        # widget would otherwise make the hit feel flaky.
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            if not (
+                event.modifiers()
+                & (
+                    QtCore.Qt.KeyboardModifier.ControlModifier
+                    | QtCore.Qt.KeyboardModifier.ShiftModifier
+                )
+            ):
+                scene = self.scene()
+                if scene is not None:
+                    scene.clearSelection()
+            self.setSelected(True)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -140,6 +165,11 @@ class BaseNode(QtWidgets.QGraphicsObject):
     def set_body(self, text: str) -> None:
         self._body = text
         self.update()
+
+    def set_footer(self, text: str) -> None:
+        self.prepareGeometryChange()
+        self._footer = text
+        self._update_layout()
 
     def title(self) -> str:
         return self._title
@@ -161,6 +191,8 @@ class BaseNode(QtWidgets.QGraphicsObject):
         max_ports = max(len(self.input_ports), len(self.output_ports))
         min_h = NODE_HEIGHT
         needed_h = HEADER_HEIGHT + 24 + (max_ports * 18)
+        if self._footer:
+            needed_h += 24
         self._height = max(min_h, needed_h)
 
         for i, p in enumerate(self.input_ports):
@@ -178,6 +210,7 @@ class BaseNode(QtWidgets.QGraphicsObject):
             "title": self._title,
             "subtitle": self._subtitle,
             "body": self._body,
+            "footer": self._footer,
             "params": {},
         }
 
@@ -286,9 +319,13 @@ class BaseNode(QtWidgets.QGraphicsObject):
             painter.setPen(QtGui.QColor("#0f1115"))
             font.setPointSize(8)
             painter.setFont(font)
+            footer_h = 24 if self._footer else 0
             # Bug 22: Use dynamic height for the body text box.
             body_box = QtCore.QRectF(
-                10, HEADER_HEIGHT + 22, NODE_WIDTH - 20, self._height - HEADER_HEIGHT - 30
+                10,
+                HEADER_HEIGHT + 22,
+                NODE_WIDTH - 20,
+                self._height - HEADER_HEIGHT - 30 - footer_h,
             )
             metrics = painter.fontMetrics()
             elided = metrics.elidedText(
@@ -301,6 +338,30 @@ class BaseNode(QtWidgets.QGraphicsObject):
                 int(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
                 | int(QtCore.Qt.TextFlag.TextWordWrap),
                 elided,
+            )
+
+        if self._footer:
+            footer_y = self._height - 22
+            painter.save()
+            painter.setClipPath(path)
+            painter.fillRect(QtCore.QRectF(0, footer_y - 2, NODE_WIDTH, 24), QtGui.QColor("#f3f5f7"))
+            painter.restore()
+            painter.setPen(QtGui.QColor("#cfd5dd"))
+            painter.drawLine(10, footer_y - 2, NODE_WIDTH - 10, footer_y - 2)
+            painter.setPen(QtGui.QColor("#4b5563"))
+            font.setPointSize(7)
+            font.setBold(True)
+            painter.setFont(font)
+            footer_rect = QtCore.QRectF(10, footer_y, NODE_WIDTH - 20, 16)
+            footer = painter.fontMetrics().elidedText(
+                self._footer,
+                QtCore.Qt.TextElideMode.ElideRight,
+                int(footer_rect.width() * 6),
+            )
+            painter.drawText(
+                footer_rect,
+                int(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter),
+                footer,
             )
 
         self._paint_outline(painter, body_rect)

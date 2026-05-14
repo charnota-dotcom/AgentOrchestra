@@ -21,6 +21,7 @@ from apps.gui.canvas.nodes.base import BaseNode
 from apps.gui.canvas.nodes.template_graph import TemplateGraphNode
 from apps.gui.canvas.ports import Port, PortDirection
 from apps.gui.canvas.scene import CanvasScene
+from apps.gui.canvas.page import _CanvasViewWithDrop
 from apps.gui.canvas.view import CanvasView
 from apps.service.types import (
     AgentTemplate,
@@ -79,13 +80,30 @@ def _default_template_node(kind: str) -> dict[str, Any]:
                 "role": "worker",
             },
         }
+    if kind == "integration_action":
+        return {
+            "type": "integration_action",
+            "title": "Machine action",
+            "subtitle": "external tool",
+            "summary": "Runs a trusted external app or tool step.",
+            "body": "Executes a machine action before AI continues.",
+            "params": {
+                "integration_kind": "mcp_tool",
+                "target_app": "WordFlash",
+                "action_name": "collect article",
+                "server_id": "",
+                "tool_name": "",
+                "arguments": "",
+                "summary_hint": "",
+            },
+        }
     if kind == "command":
         return {
             "type": "command",
-            "title": "Command",
-            "summary": "echo hello",
-            "body": "",
-            "command": "echo hello",
+            "title": "Manual gate",
+            "summary": "Legacy manual gate; does not execute app code.",
+            "body": "Use only to gate or release a flow step.",
+            "command": "manual gate",
         }
     if kind == "documentation":
         return {
@@ -262,18 +280,14 @@ class _TemplateInspector(QtWidgets.QWidget):
         form.setSpacing(8)
 
         title = QtWidgets.QLineEdit(node.title())
-        title.setToolTip("Node title shown on the canvas.")
+        title.setToolTip("Header shown on the canvas card.")
         subtitle = QtWidgets.QLineEdit(data.get("subtitle") or node._subtitle)
-        subtitle.setToolTip("Optional subtitle shown below the title.")
-        
-        summary = QtWidgets.QLineEdit(data.get("summary") or node._body)
-        summary.setToolTip("Short summary shown on the card body (1-2 lines).")
-
-        # Body is now mostly used as internal storage if needed.
-        # The summary is what shows on the card.
+        subtitle.setToolTip("Secondary label shown below the header.")
+        summary = QtWidgets.QLineEdit(data.get("summary") or "")
+        summary.setToolTip("Short summary shown below the header.")
         body = QtWidgets.QPlainTextEdit(data.get("body") or "")
         body.setMinimumHeight(60)
-        body.setToolTip("Internal body text or secondary detail.")
+        body.setToolTip("Longer body text shown below the summary.")
 
         agent_role = QtWidgets.QLineEdit(str(data.get("agent_role") or ""))
         agent_role.setToolTip("Role name stored in the node payload and template validation.")
@@ -282,7 +296,24 @@ class _TemplateInspector(QtWidgets.QWidget):
         instruction.setToolTip("Full task instruction for agent_action nodes.")
         command = QtWidgets.QPlainTextEdit(str(data.get("command") or ""))
         command.setMinimumHeight(70)
-        command.setToolTip("Shell command stored on command nodes.")
+        command.setToolTip("Legacy gate text stored on command nodes.")
+        integration_kind = QtWidgets.QLineEdit(
+            str((data.get("params") or {}).get("integration_kind") or "mcp_tool")
+        )
+        integration_kind.setToolTip(
+            "Execution adapter for machine actions. Use mcp_tool for trusted MCP servers."
+        )
+        target_app = QtWidgets.QLineEdit(str((data.get("params") or {}).get("target_app") or ""))
+        target_app.setToolTip("Human-readable app name this machine action talks to.")
+        action_name = QtWidgets.QLineEdit(str((data.get("params") or {}).get("action_name") or ""))
+        action_name.setToolTip("Short action label, such as collect article or validate inputs.")
+        server_id = QtWidgets.QLineEdit(str((data.get("params") or {}).get("server_id") or ""))
+        server_id.setToolTip("Trusted MCP server id to invoke, when integration_kind is mcp_tool.")
+        tool_name = QtWidgets.QLineEdit(str((data.get("params") or {}).get("tool_name") or ""))
+        tool_name.setToolTip("Tool name on the MCP server, when integration_kind is mcp_tool.")
+        arguments = QtWidgets.QPlainTextEdit(str((data.get("params") or {}).get("arguments") or ""))
+        arguments.setMinimumHeight(70)
+        arguments.setToolTip("Arguments payload for the machine action. Text is passed through as-is.")
         card_name = QtWidgets.QLineEdit(str((data.get("card_mapping") or {}).get("name") or ""))
         card_name.setToolTip("Reusable card name created when this template deploys.")
         card_provider = QtWidgets.QLineEdit(str((data.get("card_mapping") or {}).get("provider") or ""))
@@ -301,6 +332,20 @@ class _TemplateInspector(QtWidgets.QWidget):
             data["agent_role"] = agent_role.text().strip() or None
             data["instruction"] = instruction.toPlainText().strip() or None
             data["command"] = command.toPlainText().strip() or None
+            params = dict(data.get("params") or {})
+            params.update(
+                {
+                    "integration_kind": integration_kind.text().strip() or "mcp_tool",
+                    "target_app": target_app.text().strip(),
+                    "action_name": action_name.text().strip(),
+                    "server_id": server_id.text().strip(),
+                    "tool_name": tool_name.text().strip(),
+                    "arguments": arguments.toPlainText().strip(),
+                    "summary_hint": summary.text().strip(),
+                }
+            )
+            if data.get("type") == "integration_action":
+                data["params"] = params
             mapping = dict(data.get("card_mapping") or {})
             mapping.update(
                 {
@@ -321,27 +366,40 @@ class _TemplateInspector(QtWidgets.QWidget):
         body.textChanged.connect(commit)  # type: ignore[arg-type]
         instruction.textChanged.connect(commit)  # type: ignore[arg-type]
         command.textChanged.connect(commit)  # type: ignore[arg-type]
+        integration_kind.editingFinished.connect(commit)  # type: ignore[arg-type]
+        target_app.editingFinished.connect(commit)  # type: ignore[arg-type]
+        action_name.editingFinished.connect(commit)  # type: ignore[arg-type]
+        server_id.editingFinished.connect(commit)  # type: ignore[arg-type]
+        tool_name.editingFinished.connect(commit)  # type: ignore[arg-type]
+        arguments.textChanged.connect(commit)  # type: ignore[arg-type]
         card_desc.textChanged.connect(commit)  # type: ignore[arg-type]
 
         form.addRow("Type", QtWidgets.QLabel(node.template_type))
-        form.addRow("Title", title)
+        form.addRow(self._heading("Content"))
+        form.addRow("Header", title)
         form.addRow("Subtitle", subtitle)
         form.addRow("Summary", summary)
-        
+        form.addRow("Body", body)
+
         if data.get("type") == "agent_action":
             form.addRow("Agent role", agent_role)
             form.addRow("Instruction", instruction)
-        elif data.get("type") == "command":
-            form.addRow("Command", command)
-        else:
-            form.addRow("Body", body)
-            
-        if data.get("type") == "agent_action":
             form.addRow(self._heading("Card mapping"))
             form.addRow("Card name", card_name)
             form.addRow("Card provider", card_provider)
             form.addRow("Card model", card_model)
             form.addRow("Card description", card_desc)
+        elif data.get("type") == "integration_action":
+            form.addRow(self._heading("Machine code"))
+            form.addRow("Integration kind", integration_kind)
+            form.addRow("Target app", target_app)
+            form.addRow("Action name", action_name)
+            form.addRow("MCP server", server_id)
+            form.addRow("MCP tool", tool_name)
+            form.addRow("Arguments", arguments)
+        elif data.get("type") == "command":
+            form.addRow(self._heading("Machine code"))
+            form.addRow("Command", command)
         
         self._replace(wrap)
 
@@ -426,7 +484,7 @@ class TemplateBuilderPage(QtWidgets.QWidget):
 
         self.scene = CanvasScene()
         self.scene.selection_changed.connect(self._on_selection_changed)  # type: ignore[arg-type]
-        self.view = CanvasView(self.scene)
+        self.view = _CanvasViewWithDrop(self.scene, self)
         self.view.viewport().installEventFilter(self)
         c.addWidget(self.view, stretch=1)
         self.splitter.addWidget(centre)
@@ -441,6 +499,13 @@ class TemplateBuilderPage(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0, self._restore_splitter_state)
 
         QtCore.QTimer.singleShot(0, lambda: asyncio.ensure_future(self._reload()))
+
+    def handle_drop(self, data: bytes, scene_pos: QtCore.QPointF) -> None:
+        # The template builder does not accept palette drops today, but
+        # the proxy-aware view expects a page hook for drop handling.
+        # Keep the method so the shared view class can be reused here
+        # without diverging from the canvas tab's hit-testing model.
+        del data, scene_pos
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # type: ignore[override]
         super().showEvent(event)
@@ -680,12 +745,18 @@ class TemplateBuilderPage(QtWidgets.QWidget):
             ("Add Start", "start"),
             ("Add Decision", "decision"),
             ("Add Agent", "agent_action"),
-            ("Add Command", "command"),
+            ("Add Machine Action", "integration_action"),
+            ("Add Manual Gate", "command"),
             ("Add Note", "documentation"),
             ("Add End", "end"),
         ):
             btn = QtWidgets.QPushButton(label)
-            btn.setToolTip(f"Insert a {kind.replace('_', ' ')} node into the canvas.")
+            if kind == "command":
+                btn.setToolTip(
+                    "Insert a legacy manual-gate node into the canvas. It does not execute app code."
+                )
+            else:
+                btn.setToolTip(f"Insert a {kind.replace('_', ' ')} node into the canvas.")
             btn.setStyleSheet(_button_style())
             btn.clicked.connect(lambda _checked=False, k=kind: self._add_node(k))  # type: ignore[arg-type]
             h.addWidget(btn)
@@ -1167,3 +1238,4 @@ class TemplateBuilderPage(QtWidgets.QWidget):
             self._selected_edge = item
             self._selected_node = None
             self.inspector.show_edge(item, self._mark_dirty)
+

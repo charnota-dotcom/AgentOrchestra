@@ -92,6 +92,38 @@ def _invalid_template() -> AgentTemplate:
     )
 
 
+def _integration_template() -> AgentTemplate:
+    return AgentTemplate(
+        name="Integration",
+        description="Template with a machine action",
+        category="ops",
+        tags=["integration", "demo"],
+        published=True,
+        nodes=[
+            TemplateNode(id="start", type="start", title="Start", body="Kick off"),
+            TemplateNode(
+                id="machine",
+                type="integration_action",
+                title="Collect WordFlash article",
+                subtitle="mcp tool",
+                summary="Collect article inputs from WordFlash.",
+                body="Call the WordFlash tool and collect article inputs.",
+                params={
+                    "integration_kind": "passthrough",
+                    "target_app": "WordFlash",
+                    "action_name": "collect article",
+                },
+            ),
+            TemplateNode(id="end", type="end", title="End"),
+            TemplateNode(id="note", type="documentation", title="Note", body="Docs only"),
+        ],
+        edges=[
+            TemplateEdge(id="e1", from_node="start", from_port="start", to_node="machine", to_port="in"),
+            TemplateEdge(id="e2", from_node="machine", from_port="out", to_node="end", to_port="in"),
+        ],
+    )
+
+
 @pytest.mark.asyncio
 async def test_template_graph_crud_round_trip(store) -> None:
     template = _valid_template()
@@ -144,6 +176,7 @@ def test_template_graph_validation_export_and_deploy() -> None:
     assert valid_result.valid is True
     assert not valid_result.errors
     assert any(issue.code == "documentation-only" for issue in valid_result.warnings)
+    assert any(issue.code == "legacy-command-node" for issue in valid_result.warnings)
 
     invalid = _invalid_template()
     invalid_result = validate_template_graph(invalid)
@@ -179,3 +212,57 @@ def test_template_graph_validation_export_and_deploy() -> None:
         assert round(float(node["y"])) % 20 == 0
         assert node["deployment"]["source_template_id"] == valid.id
         assert node["deployment"]["deployed_group_id"] == deployment.deployed_group_id
+
+
+def test_template_graph_integration_action_validation_and_deploy() -> None:
+    template = _integration_template()
+    result = validate_template_graph(template)
+    assert result.valid is True
+    assert not result.errors
+
+    deployment = deploy_template_graph(
+        template,
+        TemplateDeploymentSettings(
+            template_id=template.id,
+            template_version=template.version,
+            drop_x=0.0,
+            drop_y=0.0,
+        ),
+    )
+    assert deployment.errors == []
+    assert any(node["kind"] == "control" and node["control_kind"] == "integration_action" for node in deployment.nodes)
+    machine = next(node for node in deployment.nodes if node.get("control_kind") == "integration_action")
+    assert machine["params"]["integration_kind"] == "passthrough"
+    assert machine["params"]["target_app"] == "WordFlash"
+    assert machine["params"]["action_name"] == "collect article"
+    assert machine["params"]["summary_hint"] == "Collect article inputs from WordFlash."
+    assert machine["subtitle"] == "Collect article inputs from WordFlash."
+    assert machine["body"] == "Call the WordFlash tool and collect article inputs."
+    assert machine["params"]["body"] == "Call the WordFlash tool and collect article inputs."
+
+
+def test_template_graph_rejects_unreachable_executable_nodes() -> None:
+    template = AgentTemplate(
+        name="Unreachable",
+        nodes=[
+            TemplateNode(id="start", type="start", title="Start"),
+            TemplateNode(
+                id="machine",
+                type="integration_action",
+                title="Machine action",
+                params={
+                    "integration_kind": "passthrough",
+                    "target_app": "WordFlash",
+                    "action_name": "collect article",
+                },
+            ),
+            TemplateNode(id="end", type="end", title="End"),
+        ],
+        edges=[
+            TemplateEdge(id="e1", from_node="start", from_port="start", to_node="end", to_port="in"),
+        ],
+    )
+
+    result = validate_template_graph(template)
+    assert result.valid is False
+    assert any(issue.code == "unreachable-node" for issue in result.errors)

@@ -1,7 +1,8 @@
 """Palette panel — drag source for new canvas nodes.
 
 Three sections: control nodes (Trigger / Branch / Merge / Human /
-Output), agent cards loaded from the service, and live drone actions
+Output), machine actions that invoke external app/tool steps, agent
+cards loaded from the service, and live drone actions
 (deployed instances of blueprints).  Each row is draggable; the canvas
 page reads the MIME data on drop and creates the matching node.
 
@@ -30,6 +31,10 @@ _CONTROL_NODES = [
     ("merge", "Merge", "Join branches"),
     ("human", "Human", "Approve / Reject"),
     ("output", "Output", "Final sink"),
+]
+
+_ACTION_NODES = [
+    ("integration_action", "Machine action", "Invoke an external app/tool"),
 ]
 
 _STAGING_NODES = [
@@ -100,6 +105,18 @@ class PalettePanel(QtWidgets.QWidget):
             )
             self.control_list.addItem(item)
         layout.addWidget(self.control_list)
+
+        layout.addWidget(self._section_header("Machine actions"))
+        self.action_list = _DragList()
+        self.action_list.setStyleSheet(self._list_stylesheet())
+        for kind, name, desc in _ACTION_NODES:
+            item = QtWidgets.QListWidgetItem(f"{name}\n{desc}")
+            item.setData(
+                QtCore.Qt.ItemDataRole.UserRole,
+                {"kind": "control", "control_kind": kind},
+            )
+            self.action_list.addItem(item)
+        layout.addWidget(self.action_list)
 
         layout.addWidget(self._section_header("Reaper cards"))
         self.cards_list = _DragList()

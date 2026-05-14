@@ -36,6 +36,8 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 from apps.service.flows.node_types import canonical_node_type
+from apps.service.mcp import registry as mcp_registry
+from apps.service.mcp.client import MCPClient
 from apps.service.providers import registry as provider_registry
 from apps.service.tokens import estimate_action_total
 from apps.service.types import (
@@ -63,6 +65,7 @@ _KNOWN_NODE_TYPES = {
     "output",
     "reaper",
     "fpv_drone",
+    "integration_action",
     "staging_area",
     "consensus",
 }
@@ -395,6 +398,8 @@ class FlowExecutor:
                     output = await self._run_agent(run.id, node, inputs, card_cache, incoming, nodes)
                 elif node_type == "fpv_drone":
                     output = await self._run_fpv_drone(run.id, node, inputs)
+                elif node_type == "integration_action":
+                    output = await self._run_integration_action(run.id, node, inputs)
                 elif node_type == "staging_area":
                     outcome = await self._run_staging_area(run.id, node, inputs, card_cache)
                     status = outcome["status"]
@@ -665,6 +670,129 @@ class FlowExecutor:
             bundle_lines.append("Latest assistant turn:")
             bundle_lines.append(last_turn)
         return "\n".join(bundle_lines).strip()
+
+    @staticmethod
+    def _integration_arguments(params: dict[str, Any], inputs: dict[str, list[str]]) -> dict[str, Any]:
+        raw_arguments = params.get("arguments")
+        arguments: dict[str, Any] = {}
+        if isinstance(raw_arguments, dict):
+            arguments.update(raw_arguments)
+        elif isinstance(raw_arguments, str):
+            text = raw_arguments.strip()
+            if text:
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    arguments["payload_text"] = text
+                else:
+                    if isinstance(parsed, dict):
+                        arguments.update(parsed)
+                    else:
+                        arguments["payload_text"] = text
+        upstream_text = FlowExecutor._inputs_to_text(inputs).strip()
+        if upstream_text:
+            arguments.setdefault("upstream_text", upstream_text)
+        target_app = str(params.get("target_app") or "").strip()
+        if target_app:
+            arguments.setdefault("target_app", target_app)
+        action_name = str(params.get("action_name") or "").strip()
+        if action_name:
+            arguments.setdefault("action_name", action_name)
+        return arguments
+
+    @staticmethod
+    def _lookup_trusted_mcp_server(
+        *,
+        server_id: str = "",
+        server_name: str = "",
+    ) -> dict[str, Any] | None:
+        servers = [mcp_registry.to_dict(server) for server in mcp_registry.list_servers()]
+        if server_id:
+            for server in servers:
+                if server.get("id") == server_id:
+                    return server
+        if server_name:
+            for server in servers:
+                if server.get("name") == server_name:
+                    return server
+        return None
+
+    async def _run_integration_action(
+        self,
+        run_id: str,
+        node: dict[str, Any],
+        inputs: dict[str, list[str]],
+    ) -> str:
+        params = node.get("params") or {}
+        integration_kind = str(params.get("integration_kind") or "mcp_tool").strip()
+        target_app = str(params.get("target_app") or "").strip()
+        action_name = str(params.get("action_name") or "").strip()
+        summary_hint = str(params.get("summary_hint") or node.get("body") or "").strip()
+        if integration_kind == "passthrough":
+            payload = {
+                "integration_kind": integration_kind,
+                "target_app": target_app,
+                "action_name": action_name,
+                "summary": summary_hint,
+                "input": self._inputs_to_text(inputs),
+            }
+            return json.dumps(payload, indent=2, sort_keys=True)
+
+        if integration_kind != "mcp_tool":
+            raise FlowValidationError(
+                f"integration_action node {node['id']} has unsupported integration_kind: {integration_kind}"
+            )
+
+        server = self._lookup_trusted_mcp_server(
+            server_id=str(params.get("server_id") or "").strip(),
+            server_name=str(params.get("server_name") or "").strip(),
+        )
+        if server is None:
+            raise FlowValidationError(
+                f"integration_action node {node['id']} references an unknown or untrusted MCP server"
+            )
+        if str(server.get("trust") or "").strip() != "trusted":
+            raise FlowValidationError(
+                f"integration_action node {node['id']} requires a trusted MCP server"
+            )
+        if str(server.get("transport") or "").strip() != "stdio":
+            raise FlowValidationError(
+                f"integration_action node {node['id']} currently supports stdio MCP servers only"
+            )
+
+        tool_name = str(params.get("tool_name") or "").strip()
+        if not tool_name:
+            raise FlowValidationError(
+                f"integration_action node {node['id']} has no tool_name configured"
+            )
+
+        client = MCPClient(
+            command=str(server.get("command") or ""),
+            args=list(server.get("args") or []),
+            env=dict(server.get("env") or {}),
+        )
+        arguments = self._integration_arguments(params, inputs)
+        try:
+            await client.open()
+            result = await client.call_tool(tool_name, arguments)
+        finally:
+            await client.close()
+
+        if result.get("is_error"):
+            raise RuntimeError(
+                f"integration_action tool call failed for {target_app or tool_name}: {result.get('content', '')}"
+            )
+
+        output = {
+            "integration_kind": integration_kind,
+            "target_app": target_app,
+            "action_name": action_name,
+            "server": server,
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "result": result,
+        }
+        return json.dumps(output, indent=2, sort_keys=True)
 
     async def _run_staging_area(
         self,

@@ -10,6 +10,7 @@ from apps.gui.canvas.nodes.agent import AgentNode
 from apps.gui.canvas.nodes.base import BaseNode, NodeStatus
 from apps.gui.canvas.nodes.control import (
     BranchNode,
+    IntegrationActionNode,
     HumanNode,
     MergeNode,
     OutputNode,
@@ -28,6 +29,7 @@ __all__ = [
     "BaseNode",
     "BranchNode",
     "DroneActionNode",
+    "IntegrationActionNode",
     "HumanNode",
     "MergeNode",
     "NodeStatus",

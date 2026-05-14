@@ -125,3 +125,26 @@ def test_phase2_mapper_templates_include_required_contracts() -> None:
     assert "mermaid.js diagram" in logic
     assert r"\.addlayout\(|\.addwidget\(" in ui
     assert r"qthread|qtcore\.qthread|movetothread\(" in logic
+
+
+def test_wordflash_article_generator_archetype_describes_ordered_chain() -> None:
+    from pathlib import Path
+
+    path = Path("packs/archetypes/wordflash_article_gen.md")
+    if not path.exists():
+        pytest.skip("wordflash archetype not present in this checkout")
+
+    text = path.read_text(encoding="utf-8").lower()
+    for phrase in (
+        "start article workflow",
+        "collect wordflash article",
+        "validate local inputs",
+        "build article generation routine",
+        "generate formatted review",
+        "check grammar and readability",
+        "check vocabulary coverage",
+        "human review",
+        "publish final article",
+        "machine-action cards connected in that exact order",
+    ):
+        assert phrase in text

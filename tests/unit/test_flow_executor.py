@@ -172,6 +172,49 @@ async def test_run_simple_chain(store: EventStore, monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_integration_action_passthrough_chain(store: EventStore) -> None:
+    flow = Flow(
+        name="integration",
+        nodes=[
+            {"id": "t", "type": "trigger"},
+            {
+                "id": "m",
+                "type": "integration_action",
+                "title": "Collect WordFlash article",
+                "params": {
+                    "integration_kind": "passthrough",
+                    "target_app": "WordFlash",
+                    "action_name": "collect article",
+                    "summary_hint": "Collect article inputs from WordFlash.",
+                },
+            },
+            {"id": "o", "type": "output"},
+        ],
+        edges=[
+            {"from_node": "t", "from_port": "start", "to_node": "m", "to_port": "in"},
+            {"from_node": "m", "from_port": "out", "to_node": "o", "to_port": "in"},
+        ],
+    )
+    await store.insert_flow(flow)
+
+    ex = FlowExecutor(store)
+    run = await ex.dispatch(flow)
+    task = ex._active.get(run.id)
+    assert task is not None
+    await task
+
+    refreshed = await store.get_flow_run(run.id)
+    assert refreshed is not None
+    assert refreshed.state == FlowState.FINISHED
+    machine_output = refreshed.node_outputs.get("m")
+    assert machine_output is not None
+    payload = json.loads(machine_output)
+    assert payload["integration_kind"] == "passthrough"
+    assert payload["target_app"] == "WordFlash"
+    assert payload["action_name"] == "collect article"
+
+
+@pytest.mark.asyncio
 async def test_branch_skips_not_taken_path(
     store: EventStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

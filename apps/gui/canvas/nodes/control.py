@@ -159,3 +159,99 @@ class OutputNode(BaseNode):
             "y": pos.y(),
             "params": {},
         }
+
+
+class IntegrationActionNode(BaseNode):
+    """A machine-action node that calls a trusted external app/tool."""
+
+    HEADER_COLOUR = QtGui.QColor("#0f766e")
+
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        title: str = "Machine action",
+        subtitle: str | None = None,
+        body: str = "",
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        params = dict(params or {})
+        self.integration_kind = str(params.get("integration_kind") or "mcp_tool")
+        self.target_app = str(params.get("target_app") or "")
+        self.action_name = str(params.get("action_name") or "")
+        self.server_id = str(params.get("server_id") or "")
+        self.tool_name = str(params.get("tool_name") or "")
+        self.arguments_text = str(params.get("arguments") or "")
+        self.summary_hint = str(params.get("summary_hint") or "")
+        self.body_text = str(params.get("body") or body or "")
+        self.release_note = str(params.get("release_note") or "")
+
+        super().__init__(
+            node_id=node_id,
+            title=title or "Machine action",
+            subtitle=subtitle or self._build_subtitle(),
+            body=self._build_body(self.body_text),
+        )
+        self.add_input_port(Port(self, PortDirection.INPUT, "in"))
+        self.add_output_port(Port(self, PortDirection.OUTPUT, "out"))
+        self.set_footer(self._build_footer())
+
+    def _build_subtitle(self) -> str:
+        if self.summary_hint.strip():
+            return self.summary_hint.strip()
+        parts = [self.integration_kind.replace("_", " ")]
+        if self.target_app:
+            parts.append(self.target_app)
+        if self.action_name:
+            parts.append(self.action_name)
+        return " | ".join(parts)
+
+    def _build_body(self, fallback: str = "") -> str:
+        if fallback.strip():
+            return fallback.strip()
+        return ""
+
+    def _build_footer(self) -> str:
+        parts = [part for part in (self.target_app, self.action_name) if part]
+        if not parts and not self.integration_kind and not self.tool_name and not self.server_id:
+            return ""
+        footer_parts: list[str] = ["Configured action"]
+        if parts:
+            footer_parts.append(" · ".join(parts))
+        if self.integration_kind:
+            footer_parts.append(self.integration_kind.replace("_", " "))
+        if self.server_id:
+            footer_parts.append(f"server: {self.server_id}")
+        if self.tool_name:
+            footer_parts.append(f"tool: {self.tool_name}")
+        return " · ".join(footer_parts)
+
+    def sync_view(self) -> None:
+        self._subtitle = self._build_subtitle()
+        self.set_body(self._build_body(self._body))
+        self.set_footer(self._build_footer())
+        self.update()
+
+    def to_payload(self) -> dict[str, Any]:
+        pos = self.pos()
+        params: dict[str, Any] = {
+            "integration_kind": self.integration_kind,
+            "target_app": self.target_app,
+            "action_name": self.action_name,
+            "server_id": self.server_id,
+            "tool_name": self.tool_name,
+            "arguments": self.arguments_text,
+            "summary_hint": self.summary_hint,
+            "release_note": self.release_note,
+        }
+        return {
+            "id": self.node_id,
+            "type": "integration_action",
+            "x": pos.x(),
+            "y": pos.y(),
+            "title": self._title,
+            "subtitle": self._subtitle,
+            "body": self._body,
+            "footer": self._build_footer(),
+            "params": params,
+        }

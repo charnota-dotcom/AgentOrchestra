@@ -30,10 +30,18 @@ The vocabulary data has been fetched from WordFlash and is provided below.
 {{ wordflash_data }}
 
 ### Your Task:
-1. Review the priority words and their definitions/examples.
-2. Coordinate the Article Writer agent to draft the article, ensuring it uses as many priority words as possible.
-3. Instruct the Formatter agent to bold and italicize the priority words for review.
-4. Ensure the QA agent checks for vocabulary coverage, grammar, and tone.
-5. Finally, present the review draft for human approval.
+Build the workflow as a strict ordered chain, not a set of floating notes:
 
-Begin by summarizing the plan and passing the instructions to the Writer.
+1. `Start article workflow`
+2. `collect WordFlash article` - machine action that fetches the WordFlash inputs.
+3. `validate local inputs` - machine action that checks the fetched data is usable.
+4. `build article generation routine` - machine action that packages the article brief, vocabulary set, and instructions.
+5. `Generate formatted review` - LLM step that receives the structured payload and drafts the article.
+6. `Check grammar and readability` - QA step.
+7. `Check vocabulary coverage` - QA step.
+8. `Human review` - one approval gate with revise/approve branches.
+9. `Publish final article` - final export once approved.
+
+Keep the machine-action cards connected in that exact order. Keep the LLM card separate from machine actions. Keep the human review decision separate from the QA steps.
+
+Begin by summarizing the plan and passing the structured instructions to the first machine-action step.

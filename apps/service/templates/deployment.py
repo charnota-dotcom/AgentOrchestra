@@ -22,6 +22,7 @@ _KNOWN_TEMPLATE_TYPES = {
     "start",
     "decision",
     "agent_action",
+    "integration_action",
     "command",
     "documentation",
     "end",
@@ -40,6 +41,7 @@ _DEPLOYABLE_TEMPLATE_TYPES = {
     "start",
     "decision",
     "agent_action",
+    "integration_action",
     "command",
     "end",
     "trigger",
@@ -87,6 +89,42 @@ def _issue(
 
 def _template_data(template: AgentTemplate) -> dict[str, Any]:
     return template.model_dump(mode="json")
+
+
+def _find_cycle_path(nodes: list[TemplateNode], edges: list[TemplateEdge]) -> list[str]:
+    node_index = {n.id: n for n in nodes}
+    graph: dict[str, list[str]] = defaultdict(list)
+    for edge in edges:
+        if edge.from_node in node_index and edge.to_node in node_index and edge.directional:
+            graph[edge.from_node].append(edge.to_node)
+
+    WHITE, GREY, BLACK = 0, 1, 2
+    colour: dict[str, int] = {nid: WHITE for nid in node_index}
+    stack: list[str] = []
+
+    def visit(nid: str) -> list[str] | None:
+        colour[nid] = GREY
+        stack.append(nid)
+        for nxt in graph.get(nid, []):
+            if colour[nxt] == WHITE:
+                cycle = visit(nxt)
+                if cycle:
+                    return cycle
+            elif colour[nxt] == GREY:
+                if nxt in stack:
+                    idx = stack.index(nxt)
+                    return stack[idx:] + [nxt]
+                return [nxt, nid, nxt]
+        stack.pop()
+        colour[nid] = BLACK
+        return None
+
+    for nid in node_index:
+        if colour[nid] == WHITE:
+            cycle = visit(nid)
+            if cycle:
+                return cycle
+    return []
 
 
 def validate_template_graph(template: AgentTemplate) -> TemplateValidationResult:
@@ -214,6 +252,63 @@ def validate_template_graph(template: AgentTemplate) -> TemplateValidationResult
                             )
                         )
 
+        if node_type == "integration_action":
+            params = node.params or {}
+            integration_kind = str(params.get("integration_kind") or "mcp_tool").strip()
+            target_app = str(params.get("target_app") or "").strip()
+            action_name = str(params.get("action_name") or "").strip()
+            if not target_app:
+                errors.append(
+                    _issue(
+                        "integration-target-missing",
+                        "integration_action nodes must define a target_app",
+                        severity=TemplateValidationSeverity.ERROR,
+                        node_id=node.id,
+                        field="target_app",
+                    )
+                )
+            if not action_name:
+                errors.append(
+                    _issue(
+                        "integration-action-missing",
+                        "integration_action nodes must define an action_name",
+                        severity=TemplateValidationSeverity.ERROR,
+                        node_id=node.id,
+                        field="action_name",
+                    )
+                )
+            if integration_kind not in {"mcp_tool", "passthrough"}:
+                errors.append(
+                    _issue(
+                        "integration-kind-unsupported",
+                        f"integration_action nodes must use a supported integration_kind: {integration_kind}",
+                        severity=TemplateValidationSeverity.ERROR,
+                        node_id=node.id,
+                        field="integration_kind",
+                    )
+                )
+            if integration_kind == "mcp_tool":
+                if not str(params.get("server_id") or "").strip():
+                    errors.append(
+                        _issue(
+                            "integration-server-missing",
+                            "integration_action nodes using mcp_tool must define a server_id",
+                            severity=TemplateValidationSeverity.ERROR,
+                            node_id=node.id,
+                            field="server_id",
+                        )
+                    )
+                if not str(params.get("tool_name") or "").strip():
+                    errors.append(
+                        _issue(
+                            "integration-tool-missing",
+                            "integration_action nodes using mcp_tool must define a tool_name",
+                            severity=TemplateValidationSeverity.ERROR,
+                            node_id=node.id,
+                            field="tool_name",
+                        )
+                    )
+
         if node_type == "command" and not (node.command or node.body.strip()):
             errors.append(
                 _issue(
@@ -222,6 +317,14 @@ def validate_template_graph(template: AgentTemplate) -> TemplateValidationResult
                     severity=TemplateValidationSeverity.ERROR,
                     node_id=node.id,
                     field="command",
+                )
+            )
+        if node_type == "command":
+            warnings.append(
+                _issue(
+                    "legacy-command-node",
+                    "command nodes are legacy manual gates and do not execute app code; use integration_action for executable app/tool steps",
+                    node_id=node.id,
                 )
             )
 
@@ -233,33 +336,46 @@ def validate_template_graph(template: AgentTemplate) -> TemplateValidationResult
             )
         )
 
-    # Lightweight cycle detection for deployment layout.
-    graph: dict[str, list[str]] = defaultdict(list)
-    indegree: dict[str, int] = {nid: 0 for nid in node_index}
-    for edge in edges:
-        if edge.from_node not in node_index or edge.to_node not in node_index:
-            continue
-        graph[edge.from_node].append(edge.to_node)
-        indegree[edge.to_node] += 1
-
-    ready = deque([nid for nid, deg in indegree.items() if deg == 0])
-    seen: list[str] = []
-    indegree_local = dict(indegree)
-    while ready:
-        nid = ready.popleft()
-        seen.append(nid)
-        for nxt in graph.get(nid, []):
-            indegree_local[nxt] -= 1
-            if indegree_local[nxt] == 0:
-                ready.append(nxt)
-    if len(seen) != len(node_index):
+    cycle = _find_cycle_path(nodes, edges)
+    if cycle:
         errors.append(
             _issue(
                 "cycle-detected",
-                "template graph contains a cycle and cannot be laid out cleanly",
+                f"template graph contains a cycle: {' -> '.join(cycle)}",
                 severity=TemplateValidationSeverity.ERROR,
             )
         )
+
+    if len(starts) == 1:
+        start_id = starts[0].id
+        reachable: set[str] = {start_id}
+        queue: deque[str] = deque([start_id])
+        graph: dict[str, list[str]] = defaultdict(list)
+        for edge in edges:
+            if edge.from_node in node_index and edge.to_node in node_index and edge.directional:
+                graph[edge.from_node].append(edge.to_node)
+        while queue:
+            nid = queue.popleft()
+            for nxt in graph.get(nid, []):
+                if nxt not in reachable:
+                    reachable.add(nxt)
+                    queue.append(nxt)
+
+        for node in nodes:
+            node_type = _canonical_type(node.type)
+            if node_type in _DOC_ONLY_TYPES or node_type not in _KNOWN_TEMPLATE_TYPES:
+                continue
+            if node_type == "start":
+                continue
+            if node.id not in reachable:
+                errors.append(
+                    _issue(
+                        "unreachable-node",
+                        f"executable node '{node.title}' is not reachable from Start",
+                        severity=TemplateValidationSeverity.ERROR,
+                        node_id=node.id,
+                    )
+                )
 
     return TemplateValidationResult(
         template_id=template.id,
@@ -461,22 +577,51 @@ def _node_payload(
             "y": 0.0,
             "deployment": deployment,
         }
+    if node_type == "integration_action":
+        params = dict(node.params)
+        payload_params = {
+            "integration_kind": str(params.get("integration_kind") or "mcp_tool"),
+            "target_app": str(params.get("target_app") or ""),
+            "action_name": str(params.get("action_name") or ""),
+            "server_id": str(params.get("server_id") or ""),
+            "tool_name": str(params.get("tool_name") or ""),
+            "arguments": params.get("arguments") or "",
+            "summary_hint": str(node.summary or params.get("summary_hint") or ""),
+            "body": str(node.body or ""),
+            "release_note": str(params.get("release_note") or ""),
+        }
+        return {
+            "id": runtime_id,
+            "kind": "control",
+            "control_kind": "integration_action",
+            "label": node.title,
+            "title": node.title,
+            "subtitle": node.summary or node.subtitle or "Configured action",
+            "body": node.body or payload_params["summary_hint"] or "External app/tool step",
+            "x": 0.0,
+            "y": 0.0,
+            "params": payload_params,
+            "deployment": deployment,
+        }
     if node_type == "command":
-        command = node.command or node.body
+        command = node.command or ""
+        body_text = node.body or node.summary or "Legacy manual gate; does not execute app code."
         return {
             "id": runtime_id,
             "kind": "control",
             "control_kind": "staging_area",
             "label": node.title,
             "title": node.title,
-            "subtitle": node.subtitle or "Command",
-            "body": command,
+            "subtitle": node.summary or node.subtitle or "Manual gate",
+            "body": body_text,
             "x": 0.0,
             "y": 0.0,
             "params": {
                 "mode": "manual_release",
-                "summary_hint": command,
-                "release_note": command,
+                "summary_hint": node.summary or node.subtitle or command,
+                "release_note": body_text,
+                "execution_kind": "manual_gate",
+                "command": command,
             },
             "deployment": deployment,
         }
@@ -578,6 +723,8 @@ def _edge_endpoint_payload(
             return ""
         if node_type == "agent_action":
             return "out"
+        if node_type == "integration_action":
+            return "out"
         if node_type == "command":
             return "out"
         if node_type == "merge":
@@ -592,6 +739,8 @@ def _edge_endpoint_payload(
         if node_type == "start" or node_type == "trigger":
             return ""
         if node_type == "agent_action":
+            return "in"
+        if node_type == "integration_action":
             return "in"
         if node_type == "command":
             return "in"

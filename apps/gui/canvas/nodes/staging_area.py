@@ -71,6 +71,7 @@ class StagingAreaNode(BaseNode):
 
         self.add_input_port(Port(self, PortDirection.INPUT, "in"))
         self.add_output_port(Port(self, PortDirection.OUTPUT, "out"))
+        self.set_footer(self._build_footer())
 
     def _build_subtitle(self) -> str:
         extras: list[str] = [self.mode.replace("_", " ")]
@@ -82,9 +83,23 @@ class StagingAreaNode(BaseNode):
             extras.append("reaper-linked")
         return " | ".join(extras)
 
+    def _build_footer(self) -> str:
+        footer_parts: list[str] = ["Gate"]
+        footer_parts.append(self.mode.replace("_", " "))
+        if self.threshold and self.mode == "threshold":
+            footer_parts.append(f"threshold={self.threshold}")
+        if self.timeout_seconds is not None:
+            footer_parts.append(f"timeout={self.timeout_seconds}s")
+        if self.release_note.strip():
+            footer_parts.append(self.release_note.strip())
+        elif self.summary_hint.strip():
+            footer_parts.append(self.summary_hint.strip())
+        return " · ".join(footer_parts)
+
     def sync_view(self) -> None:
         self._subtitle = self._build_subtitle()
         self.set_body(self.summary_hint or self.release_note or "Waiting for release conditions.")
+        self.set_footer(self._build_footer())
         self.update()
 
     def set_mode(self, mode: str) -> None:
