@@ -55,7 +55,7 @@ AnnotationManager(
 | `data_dir` | `Path \| None` | Strongly recommended | Directory where `annotations.json` is written. If `None`, annotations are not persisted to disk. Must exist before instantiation (see section 7). |
 | `app_name` | `str` | Yes (has default) | Appears in the Review dialog title, action log headers, and the clipboard JSON payload as `app_name`. The string is also lowercased and slug-ified (non-word chars â†’ `_`) to derive the action log filename auto-path on Windows. |
 | `app_version` | `str` | Yes (has default) | Used as the `version` field in every action log entry. Should match the app's own version string. |
-| `action_log_path` | `Path \| None` | Optional | Explicit path to `_claude_actions.json`. If omitted, the manager auto-creates a file at `~/OneDrive/Desktop/Annotation logs/<app_slug>.json` (Windows only; silently disabled on other platforms if the path does not exist). Supply an explicit path to ensure cross-platform action logging. |
+| `action_log_path` | `Path \| None` | Optional | Explicit path to `_claude_actions.json`. If omitted, the manager auto-creates a file at `~/OneDrive/Desktop/Annotation logs/<app_slug>.json` (Windows only; silently disabled on other platforms if the path does not exist). Current host apps should always pass an explicit per-app path under app-local storage so action logging is portable. |
 | `navigate_to` | `Callable[[str], bool] \| None` | Recommended | Callback invoked when the user clicks "Jump" in the Review dialog. See section 4. |
 | `tab_hint_map` | `dict \| None` | Optional | Maps widget class names (strings) to `QTabWidget` tab indices. Used to infer which tab to switch to before retrying a jump. Override built-in defaults. |
 
@@ -83,7 +83,7 @@ FloatingAnnotationBar(
 |-----------|------|----------|---------|
 | `manager` | `AnnotationManager` | Yes | Must be the already-constructed primary `AnnotationManager`. The bar wires itself to the manager's buttons in `__init__`. |
 | `data_dir` | `Path \| None` | Optional | If supplied, enables the "Annotate bar" / "Review bar" self-annotation section and stores bar annotations in `<data_dir>/.annotator/annotations.json`. If `None`, the self-annotation section is hidden. |
-| `action_log_path` | `Path \| None` | Optional | Accepted but **silently ignored** â€” `_build_self_manager()` always uses a hardcoded OneDrive path for the bar's own action log regardless of this value. Ignored entirely if `data_dir` is `None`. |
+| `action_log_path` | `Path \| None` | Optional | Accepted but **silently ignored** by `_build_self_manager()` in the current implementation â€” the bar still uses a hardcoded OneDrive path for its own action log, regardless of this value. Ignored entirely if `data_dir` is `None`. |
 | `host` | `QWidget \| None` | Optional | The main window. Used only to compute the initial Y center position of the bar. Has no effect after positioning. |
 | `parent` | `QWidget \| None` | **Must be None** | See section 5. |
 | `settings_key` | `str \| None` | Optional | If provided, the bar's Y position is stored in QSettings under `floating_bar/<settings_key>/edge_y`. Use this when multiple apps share the same QSettings organization/app name to avoid position collisions. |
@@ -272,13 +272,15 @@ Use a per-app subdirectory of the user's home directory (e.g. `~/.myapp`) to avo
 
 `_pending_actions.json` is the AI worker's mechanism for submitting fix attempts into the action log without needing to call Python code directly. The file is dropped into the app's working directory (or a configured scan path), and the annotator processes it automatically on the next app launch.
 
+When integrating AgentOrchestra specifically, the host app now passes an explicit action-log path under `~/.local/share/agentorchestra/` (or the Windows equivalent) so the primary log does not depend on the library's OneDrive fallback.
+
 ### Where to place it
 
 Place the file in **the same directory as the app's entry point** (`main.py` or equivalent). The annotator always scans `Path.cwd()` as a fallback, plus any directories listed in `scan_paths.json` (one level deep, including immediate subdirectories). After processing, the file is renamed to `_pending_actions.processed`.
 
 ### When it is processed
 
-`_process_pending_actions()` is invoked via `QTimer.singleShot(0, ...)` in `AnnotationManager.__init__`, meaning it runs after the first Qt event loop tick â€” i.e. after `show()` is called and the window appears, but during normal app startup. The delay avoids blocking the UI while scanning OneDrive paths.
+`_process_pending_actions()` is invoked via `QTimer.singleShot(0, ...)` in `AnnotationManager.__init__`, meaning it runs after the first Qt event loop tick â€” i.e. after `show()` is called and the window appears, but during normal app startup. The delay avoids blocking the UI while scanning configured paths.
 
 ### Schema
 
@@ -472,7 +474,7 @@ The `for_app` field in `_pending_actions.json` is matched against `re.sub(r"[^\w
 
 ### 14.3 action_log_path=None disables _pending_actions.json processing
 
-If `action_log_path` is `None` (which happens on non-Windows platforms when the OneDrive auto-path does not exist), `_try_file()` returns `False` immediately without processing any attempts. To ensure cross-platform action logging, always supply an explicit `action_log_path`.
+If `action_log_path` is `None` (which happens when the library's default auto-path does not resolve), `_try_file()` returns `False` immediately without processing any attempts. To ensure cross-platform action logging, always supply an explicit `action_log_path`.
 
 ### 14.4 FloatingAnnotationBar with non-None parent in QStackedWidget apps
 
@@ -484,7 +486,7 @@ Setting `parent` to any widget inside a `QStackedWidget` causes the bar to be de
 
 ### 14.6 Self-annotation log path hardcoded to OneDrive
 
-`_build_self_manager()` (inside `FloatingAnnotationBar`) hardcodes the self-annotation log to `~/OneDrive/Desktop/Annotation logs/annotation_bar.json`. On non-Windows or machines without OneDrive, this path creation fails silently (`OSError` is caught) and `_bar_log` is set to `None`, disabling bar action logging. This does not affect the primary app's action log.
+`_build_self_manager()` (inside `FloatingAnnotationBar`) hardcodes the self-annotation log to `~/OneDrive/Desktop/Annotation logs/annotation_bar.json`. On non-Windows or machines without OneDrive, this path creation fails silently (`OSError` is caught) and `_bar_log` is set to `None`, disabling bar action logging. This does not affect the primary app's action log when the host passes an explicit `action_log_path` to `AnnotationManager`.
 
 ### 14.7 Annotations saved with index starting from current counter
 

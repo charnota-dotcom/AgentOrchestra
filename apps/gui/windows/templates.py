@@ -297,9 +297,12 @@ class _TemplateInspector(QtWidgets.QWidget):
         command = QtWidgets.QPlainTextEdit(str(data.get("command") or ""))
         command.setMinimumHeight(70)
         command.setToolTip("Legacy gate text stored on command nodes.")
-        integration_kind = QtWidgets.QLineEdit(
-            str((data.get("params") or {}).get("integration_kind") or "mcp_tool")
-        )
+        integration_kind = QtWidgets.QComboBox()
+        integration_kind.addItems(["mcp_tool", "passthrough"])
+        current_kind = str((data.get("params") or {}).get("integration_kind") or "mcp_tool")
+        if integration_kind.findText(current_kind) < 0:
+            integration_kind.addItem(current_kind)
+        integration_kind.setCurrentText(current_kind)
         integration_kind.setToolTip(
             "Execution adapter for machine actions. Use mcp_tool for trusted MCP servers."
         )
@@ -335,7 +338,7 @@ class _TemplateInspector(QtWidgets.QWidget):
             params = dict(data.get("params") or {})
             params.update(
                 {
-                    "integration_kind": integration_kind.text().strip() or "mcp_tool",
+                    "integration_kind": integration_kind.currentText().strip() or "mcp_tool",
                     "target_app": target_app.text().strip(),
                     "action_name": action_name.text().strip(),
                     "server_id": server_id.text().strip(),
@@ -366,7 +369,7 @@ class _TemplateInspector(QtWidgets.QWidget):
         body.textChanged.connect(commit)  # type: ignore[arg-type]
         instruction.textChanged.connect(commit)  # type: ignore[arg-type]
         command.textChanged.connect(commit)  # type: ignore[arg-type]
-        integration_kind.editingFinished.connect(commit)  # type: ignore[arg-type]
+        integration_kind.currentTextChanged.connect(lambda _text: commit())  # type: ignore[arg-type]
         target_app.editingFinished.connect(commit)  # type: ignore[arg-type]
         action_name.editingFinished.connect(commit)  # type: ignore[arg-type]
         server_id.editingFinished.connect(commit)  # type: ignore[arg-type]
@@ -390,8 +393,23 @@ class _TemplateInspector(QtWidgets.QWidget):
             form.addRow("Card model", card_model)
             form.addRow("Card description", card_desc)
         elif data.get("type") == "integration_action":
+            integration_kind = QtWidgets.QComboBox()
+            integration_kind.addItems(["mcp_tool", "passthrough"])
+            current_kind = str((data.get("params") or {}).get("integration_kind") or "mcp_tool")
+            if integration_kind.findText(current_kind) < 0:
+                integration_kind.addItem(current_kind)
+            integration_kind.setCurrentText(current_kind)
+            integration_kind.setToolTip(
+                "mcp_tool executes a trusted external tool. passthrough only previews structured output and does not launch app code."
+            )
             form.addRow(self._heading("Machine code"))
             form.addRow("Integration kind", integration_kind)
+            form.addRow(
+                "",
+                self._small(
+                    "mcp_tool is the executable mode. passthrough is preview-only."
+                ),
+            )
             form.addRow("Target app", target_app)
             form.addRow("Action name", action_name)
             form.addRow("MCP server", server_id)
@@ -754,6 +772,10 @@ class TemplateBuilderPage(QtWidgets.QWidget):
             if kind == "command":
                 btn.setToolTip(
                     "Insert a legacy manual-gate node into the canvas. It does not execute app code."
+                )
+            elif kind == "integration_action":
+                btn.setToolTip(
+                    "Insert a machine-action node. Use mcp_tool to launch a trusted external tool; passthrough is preview-only."
                 )
             else:
                 btn.setToolTip(f"Insert a {kind.replace('_', ' ')} node into the canvas.")

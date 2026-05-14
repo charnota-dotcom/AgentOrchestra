@@ -28,7 +28,11 @@ class _FakeClient:
 
     async def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
         self.calls.append((method, params or {}))
-        return self.responses.get(method, [])
+        if method in self.responses:
+            return self.responses[method]
+        if method == "template_graphs.validate":
+            return {"valid": True, "errors": [], "warnings": []}
+        return []
 
 
 def _app() -> QtWidgets.QApplication:
@@ -153,9 +157,11 @@ def test_template_graph_node_surfaces_execution_contract() -> None:
             "type": "integration_action",
             "title": "Collect WordFlash article",
             "params": {
-                "integration_kind": "passthrough",
+                "integration_kind": "mcp_tool",
                 "target_app": "WordFlash",
                 "action_name": "collect article",
+                "server_id": "wordflash-server",
+                "tool_name": "collect_article",
             },
         },
     )
@@ -164,7 +170,25 @@ def test_template_graph_node_surfaces_execution_contract() -> None:
     assert "WordFlash" in payload["subtitle"]
     assert "collect article" in payload["subtitle"]
     assert "WordFlash" in payload["footer"]
-    assert "passthrough" in payload["footer"]
+    assert "Executes via MCP tool" in payload["footer"]
+    assert "server: wordflash-server" in payload["footer"]
+    assert "tool: collect_article" in payload["footer"]
+
+    passthrough_node = TemplateGraphNode(
+        "n4",
+        {
+            "type": "integration_action",
+            "title": "Preview WordFlash article",
+            "params": {
+                "integration_kind": "passthrough",
+                "target_app": "WordFlash",
+                "action_name": "collect article",
+            },
+        },
+    )
+    passthrough_payload = passthrough_node.to_template_payload()
+    assert "preview only" in passthrough_payload["footer"].lower()
+    assert "does not launch" in passthrough_payload["footer"].lower()
 
     command_node = TemplateGraphNode(
         "n3",

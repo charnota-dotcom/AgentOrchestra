@@ -13,11 +13,13 @@ import pytest_asyncio
 from apps.service.store.events import EventStore
 
 
-_LOCAL_TMP = Path(__file__).resolve().parent.parent / ".tmp"
-_LOCAL_TMP.mkdir(parents=True, exist_ok=True)
+# Use a dedicated writable temp root outside the repo so pytest tmp_path
+# does not depend on the state/ACLs of a checked-in workspace folder.
+_TEST_TMP = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Temp" / "AgentOrchestra" / "pytest"
+_TEST_TMP.mkdir(parents=True, exist_ok=True)
 for _env_key in ("TMP", "TEMP", "TMPDIR"):
-    os.environ.setdefault(_env_key, str(_LOCAL_TMP))
-tempfile.tempdir = str(_LOCAL_TMP)
+    os.environ[_env_key] = str(_TEST_TMP)
+tempfile.tempdir = str(_TEST_TMP)
 
 
 @pytest_asyncio.fixture

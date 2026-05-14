@@ -1,7 +1,7 @@
-"""Control nodes — Trigger / Branch / Merge / Human / Output.
+"""Control nodes - Trigger / Branch / Merge / Human / Output.
 
 These have no underlying card; the flow executor implements them
-directly.  Visually they share the same shape as agent nodes but use
+directly. Visually they share the same shape as agent nodes but use
 distinct header colours and short labels so the topology is readable
 at a glance.
 """
@@ -17,7 +17,7 @@ from apps.gui.canvas.ports import Port, PortDirection
 
 
 class TriggerNode(BaseNode):
-    """Manual start of a flow.  No input port; one output port."""
+    """Manual start of a flow. No input port; one output port."""
 
     HEADER_COLOUR = QtGui.QColor("#1f7a3f")
 
@@ -46,13 +46,13 @@ class BranchNode(BaseNode):
 
     V1 supports two predicate kinds:
 
-    * ``regex`` — match the upstream text against ``params.pattern``
+    * ``regex`` - match the upstream text against ``params.pattern``
       and pick the ``true`` or ``false`` port.
-    * ``llm`` — ask a tiny judge call (the existing claude-cli or
+    * ``llm`` - ask a tiny judge call (the existing claude-cli or
       gemini-cli) to label the input; ``params.labels`` is the list
       of allowed labels and each label gets its own output port.
 
-    For V1 we ship the regex flavour with two outputs — branch labels
+    For V1 we ship the regex flavour with two outputs - branch labels
     are first-class so the flow JSON survives later predicate changes.
     """
 
@@ -63,7 +63,7 @@ class BranchNode(BaseNode):
             node_id=node_id,
             title="Branch",
             subtitle="Route on regex match",
-            body="If pattern matches → true port, else → false port.",
+            body="If pattern matches -> true port, else -> false port.",
         )
         self.add_input_port(Port(self, PortDirection.INPUT, "in"))
         self.add_output_port(Port(self, PortDirection.OUTPUT, "true"))
@@ -93,8 +93,6 @@ class MergeNode(BaseNode):
             subtitle="Concatenate inputs",
             body="Joins N upstream outputs into a single text blob.",
         )
-        # Two visible input ports for the common case; the flow
-        # executor accepts any number incident on the node id.
         self.add_input_port(Port(self, PortDirection.INPUT, "a"))
         self.add_input_port(Port(self, PortDirection.INPUT, "b"))
         self.add_output_port(Port(self, PortDirection.OUTPUT, "out"))
@@ -137,7 +135,7 @@ class HumanNode(BaseNode):
 
 
 class OutputNode(BaseNode):
-    """Terminal sink — renders the upstream result."""
+    """Terminal sink - renders the upstream result."""
 
     HEADER_COLOUR = QtGui.QColor("#5b6068")
 
@@ -204,6 +202,12 @@ class IntegrationActionNode(BaseNode):
             parts.append(self.target_app)
         if self.action_name:
             parts.append(self.action_name)
+        if self.integration_kind == "passthrough":
+            preview = " | ".join(parts[1:])
+            return "Preview only" if not preview else "Preview only | " + preview
+        if self.integration_kind == "mcp_tool":
+            preview = " | ".join(parts[1:])
+            return preview or "mcp tool"
         return " | ".join(parts)
 
     def _build_body(self, fallback: str = "") -> str:
@@ -217,14 +221,18 @@ class IntegrationActionNode(BaseNode):
             return ""
         footer_parts: list[str] = ["Configured action"]
         if parts:
-            footer_parts.append(" · ".join(parts))
-        if self.integration_kind:
+            footer_parts.append(" | ".join(parts))
+        if self.integration_kind == "passthrough":
+            footer_parts.append("preview only")
+        elif self.integration_kind == "mcp_tool":
+            footer_parts.append("executes via MCP tool")
+        elif self.integration_kind:
             footer_parts.append(self.integration_kind.replace("_", " "))
         if self.server_id:
             footer_parts.append(f"server: {self.server_id}")
         if self.tool_name:
             footer_parts.append(f"tool: {self.tool_name}")
-        return " · ".join(footer_parts)
+        return " | ".join(footer_parts)
 
     def sync_view(self) -> None:
         self._subtitle = self._build_subtitle()

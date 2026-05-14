@@ -308,6 +308,15 @@ def validate_template_graph(template: AgentTemplate) -> TemplateValidationResult
                             field="tool_name",
                         )
                     )
+            if integration_kind == "passthrough":
+                warnings.append(
+                    _issue(
+                        "integration-kind-passthrough",
+                        "passthrough integration_action nodes return structured output only and do not launch external app/tool code; use mcp_tool for a real execution step",
+                        node_id=node.id,
+                        field="integration_kind",
+                    )
+                )
 
         if node_type == "command" and not (node.command or node.body.strip()):
             errors.append(

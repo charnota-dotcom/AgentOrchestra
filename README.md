@@ -47,6 +47,8 @@ The service does five things:
 
 The GUI presents this as **twelve rail tabs** (Home, FPV Drones, Reaper Drones, Blueprints, Templates, Skills, Compose, Canvas, Analytics, History, Limits, Settings) plus two stack pages (Live, Review) reached when you dispatch a Run from Compose.
 
+The optional annotator overlay is attached through `apps/gui/annotator.py` when `pyside6_annotator` is installed. When annotations are resolved, the shared Annotator library writes the AI-log attempt record; AgentOrchestra itself only supplies the host app context and explicit log path.
+
 ---
 
 ## Install & first run
@@ -122,7 +124,7 @@ The **"Robot Plan"** workshop.  Create frozen templates for your friends:
 The **graph-template builder**.  Create reusable agent-team flow graphs, validate them, export Mermaid previews, and publish them to the canvas sidebar.
 
 - Deploy a template onto the Canvas to stamp out native-looking cards and links.
-- Use `integration_action` nodes for executable app/tool steps. Their cards show the target app, action name, and transport so it is obvious what will run.
+- Use `integration_action` nodes for executable app/tool steps. `integration_kind="mcp_tool"` is the executable path; `integration_kind="passthrough"` is preview-only. Their cards show the target app, action name, and transport so it is obvious what will run.
 - Treat `command` nodes as legacy manual gates only; they do not execute app code.
 - Edit nodes, edges, and deployment mapping in a dedicated builder instead of mixing them into the instruction-template engine.
 - `templates.render` and `templates.get` still refer to instruction templates; graph templates use the new `template_graphs.*` RPCs.

@@ -109,9 +109,11 @@ def _integration_template() -> AgentTemplate:
                 summary="Collect article inputs from WordFlash.",
                 body="Call the WordFlash tool and collect article inputs.",
                 params={
-                    "integration_kind": "passthrough",
+                    "integration_kind": "mcp_tool",
                     "target_app": "WordFlash",
                     "action_name": "collect article",
+                    "server_id": "wordflash-server",
+                    "tool_name": "collect_article",
                 },
             ),
             TemplateNode(id="end", type="end", title="End"),
@@ -232,13 +234,27 @@ def test_template_graph_integration_action_validation_and_deploy() -> None:
     assert deployment.errors == []
     assert any(node["kind"] == "control" and node["control_kind"] == "integration_action" for node in deployment.nodes)
     machine = next(node for node in deployment.nodes if node.get("control_kind") == "integration_action")
-    assert machine["params"]["integration_kind"] == "passthrough"
+    assert machine["params"]["integration_kind"] == "mcp_tool"
     assert machine["params"]["target_app"] == "WordFlash"
     assert machine["params"]["action_name"] == "collect article"
+    assert machine["params"]["server_id"] == "wordflash-server"
+    assert machine["params"]["tool_name"] == "collect_article"
     assert machine["params"]["summary_hint"] == "Collect article inputs from WordFlash."
     assert machine["subtitle"] == "Collect article inputs from WordFlash."
     assert machine["body"] == "Call the WordFlash tool and collect article inputs."
     assert machine["params"]["body"] == "Call the WordFlash tool and collect article inputs."
+
+
+def test_template_graph_passthrough_warns_that_it_does_not_execute() -> None:
+    template = _integration_template().model_copy(deep=True)
+    machine = next(node for node in template.nodes if node.id == "machine")
+    machine.params["integration_kind"] = "passthrough"
+    machine.params.pop("server_id", None)
+    machine.params.pop("tool_name", None)
+
+    result = validate_template_graph(template)
+    assert result.valid is True
+    assert any(issue.code == "integration-kind-passthrough" for issue in result.warnings)
 
 
 def test_template_graph_rejects_unreachable_executable_nodes() -> None:

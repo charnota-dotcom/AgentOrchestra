@@ -30,7 +30,7 @@ def _preview_text(text: str, *, limit: int = 140) -> str:
     text = " ".join(text.split())
     if len(text) <= limit:
         return text
-    return text[: max(0, limit - 1)].rstrip() + "…"
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 class TemplateGraphNode(BaseNode):
@@ -41,24 +41,15 @@ class TemplateGraphNode(BaseNode):
         self.template_type = str(node_data.get("type") or "documentation")
         title = str(node_data.get("title") or node_data.get("name") or "Template node")
 
-        # Initial summary generation if missing.
         summary = str(self.node_data.get("summary") or "").strip()
         if not summary:
-            raw_body = str(
-                node_data.get("body")
-                or node_data.get("instruction")
-                or ""
-            )
+            raw_body = str(node_data.get("body") or node_data.get("instruction") or "")
             summary = _preview_text(raw_body, limit=80)
             self.node_data["summary"] = summary
 
         subtitle = str(summary or node_data.get("subtitle") or self._default_subtitle())
-        body = str(
-            node_data.get("body")
-            or node_data.get("instruction")
-            or ""
-        )
-            
+        body = str(node_data.get("body") or node_data.get("instruction") or "")
+
         super().__init__(node_id=node_id, title=title, subtitle=subtitle, body=body)
         self.HEADER_COLOUR = _HEADER_COLOUR.get(self.template_type, QtGui.QColor("#3b4252"))
         self._configure_ports()
@@ -97,19 +88,45 @@ class TemplateGraphNode(BaseNode):
             if details:
                 return f"Manual gate: {details}"
             return "Manual gate: does not execute app code."
-        if str(node_data.get("type") or "") != "integration_action":
+        if node_type != "integration_action":
             return ""
+
         params = node_data.get("params") or {}
         target_app = str(params.get("target_app") or "").strip()
         action_name = str(params.get("action_name") or "").strip()
         tool_name = str(params.get("tool_name") or "").strip()
+        server_id = str(params.get("server_id") or "").strip()
         kind = str(params.get("integration_kind") or "").strip()
         parts = [part for part in (target_app, action_name) if part]
+
+        if kind == "passthrough":
+            details: list[str] = []
+            if parts:
+                details.append(" | ".join(parts))
+            if server_id:
+                details.append(f"server: {server_id}")
+            if tool_name:
+                details.append(f"tool: {tool_name}")
+            tail = "preview only; does not launch external app/tool code"
+            if details:
+                return f"Preview only: {' | '.join(details)} | {tail}"
+            return f"Preview only: {tail}"
+
+        if kind == "mcp_tool":
+            details = ["Executes via MCP tool"]
+            if parts:
+                details.append(" | ".join(parts))
+            if server_id:
+                details.append(f"server: {server_id}")
+            if tool_name:
+                details.append(f"tool: {tool_name}")
+            return " | ".join(details)
+
         if tool_name:
             parts.append(tool_name)
         if kind:
             parts.append(kind.replace("_", " "))
-        preview = " · ".join(part for part in parts if part)
+        preview = " | ".join(part for part in parts if part)
         if preview:
             return f"Configured action: {preview}"
         return ""
@@ -122,7 +139,11 @@ class TemplateGraphNode(BaseNode):
             kind = str(params.get("integration_kind") or "").strip()
             parts = [part for part in (target_app, action_name) if part]
             if parts:
-                return " · ".join(parts)
+                if kind == "passthrough":
+                    return "Preview only | " + " | ".join(parts)
+                return " | ".join(parts)
+            if kind == "passthrough":
+                return "Preview only"
             if kind:
                 return kind.replace("_", " ").title()
             return "Configured action"
@@ -137,18 +158,10 @@ class TemplateGraphNode(BaseNode):
         if summary:
             self.node_data["summary"] = summary
         else:
-            raw_body = str(
-                self.node_data.get("body")
-                or self.node_data.get("instruction")
-                or ""
-            )
+            raw_body = str(self.node_data.get("body") or self.node_data.get("instruction") or "")
             preview = _preview_text(raw_body, limit=80)
             self.node_data["summary"] = preview
-        body = str(
-            self.node_data.get("body")
-            or self.node_data.get("instruction")
-            or ""
-        )
+        body = str(self.node_data.get("body") or self.node_data.get("instruction") or "")
         self._body = body
         self.set_footer(self._execution_preview(self.node_data))
         self.HEADER_COLOUR = _HEADER_COLOUR.get(self.template_type, QtGui.QColor("#3b4252"))
@@ -172,6 +185,5 @@ class TemplateGraphNode(BaseNode):
             "command": self.node_data.get("command"),
             "card_mapping": self.node_data.get("card_mapping"),
         }
-        # Keep the raw node data for forward compatibility.
         payload.update({k: v for k, v in self.node_data.items() if k not in payload})
         return payload
